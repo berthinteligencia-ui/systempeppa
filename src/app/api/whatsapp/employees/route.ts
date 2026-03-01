@@ -1,5 +1,5 @@
 import { auth } from "@/lib/auth"
-import { prisma } from "@/lib/prisma"
+import { getSupabaseAdmin } from "@/lib/supabase-admin"
 import { NextResponse } from "next/server"
 
 export async function GET() {
@@ -10,20 +10,15 @@ export async function GET() {
     }
 
     try {
-        const employees = await prisma.employee.findMany({
-            where: {
-                companyId: session.user.companyId,
-                status: "ACTIVE",
-            },
-            select: {
-                id: true,
-                name: true,
-                position: true,
-            },
-            orderBy: {
-                name: "asc",
-            },
-        })
+        const supabase = getSupabaseAdmin()
+        const { data: employees, error } = await supabase
+            .from("Employee")
+            .select("id, name, position")
+            .eq("companyId", session.user.companyId)
+            .eq("status", "ACTIVE")
+            .order("name", { ascending: true })
+
+        if (error) throw error
 
         return NextResponse.json(employees)
     } catch (error) {
