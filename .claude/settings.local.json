@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la \"c:\\\\Users\\\\flord\\\\OneDrive\\\\Documentos\\\\PROJETOS\\\\folhapro\\\\.agent\\\\skills\\\\plan-writing\"\" 2>&1 || ls -la \"/c/Users/flord/OneDrive/Documentos/PROJETOS/folhapro/.agent/skills/plan-writing/ \")",
+      "Bash(nslookup:*)",
+      "Bash(ping:*)",
+      "Read(//c/Users/flord/.claude/**)",
+      "Read(//c/Users/flord/AppData/Roaming/Claude/**)",
+      "Bash(npm run dev:*)",
+      "Bash(netstat:*)",
+      "Bash(tasklist:*)",
+      "Bash(powershell -Command \"Get-Process -Id 14492 | Select-Object Name, Id, Path\")",
+      "Bash(powershell -Command \"Stop-Process -Id 14492 -Force\")",
+      "Bash(/c/PROJETOS/pepacorp/src/lib/actions/banks.ts:*)",
+      "Bash(/c/PROJETOS/pepacorp/src/lib/actions/departments.ts:*)",
+      "Bash(/c/PROJETOS/pepacorp/src/lib/actions/employees.ts:*)",
+      "Bash(/c/PROJETOS/pepacorp/src/lib/actions/payroll.ts:*)",
+      "Bash(/c/PROJETOS/pepacorp/src/lib/actions/settings.ts:*)",
+      "Bash(/c/PROJETOS/pepacorp/src/lib/actions/users.ts:*)",
+      "Bash(/c/PROJETOS/pepacorp/src/app/\\\\\\(dashboard\\\\\\)/bancos/page.tsx:*)",
+      "Bash(/c/PROJETOS/pepacorp/src/app/\\\\\\(dashboard\\\\\\)/funcionarios/page.tsx:*)",
+      "Bash(/c/PROJETOS/pepacorp/src/app/\\\\\\(dashboard\\\\\\)/unidades/page.tsx:*)",
+      "Bash(/c/PROJETOS/pepacorp/src/app/\\\\\\(dashboard\\\\\\)/usuarios/page.tsx:*)",
+      "Bash(/c/PROJETOS/pepacorp/src/app/\\\\\\(dashboard\\\\\\)/folha-pagamento/page.tsx:*)",
+      "Bash(powershell -Command:*)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\flord\\AppData\\Roaming\\Claude",
+      "C:\\PROJETOS\\pepacorp\\.vercel"
+    ]
+  }
+}

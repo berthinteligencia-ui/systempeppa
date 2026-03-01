@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e:*)",
+      "Bash(/c/Users/flord/OneDrive/Documentos/PROJETOS/folhapro/.env:*)",
+      "Bash(npm run db:seed:*)"
+    ]
+  }
+}
