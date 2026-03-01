@@ -15,7 +15,6 @@
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",
-    "@prisma/adapter-pg": "^7.4.1",
     "@prisma/client": "^6.19.2",
     "@supabase/supabase-js": "^2.98.0",
     "@types/bcryptjs": "^2.4.6",
@@ -31,7 +30,9 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tailwind-merge": "^2.5.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "pg": "^8.13.1",
+    "@prisma/adapter-pg": "^6.4.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.0",
@@ -41,7 +42,6 @@
     "dotenv": "^17.3.1",
     "eslint": "^9",
     "eslint-config-next": "^15.1.0",
-    "pg": "^8.19.0",
     "shadcn": "^3",
     "tailwindcss": "^4.0.0",
     "tsx": "^4.19.0",
