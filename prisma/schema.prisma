@@ -60,6 +60,7 @@ model Company {
   payrollAnalyses PayrollAnalysis[]
   settings        Settings?
   conversations   Conversation[]
+  backups         Backup[]
 }
 
 model Settings {
@@ -183,4 +184,14 @@ model Message {
 enum SenderType {
   COMPANY
   EMPLOYEE
+}
+
+model Backup {
+  id         String   @id @default(cuid())
+  fileName   String
+  fileSize   Int
+  status     String   @default("SUCCESS")
+  createdAt  DateTime @default(now())
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
 }

@@ -8,8 +8,8 @@ import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { updateCompanySettings } from "@/lib/actions/settings"
-import { runBackup, listBackups, getBackupUrl } from "@/lib/actions/backup"
-import { Database, Download, History, Loader2, RefreshCw } from "lucide-react"
+import { runBackup, listBackups, getBackupUrl, deleteBackup } from "@/lib/actions/backup"
+import { Database, Download, History, Loader2, RefreshCw, Trash2 } from "lucide-react"
 import { useEffect } from "react"
 
 interface SettingsClientProps {
@@ -92,6 +92,19 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
             if (url) window.open(url, "_blank")
         } catch (err) {
             alert("Erro ao gerar link de download")
+        }
+    }
+
+    const handleDeleteBackup = async (id: string) => {
+        if (!confirm("Deseja realmente excluir este backup permanentemente?")) return
+        setLoadingBackups(true)
+        try {
+            await deleteBackup(id)
+            await loadBackups()
+        } catch (err: any) {
+            alert(err.message || "Erro ao excluir backup")
+        } finally {
+            setLoadingBackups(false)
         }
     }
 
@@ -362,21 +375,31 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
                                             <History className="h-3 w-3 text-slate-300" />
                                             <div className="space-y-0.5">
                                                 <p className="text-[10px] font-bold text-slate-600">
-                                                    {new Date(backup.created_at).toLocaleDateString('pt-BR')}
+                                                    {new Date(backup.createdAt).toLocaleDateString('pt-BR')} {new Date(backup.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                                                 </p>
                                                 <p className="text-[9px] text-slate-400">
-                                                    {(backup.metadata?.size / 1024).toFixed(1)} KB
+                                                    {(backup.fileSize / 1024).toFixed(1)} KB
                                                 </p>
                                             </div>
                                         </div>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-7 w-7 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                                            onClick={() => handleDownloadBackup(backup.name)}
-                                        >
-                                            <Download className="h-3.5 w-3.5" />
-                                        </Button>
+                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-7 w-7 text-slate-400 hover:text-blue-500"
+                                                onClick={() => handleDownloadBackup(backup.fileName)}
+                                            >
+                                                <Download className="h-3.5 w-3.5" />
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-7 w-7 text-slate-400 hover:text-red-500"
+                                                onClick={() => handleDeleteBackup(backup.id)}
+                                            >
+                                                <Trash2 className="h-3.5 w-3.5" />
+                                            </Button>
+                                        </div>
                                     </div>
                                 ))}
                             </div>
