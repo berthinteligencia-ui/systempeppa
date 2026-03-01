@@ -8,6 +8,9 @@ import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { updateCompanySettings } from "@/lib/actions/settings"
+import { runBackup, listBackups, getBackupUrl } from "@/lib/actions/backup"
+import { Database, Download, History, Loader2, RefreshCw } from "lucide-react"
+import { useEffect } from "react"
 
 interface SettingsClientProps {
     initialData: any
@@ -17,6 +20,9 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
     const [loading, setLoading] = useState(false)
     const [success, setSuccess] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const [backups, setBackups] = useState<any[]>([])
+    const [loadingBackups, setLoadingBackups] = useState(false)
+    const [backingUp, setBackingUp] = useState(false)
     const [formData, setFormData] = useState({
         name: initialData?.name || "",
         cnpj: initialData?.cnpj || "",
@@ -53,6 +59,45 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
             setLoading(false)
         }
     }
+
+    const loadBackups = async () => {
+        setLoadingBackups(true)
+        try {
+            const data = await listBackups()
+            setBackups(data)
+        } catch (err) {
+            console.error("Erro ao carregar backups:", err)
+        } finally {
+            setLoadingBackups(false)
+        }
+    }
+
+    const handleRunBackup = async () => {
+        setBackingUp(true)
+        setError(null)
+        try {
+            await runBackup()
+            await loadBackups()
+            setSuccess(true)
+        } catch (err: any) {
+            setError(err.message || "Erro ao realizar backup")
+        } finally {
+            setBackingUp(false)
+        }
+    }
+
+    const handleDownloadBackup = async (name: string) => {
+        try {
+            const url = await getBackupUrl(name)
+            if (url) window.open(url, "_blank")
+        } catch (err) {
+            alert("Erro ao gerar link de download")
+        }
+    }
+
+    useEffect(() => {
+        loadBackups()
+    }, [])
 
     return (
         <div className="grid gap-6 md:grid-cols-3">
@@ -269,6 +314,77 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
                         >
                             {loading ? "Aplicando..." : "Aplicar Preferências"}
                         </Button>
+                    </CardContent>
+                </Card>
+
+                <Card className="border-slate-200 shadow-sm h-fit">
+                    <CardHeader>
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <CardTitle className="text-sm">Sistema de Backup</CardTitle>
+                                <CardDescription className="text-xs">Armazenamento em nuvem</CardDescription>
+                            </div>
+                            <div className="h-8 w-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                                <Database className="h-4 w-4" />
+                            </div>
+                        </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <Button
+                            onClick={handleRunBackup}
+                            disabled={backingUp}
+                            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold gap-2"
+                        >
+                            {backingUp ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                            {backingUp ? "Processando Backup..." : "Realizar Backup Agora"}
+                        </Button>
+
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Últimos Backups</p>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-5 w-5 text-slate-400 hover:text-blue-500"
+                                    onClick={loadBackups}
+                                    disabled={loadingBackups}
+                                >
+                                    <RefreshCw className={`h-3 w-3 ${loadingBackups ? 'animate-spin' : ''}`} />
+                                </Button>
+                            </div>
+
+                            <div className="space-y-1.5">
+                                {backups.length === 0 ? (
+                                    <p className="text-[11px] text-slate-400 text-center py-2 italic">Nenhum backup encontrado</p>
+                                ) : backups.slice(0, 3).map((backup, idx) => (
+                                    <div key={idx} className="flex items-center justify-between p-2 rounded-lg border bg-white group transition-hover hover:border-blue-100">
+                                        <div className="flex items-center gap-2">
+                                            <History className="h-3 w-3 text-slate-300" />
+                                            <div className="space-y-0.5">
+                                                <p className="text-[10px] font-bold text-slate-600">
+                                                    {new Date(backup.created_at).toLocaleDateString('pt-BR')}
+                                                </p>
+                                                <p className="text-[9px] text-slate-400">
+                                                    {(backup.metadata?.size / 1024).toFixed(1)} KB
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-7 w-7 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                                            onClick={() => handleDownloadBackup(backup.name)}
+                                        >
+                                            <Download className="h-3.5 w-3.5" />
+                                        </Button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <p className="text-[9px] text-slate-400 leading-tight">
+                            Os backups contêm todos os dados da sua empresa e são armazenados de forma criptografada e segura.
+                        </p>
                     </CardContent>
                 </Card>
             </div>
