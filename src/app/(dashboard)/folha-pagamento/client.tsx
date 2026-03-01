@@ -211,8 +211,9 @@ export function FolhaPagamentoClient({ departments }: { departments: Department[
             } else {
                 setPhase("result")
             }
-        } catch {
-            setError("Falha na conexão. Tente novamente.")
+        } catch (e: any) {
+            console.error("[FOLHA] fetch error:", e)
+            setError(e?.message ?? "Falha na conexão. Tente novamente.")
             setPhase("form")
         }
     }

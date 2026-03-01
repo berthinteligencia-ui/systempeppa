@@ -99,6 +99,7 @@ function detectColumns(
 // ── Route Handler ─────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
+    try {
     const session = await auth()
     if (!session?.user?.companyId) {
         return NextResponse.json({ error: "Não autenticado" }, { status: 401 })
@@ -219,4 +220,11 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ found, missing, total, sheetSummary, duplicates, debug: debugInfo })
+    } catch (e: any) {
+        console.error("[ANALYZE_ROUTE] Unhandled error:", e)
+        return NextResponse.json(
+            { error: e?.message ?? "Erro interno ao processar a planilha." },
+            { status: 500 }
+        )
+    }
 }
