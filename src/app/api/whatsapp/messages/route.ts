@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth"
-import { prisma } from "@/lib/prisma"
+import { getSupabaseAdmin } from "@/lib/supabase-admin"
 import { NextResponse } from "next/server"
+import { randomUUID } from "crypto"
 
 export async function GET(req: Request) {
     const session = await auth()
@@ -12,17 +13,18 @@ export async function GET(req: Request) {
     }
 
     try {
-        const messages = await prisma.message.findMany({
-            where: {
-                conversationId,
-                conversation: {
-                    companyId: session.user.companyId, // Security check
-                },
-            },
-            orderBy: {
-                createdAt: "asc",
-            },
-        })
+        const supabase = getSupabaseAdmin()
+        const { data: messages, error } = await supabase
+            .from("Message")
+            .select(`
+                *,
+                conversation!inner(companyId)
+            `)
+            .eq("conversationId", conversationId)
+            .eq("conversation.companyId", session.user.companyId)
+            .order("createdAt", { ascending: true })
+
+        if (error) throw error
 
         return NextResponse.json(messages)
     } catch (error) {
@@ -41,44 +43,65 @@ export async function POST(req: Request) {
     }
 
     try {
+        const supabase = getSupabaseAdmin()
         let activeConversationId = conversationId
 
         // If no conversationId is provided, find or create one with the employeeId
         if (!activeConversationId && employeeId) {
-            const conversation = await prisma.conversation.upsert({
-                where: {
-                    companyId_employeeId: {
+            const { data: conversation, error: convError } = await supabase
+                .from("Conversation")
+                .select("id")
+                .eq("companyId", session.user.companyId)
+                .eq("employeeId", employeeId)
+                .maybeSingle()
+
+            if (convError) throw convError
+
+            if (conversation) {
+                activeConversationId = conversation.id
+            } else {
+                const newId = randomUUID()
+                const { data: newConv, error: createError } = await supabase
+                    .from("Conversation")
+                    .insert({
+                        id: newId,
                         companyId: session.user.companyId,
                         employeeId: employeeId,
-                    },
-                },
-                update: {},
-                create: {
-                    companyId: session.user.companyId,
-                    employeeId: employeeId,
-                },
-            })
-            activeConversationId = conversation.id
+                        updatedAt: new Date().toISOString()
+                    })
+                    .select("id")
+                    .single()
+
+                if (createError) throw createError
+                activeConversationId = newConv.id
+            }
         }
 
         if (!activeConversationId) {
             return new NextResponse("Missing conversation or employee ID", { status: 400 })
         }
 
-        const message = await prisma.message.create({
-            data: {
+        const messageId = randomUUID()
+        const { data: message, error: msgError } = await supabase
+            .from("Message")
+            .insert({
+                id: messageId,
                 content,
                 conversationId: activeConversationId,
                 senderId: session.user.id!,
                 senderType: "COMPANY",
-            },
-        })
+                createdAt: new Date().toISOString()
+            })
+            .select()
+            .single()
+
+        if (msgError) throw msgError
 
         // Update conversation updatedAt to bring it to top
-        await prisma.conversation.update({
-            where: { id: activeConversationId },
-            data: { updatedAt: new Date() },
-        })
+        await supabase
+            .from("Conversation")
+            .update({ updatedAt: new Date().toISOString() })
+            .eq("id", activeConversationId)
 
         return NextResponse.json(message)
     } catch (error) {

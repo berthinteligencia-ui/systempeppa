@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import * as XLSX from "xlsx"
-import { prisma } from "@/lib/prisma"
+import { getSupabaseAdmin } from "@/lib/supabase-admin"
 import { auth } from "@/lib/auth"
 
 // ── CPF helpers ───────────────────────────────────────────────────────────────
@@ -187,11 +187,19 @@ export async function POST(req: NextRequest) {
 
     // ── Cross-reference DB ────────────────────────────────────────────────────
     const cpfs = finalRows.map((r) => r.cpf)
-    const dbEmployees = await prisma.employee.findMany({
-        where: { companyId, cpf: { in: cpfs } },
-        select: { id: true, cpf: true, name: true },
-    })
-    const dbMap = new Map(dbEmployees.map((e) => [e.cpf ?? "", e]))
+    const supabase = getSupabaseAdmin()
+    const { data: dbEmployees, error: dbError } = await supabase
+        .from("Employee")
+        .select("id, cpf, name")
+        .eq("companyId", companyId)
+        .in("cpf", cpfs)
+
+    if (dbError) {
+        console.error("[ANALYZE_ROUTE] DB Error:", dbError)
+        return NextResponse.json({ error: "Erro ao conectar ao banco de dados" }, { status: 500 })
+    }
+
+    const dbMap = new Map((dbEmployees || []).map((e) => [e.cpf ?? "", e]))
 
     const found = finalRows
         .filter((r: PayrollRow) => dbMap.has(r.cpf))
