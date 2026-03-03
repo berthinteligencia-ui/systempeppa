@@ -44,6 +44,7 @@ function toTitleCase(str: string): string {
 const CPF_NAMES = ["cpf", "doc", "documento", "cpf/cnpj", "cnpj/cpf", "nr documento", "nr.documento", "nrdocumento", "registro", "matricula", "matrícula", "id", "c.p.f"]
 const NOME_NAMES = ["nome", "name", "funcionario", "funcionário", "colaborador", "empregado", "trabalhador", "nomefuncionario", "nome funcionário", "nome funcionario", "servidor", "beneficiario", "beneficiário"]
 const VALOR_NAMES = ["valor", "total", "liquido", "líquido", "bruto", "vencimento", "salario", "salário", "remuneracao", "remuneração", "pagamento", "totalvencimentos", "total vencimentos", "vlr", "vlrliquido", "vlrbruto", "proventos", "creditado", "valor pago", "vlr.pago"]
+const TELEFONE_NAMES = ["telefone", "fone", "celular", "cel", "phone", "contato", "tel", "whatsapp", "zap", "fone/cel", "cel/fone", "numero", "número"]
 
 function matchHeader(header: string, candidates: string[]): boolean {
     const h = header.toLowerCase().trim().replace(/\s+/g, " ")
