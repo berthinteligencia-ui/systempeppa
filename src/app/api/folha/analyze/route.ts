@@ -45,6 +45,7 @@ const CPF_NAMES = ["cpf", "doc", "documento", "cpf/cnpj", "cnpj/cpf", "nr docume
 const NOME_NAMES = ["nome", "name", "funcionario", "funcionário", "colaborador", "empregado", "trabalhador", "nomefuncionario", "nome funcionário", "nome funcionario", "servidor", "beneficiario", "beneficiário"]
 const VALOR_NAMES = ["valor", "total", "liquido", "líquido", "bruto", "vencimento", "salario", "salário", "remuneracao", "remuneração", "pagamento", "totalvencimentos", "total vencimentos", "vlr", "vlrliquido", "vlrbruto", "proventos", "creditado", "valor pago", "vlr.pago"]
 const TELEFONE_NAMES = ["telefone", "fone", "celular", "cel", "phone", "contato", "tel", "whatsapp", "zap", "fone/cel", "cel/fone", "numero", "número"]
+const CARGO_NAMES = ["cargo", "função", "funcao", "ocupação", "ocupacao", "atividade", "posição", "posicao", "função/cargo", "cargo/função"]
 
 function matchHeader(header: string, candidates: string[]): boolean {
     const h = header.toLowerCase().trim().replace(/\s+/g, " ")
@@ -56,12 +57,13 @@ function matchHeader(header: string, candidates: string[]): boolean {
 function detectColumns(
     headers: string[],
     rows: Record<string, unknown>[]
-): { cpfIdx: number; nomeIdx: number; valorIdx: number; telefoneIdx: number } {
+): { cpfIdx: number; nomeIdx: number; valorIdx: number; telefoneIdx: number; cargoIdx: number } {
     // 1st pass: match by header name
     let cpfIdx = headers.findIndex((h) => matchHeader(h, CPF_NAMES))
     let nomeIdx = headers.findIndex((h) => matchHeader(h, NOME_NAMES))
     let valorIdx = headers.findIndex((h) => matchHeader(h, VALOR_NAMES))
     let telefoneIdx = headers.findIndex((h) => matchHeader(h, TELEFONE_NAMES))
+    let cargoIdx = headers.findIndex((h) => matchHeader(h, CARGO_NAMES))
 
     // 2nd pass: scan cell content to find CPF column when name didn't match
     if (cpfIdx === -1) {
@@ -95,7 +97,7 @@ function detectColumns(
         }
     }
 
-    return { cpfIdx, nomeIdx, valorIdx, telefoneIdx }
+    return { cpfIdx, nomeIdx, valorIdx, telefoneIdx, cargoIdx }
 }
 
 // ── Route Handler ─────────────────────────────────────────────────────────────
@@ -115,7 +117,7 @@ export async function POST(req: NextRequest) {
         const buffer = Buffer.from(await file.arrayBuffer())
         const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true })
 
-        type PayrollRow = { cpf: string; nome: string; valor: number; sheet: string; telefone?: string }
+        type PayrollRow = { cpf: string; nome: string; valor: number; sheet: string; telefone?: string; cargo?: string }
         const allRows: PayrollRow[] = []
         const debugInfo: Record<string, unknown>[] = []
         const sheetMap = new Map<string, { count: number; total: number }>()
@@ -127,7 +129,7 @@ export async function POST(req: NextRequest) {
             if (rawRows.length === 0) continue
 
             const headers = Object.keys(rawRows[0])
-            const { cpfIdx, nomeIdx, valorIdx, telefoneIdx } = detectColumns(headers, rawRows)
+            const { cpfIdx, nomeIdx, valorIdx, telefoneIdx, cargoIdx } = detectColumns(headers, rawRows)
 
             debugInfo.push({
                 sheet: sheetName,
@@ -138,6 +140,7 @@ export async function POST(req: NextRequest) {
                     nome: nomeIdx !== -1 ? headers[nomeIdx] : null,
                     valor: valorIdx !== -1 ? headers[valorIdx] : null,
                     telefone: telefoneIdx !== -1 ? headers[telefoneIdx] : null,
+                    cargo: cargoIdx !== -1 ? headers[cargoIdx] : null,
                 },
             })
 
@@ -152,7 +155,10 @@ export async function POST(req: NextRequest) {
                 const telefone = telefoneIdx !== -1
                     ? String(row[headers[telefoneIdx]] ?? "").replace(/\D/g, "").slice(0, 20) || undefined
                     : undefined
-                allRows.push({ cpf, nome, valor, sheet: sheetName, telefone })
+                const cargo = cargoIdx !== -1
+                    ? String(row[headers[cargoIdx]] ?? "").trim() || undefined
+                    : undefined
+                allRows.push({ cpf, nome, valor, sheet: sheetName, telefone, cargo })
 
                 const entry = sheetMap.get(sheetName) ?? { count: 0, total: 0 }
                 entry.count += 1
@@ -162,7 +168,7 @@ export async function POST(req: NextRequest) {
         }
 
         // ── Aggregate by CPF ───────────────────────────────────────────────────────
-        const aggregatedMap = new Map<string, { cpf: string; nome: string; valor: number; sheet: string; telefone?: string; isAggregated: boolean }>()
+        const aggregatedMap = new Map<string, { cpf: string; nome: string; valor: number; sheet: string; telefone?: string; cargo?: string; isAggregated: boolean }>()
         const duplicateCpfs = new Set<string>()
 
         for (const row of allRows) {
@@ -197,7 +203,7 @@ export async function POST(req: NextRequest) {
         const supabase = getSupabaseAdmin()
         const { data: dbEmployees, error: dbError } = await supabase
             .from("Employee")
-            .select("id, cpf, name, phone")
+            .select("id, cpf, name, phone, position")
             .eq("companyId", companyId)
             .in("cpf", cpfs)
 
@@ -218,13 +224,14 @@ export async function POST(req: NextRequest) {
                     cpf: r.cpf,
                     valor: r.valor,
                     sheet: r.sheet,
-                    telefone: e.phone || r.telefone
+                    telefone: e.phone || r.telefone,
+                    cargo: e.position || r.cargo
                 }
             })
 
         const missing = finalRows
             .filter((r: PayrollRow) => !dbMap.has(r.cpf))
-            .map((r: PayrollRow) => ({ cpf: r.cpf, nome: r.nome, valor: r.valor, sheet: r.sheet, telefone: r.telefone }))
+            .map((r: PayrollRow) => ({ cpf: r.cpf, nome: r.nome, valor: r.valor, sheet: r.sheet, telefone: r.telefone, cargo: r.cargo }))
 
         // Employees found in DB but missing phone there, yet spreadsheet has a phone
         const phoneUpdates = finalRows

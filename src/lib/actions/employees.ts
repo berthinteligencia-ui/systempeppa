@@ -71,7 +71,7 @@ export async function deleteEmployee(id: string) {
 }
 
 export async function registerBatchFromPayroll(
-  employees: { cpf: string; nome: string; valor: number; telefone?: string }[],
+  employees: { cpf: string; nome: string; valor: number; telefone?: string; cargo?: string }[],
   departmentId: string
 ) {
   const companyId = await getCompanyId()
@@ -83,7 +83,7 @@ export async function registerBatchFromPayroll(
       name: e.nome,
       cpf: e.cpf,
       phone: e.telefone || null,
-      position: "A definir",
+      position: e.cargo || "A definir",
       salary: e.valor,
       hireDate: now,
       companyId,
