@@ -109,6 +109,69 @@ export async function updateEmployeesPhone(updates: { id: string; phone: string 
   revalidatePath("/funcionarios")
 }
 
+export async function importEmployees(
+  employees: {
+    name: string
+    cpf?: string
+    phone?: string
+    email?: string
+    position?: string
+    salary?: number
+    departmentId?: string
+  }[]
+) {
+  const companyId = await getCompanyId()
+  const supabase = getSupabaseAdmin()
+  const now = new Date().toISOString()
+
+  const withCpf = employees.filter((e) => e.cpf)
+  const withoutCpf = employees.filter((e) => !e.cpf)
+
+  if (withCpf.length > 0) {
+    check(await supabase.from("Employee").upsert(
+      withCpf.map((e) => ({
+        id: randomUUID(),
+        name: e.name,
+        cpf: e.cpf,
+        phone: e.phone || null,
+        email: e.email || null,
+        position: e.position || "A definir",
+        salary: e.salary ?? 0,
+        hireDate: now,
+        companyId,
+        departmentId: e.departmentId || null,
+        status: "ACTIVE",
+        createdAt: now,
+        updatedAt: now,
+      })),
+      { onConflict: "cpf", ignoreDuplicates: false }
+    ))
+  }
+
+  if (withoutCpf.length > 0) {
+    check(await supabase.from("Employee").insert(
+      withoutCpf.map((e) => ({
+        id: randomUUID(),
+        name: e.name,
+        cpf: null,
+        phone: e.phone || null,
+        email: e.email || null,
+        position: e.position || "A definir",
+        salary: e.salary ?? 0,
+        hireDate: now,
+        companyId,
+        departmentId: e.departmentId || null,
+        status: "ACTIVE",
+        createdAt: now,
+        updatedAt: now,
+      }))
+    ))
+  }
+
+  revalidatePath("/funcionarios")
+  return { imported: employees.length }
+}
+
 export async function deleteEmployeesBatch(ids: string[]) {
   const companyId = await getCompanyId()
   const supabase = getSupabaseAdmin()
