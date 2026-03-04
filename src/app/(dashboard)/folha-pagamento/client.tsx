@@ -6,7 +6,7 @@ import {
     Plus, CirclePlus, Search, SearchSlash, Download, History, Save, Archive,
     FileSpreadsheet, Upload, CheckCircle2, X, Calendar, Building2, FileUp,
     AlertTriangle, UserPlus, Users, ChevronRight, RotateCcw, Loader2, ShieldCheck,
-    Trash2, Edit
+    Trash2, Edit, Phone
 } from "lucide-react"
 import * as XLSX from "xlsx"
 import { Button } from "@/components/ui/button"
@@ -18,7 +18,7 @@ import {
 import {
     Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
-import { registerBatchFromPayroll, getEmployeeByCpf } from "@/lib/actions/employees"
+import { registerBatchFromPayroll, getEmployeeByCpf, updateEmployeesPhone } from "@/lib/actions/employees"
 import {
     savePayrollAnalysis,
     listPayrollAnalyses,
@@ -31,10 +31,11 @@ import {
 type Department = { id: string; name: string }
 
 type FoundRow = { id: string; nome: string; cpf: string; valor: number; sheet: string }
-type MissingRow = { cpf: string; nome: string; valor: number; sheet: string }
+type MissingRow = { cpf: string; nome: string; valor: number; sheet: string; telefone?: string }
 type ExtraRow = { nome: string; cpfCnpj: string; valor: number; sheet: string }
 type SheetSummary = { sheet: string; count: number; total: number }
-type AnalysisResult = { found: FoundRow[]; missing: MissingRow[]; extras: ExtraRow[]; total: number; sheetSummary: SheetSummary[]; duplicates?: string[] }
+type PhoneUpdateRow = { id: string; nome: string; cpf: string; phoneInSheet: string }
+type AnalysisResult = { found: FoundRow[]; missing: MissingRow[]; extras: ExtraRow[]; total: number; sheetSummary: SheetSummary[]; duplicates?: string[]; phoneUpdates?: PhoneUpdateRow[] }
 type SheetDebug = { sheet: string; headers: string[]; totalRows: number; detected: { cpf: string | null; nome: string | null; valor: string | null } }
 
 type AnalyzedRow =
@@ -114,6 +115,8 @@ export function FolhaPagamentoClient({ departments }: { departments: Department[
     const [registering, setRegistering] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [debugInfo, setDebugInfo] = useState<SheetDebug[] | null>(null)
+    const [phoneUpdates, setPhoneUpdates] = useState<PhoneUpdateRow[]>([])
+    const [isUpdatingPhones, setIsUpdatingPhones] = useState(false)
 
     // Manual additions
     const [isAddingEmp, setIsAddingEmp] = useState(false)
@@ -205,6 +208,7 @@ export function FolhaPagamentoClient({ departments }: { departments: Department[
 
             setResult(data)
             setMissing(data.missing)
+            setPhoneUpdates(data.phoneUpdates ?? [])
 
             if (data.missing.length > 0) {
                 setPhase("pending")
@@ -221,7 +225,7 @@ export function FolhaPagamentoClient({ departments }: { departments: Department[
     async function handleRegisterAll() {
         setRegistering(true)
         try {
-            await registerBatchFromPayroll(missing.map(({ cpf, nome, valor }) => ({ cpf, nome, valor })), unidade)
+            await registerBatchFromPayroll(missing.map(({ cpf, nome, valor, telefone }) => ({ cpf, nome, valor, telefone })), unidade)
             // Re-fetch analysis after registration
             const fd = new FormData()
             fd.append("file", file!)
@@ -241,13 +245,25 @@ export function FolhaPagamentoClient({ departments }: { departments: Department[
         setPhase("result")
     }
 
+    async function handleUpdatePhones() {
+        setIsUpdatingPhones(true)
+        try {
+            await updateEmployeesPhone(phoneUpdates.map(u => ({ id: u.id, phone: u.phoneInSheet })))
+            setPhoneUpdates([])
+        } catch (err: any) {
+            alert("Erro ao atualizar telefones: " + err.message)
+        } finally {
+            setIsUpdatingPhones(false)
+        }
+    }
+
     function setFormCpf(val: string) {
         setManualForm(f => ({ ...f, cpf: val, id: "" }))
     }
 
     function reset() {
         setMes(""); setAno(String(CURRENT_YEAR)); setUnidade(""); setFile(null)
-        setResult(null); setMissing([]); setPhase("form"); setError(null); setDebugInfo(null)
+        setResult(null); setMissing([]); setPhase("form"); setError(null); setDebugInfo(null); setPhoneUpdates([])
         setManualForm({ nome: "", cpf: "", valor: "", sheet: "", id: "" })
         setExtraForm({ nome: "", cpfCnpj: "", valor: "", sheet: "" })
         setNewSheetName("")
@@ -828,6 +844,52 @@ export function FolhaPagamentoClient({ departments }: { departments: Department[
                                         )}
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Phone update banner */}
+                    {phoneUpdates.length > 0 && (
+                        <div className="rounded-2xl border border-blue-200 bg-blue-50 p-5">
+                            <div className="flex items-start gap-3">
+                                <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-100">
+                                    <Phone className="h-5 w-5 text-blue-600" />
+                                </div>
+                                <div className="flex-1">
+                                    <p className="font-semibold text-blue-800">
+                                        {phoneUpdates.length} funcionário{phoneUpdates.length > 1 ? "s" : ""} sem telefone cadastrado
+                                    </p>
+                                    <p className="mt-0.5 text-sm text-blue-700">
+                                        A planilha contém número de telefone para esses funcionários. Deseja salvar no cadastro?
+                                    </p>
+                                    <div className="mt-3 flex flex-wrap gap-2">
+                                        {phoneUpdates.slice(0, 8).map((u) => (
+                                            <span key={u.id} className="inline-flex items-center gap-1.5 rounded-lg bg-white border border-blue-200 px-2.5 py-1 text-xs text-blue-800 shadow-sm">
+                                                <Phone className="h-3 w-3 text-blue-400" />
+                                                <span className="font-medium">{u.nome}</span>
+                                                <span className="font-mono text-blue-500">{u.phoneInSheet}</span>
+                                            </span>
+                                        ))}
+                                        {phoneUpdates.length > 8 && (
+                                            <span className="inline-flex items-center rounded-lg bg-blue-100/50 border border-blue-200 px-2.5 py-1 text-xs text-blue-600">
+                                                +{phoneUpdates.length - 8} outros
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                                <Button
+                                    size="sm"
+                                    onClick={handleUpdatePhones}
+                                    disabled={isUpdatingPhones}
+                                    className="shrink-0 bg-blue-600 hover:bg-blue-700 gap-1.5"
+                                >
+                                    {isUpdatingPhones ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                        <Phone className="h-4 w-4" />
+                                    )}
+                                    Atualizar Telefones
+                                </Button>
                             </div>
                         </div>
                     )}

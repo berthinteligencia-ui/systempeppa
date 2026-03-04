@@ -71,7 +71,7 @@ export async function deleteEmployee(id: string) {
 }
 
 export async function registerBatchFromPayroll(
-  employees: { cpf: string; nome: string; valor: number }[],
+  employees: { cpf: string; nome: string; valor: number; telefone?: string }[],
   departmentId: string
 ) {
   const companyId = await getCompanyId()
@@ -82,6 +82,7 @@ export async function registerBatchFromPayroll(
       id: randomUUID(),
       name: e.nome,
       cpf: e.cpf,
+      phone: e.telefone || null,
       position: "A definir",
       salary: e.valor,
       hireDate: now,
@@ -94,6 +95,18 @@ export async function registerBatchFromPayroll(
   ))
   revalidatePath("/funcionarios")
   revalidatePath("/folha-pagamento")
+}
+
+export async function updateEmployeesPhone(updates: { id: string; phone: string }[]) {
+  const companyId = await getCompanyId()
+  const supabase = getSupabaseAdmin()
+  await Promise.all(
+    updates.map((u) =>
+      supabase.from("Employee").update({ phone: u.phone, updatedAt: new Date().toISOString() })
+        .eq("id", u.id).eq("companyId", companyId)
+    )
+  )
+  revalidatePath("/funcionarios")
 }
 
 export async function deleteEmployeesBatch(ids: string[]) {
