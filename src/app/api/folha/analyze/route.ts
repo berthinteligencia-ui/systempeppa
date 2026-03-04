@@ -102,142 +102,152 @@ function detectColumns(
 
 export async function POST(req: NextRequest) {
     try {
-    const session = await auth()
-    if (!session?.user?.companyId) {
-        return NextResponse.json({ error: "Não autenticado" }, { status: 401 })
-    }
-    const companyId = session.user.companyId
-
-    const form = await req.formData()
-    const file = form.get("file") as File | null
-    if (!file) return NextResponse.json({ error: "Arquivo não enviado" }, { status: 400 })
-
-    const buffer = Buffer.from(await file.arrayBuffer())
-    const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true })
-
-    type PayrollRow = { cpf: string; nome: string; valor: number; sheet: string; telefone?: string }
-    const allRows: PayrollRow[] = []
-    const debugInfo: Record<string, unknown>[] = []
-    const sheetMap = new Map<string, { count: number; total: number }>()
-
-    for (const sheetName of workbook.SheetNames) {
-        const sheet = workbook.Sheets[sheetName]
-
-        const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" })
-        if (rawRows.length === 0) continue
-
-        const headers = Object.keys(rawRows[0])
-        const { cpfIdx, nomeIdx, valorIdx, telefoneIdx } = detectColumns(headers, rawRows)
-
-        debugInfo.push({
-            sheet: sheetName,
-            totalRows: rawRows.length,
-            headers,
-            detected: {
-                cpf: cpfIdx !== -1 ? headers[cpfIdx] : null,
-                nome: nomeIdx !== -1 ? headers[nomeIdx] : null,
-                valor: valorIdx !== -1 ? headers[valorIdx] : null,
-                telefone: telefoneIdx !== -1 ? headers[telefoneIdx] : null,
-            },
-        })
-
-        if (cpfIdx === -1) continue
-
-        for (const row of rawRows) {
-            const cpf = normalizeCpf(row[headers[cpfIdx]])
-            if (cpf.length < 8) continue // Ensure at least some digits
-            const nomeRaw = nomeIdx !== -1 ? String(row[headers[nomeIdx]] ?? "").trim() : "—"
-            const nome = toTitleCase(nomeRaw)
-            const valor = valorIdx !== -1 ? parseValue(row[headers[valorIdx]]) : 0
-            const telefone = telefoneIdx !== -1
-                ? String(row[headers[telefoneIdx]] ?? "").replace(/\D/g, "").slice(0, 20) || undefined
-                : undefined
-            allRows.push({ cpf, nome, valor, sheet: sheetName, telefone })
-
-            const entry = sheetMap.get(sheetName) ?? { count: 0, total: 0 }
-            entry.count += 1
-            entry.total += valor
-            sheetMap.set(sheetName, entry)
+        const session = await auth()
+        if (!session?.user?.companyId) {
+            return NextResponse.json({ error: "Não autenticado" }, { status: 401 })
         }
-    }
+        const companyId = session.user.companyId
 
-    // ── Aggregate by CPF ───────────────────────────────────────────────────────
-    const aggregatedMap = new Map<string, { cpf: string; nome: string; valor: number; sheet: string; telefone?: string; isAggregated: boolean }>()
-    const duplicateCpfs = new Set<string>()
+        const form = await req.formData()
+        const file = form.get("file") as File | null
+        if (!file) return NextResponse.json({ error: "Arquivo não enviado" }, { status: 400 })
 
-    for (const row of allRows) {
-        if (aggregatedMap.has(row.cpf)) {
-            const existing = aggregatedMap.get(row.cpf)!
-            existing.valor += row.valor
-            existing.isAggregated = true
-            if (existing.sheet !== row.sheet) {
-                existing.sheet = "várias"
+        const buffer = Buffer.from(await file.arrayBuffer())
+        const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true })
+
+        type PayrollRow = { cpf: string; nome: string; valor: number; sheet: string; telefone?: string }
+        const allRows: PayrollRow[] = []
+        const debugInfo: Record<string, unknown>[] = []
+        const sheetMap = new Map<string, { count: number; total: number }>()
+
+        for (const sheetName of workbook.SheetNames) {
+            const sheet = workbook.Sheets[sheetName]
+
+            const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" })
+            if (rawRows.length === 0) continue
+
+            const headers = Object.keys(rawRows[0])
+            const { cpfIdx, nomeIdx, valorIdx, telefoneIdx } = detectColumns(headers, rawRows)
+
+            debugInfo.push({
+                sheet: sheetName,
+                totalRows: rawRows.length,
+                headers,
+                detected: {
+                    cpf: cpfIdx !== -1 ? headers[cpfIdx] : null,
+                    nome: nomeIdx !== -1 ? headers[nomeIdx] : null,
+                    valor: valorIdx !== -1 ? headers[valorIdx] : null,
+                    telefone: telefoneIdx !== -1 ? headers[telefoneIdx] : null,
+                },
+            })
+
+            if (cpfIdx === -1) continue
+
+            for (const row of rawRows) {
+                const cpf = normalizeCpf(row[headers[cpfIdx]])
+                if (cpf.length < 8) continue // Ensure at least some digits
+                const nomeRaw = nomeIdx !== -1 ? String(row[headers[nomeIdx]] ?? "").trim() : "—"
+                const nome = toTitleCase(nomeRaw)
+                const valor = valorIdx !== -1 ? parseValue(row[headers[valorIdx]]) : 0
+                const telefone = telefoneIdx !== -1
+                    ? String(row[headers[telefoneIdx]] ?? "").replace(/\D/g, "").slice(0, 20) || undefined
+                    : undefined
+                allRows.push({ cpf, nome, valor, sheet: sheetName, telefone })
+
+                const entry = sheetMap.get(sheetName) ?? { count: 0, total: 0 }
+                entry.count += 1
+                entry.total += valor
+                sheetMap.set(sheetName, entry)
             }
-            duplicateCpfs.add(row.cpf)
-        } else {
-            aggregatedMap.set(row.cpf, { ...row, isAggregated: false })
         }
-    }
 
-    const finalRows = Array.from(aggregatedMap.values()) as PayrollRow[]
-    const duplicates = Array.from(duplicateCpfs)
+        // ── Aggregate by CPF ───────────────────────────────────────────────────────
+        const aggregatedMap = new Map<string, { cpf: string; nome: string; valor: number; sheet: string; telefone?: string; isAggregated: boolean }>()
+        const duplicateCpfs = new Set<string>()
 
-    if (finalRows.length === 0) {
-        return NextResponse.json(
-            {
-                error: "Nenhuma linha com CPF válido foi encontrada na planilha.",
-                debug: debugInfo,
-            },
-            { status: 422 }
-        )
-    }
+        for (const row of allRows) {
+            if (aggregatedMap.has(row.cpf)) {
+                const existing = aggregatedMap.get(row.cpf)!
+                existing.valor += row.valor
+                existing.isAggregated = true
+                if (existing.sheet !== row.sheet) {
+                    existing.sheet = "várias"
+                }
+                duplicateCpfs.add(row.cpf)
+            } else {
+                aggregatedMap.set(row.cpf, { ...row, isAggregated: false })
+            }
+        }
 
-    // ── Cross-reference DB ────────────────────────────────────────────────────
-    const cpfs = finalRows.map((r) => r.cpf)
-    const supabase = getSupabaseAdmin()
-    const { data: dbEmployees, error: dbError } = await supabase
-        .from("Employee")
-        .select("id, cpf, name, phone")
-        .eq("companyId", companyId)
-        .in("cpf", cpfs)
+        const finalRows = Array.from(aggregatedMap.values()) as PayrollRow[]
+        const duplicates = Array.from(duplicateCpfs)
 
-    if (dbError) {
-        console.error("[ANALYZE_ROUTE] DB Error:", dbError)
-        return NextResponse.json({ error: "Erro ao conectar ao banco de dados" }, { status: 500 })
-    }
+        if (finalRows.length === 0) {
+            return NextResponse.json(
+                {
+                    error: "Nenhuma linha com CPF válido foi encontrada na planilha.",
+                    debug: debugInfo,
+                },
+                { status: 422 }
+            )
+        }
 
-    const dbMap = new Map((dbEmployees || []).map((e) => [e.cpf ?? "", e]))
+        // ── Cross-reference DB ────────────────────────────────────────────────────
+        const cpfs = finalRows.map((r) => r.cpf)
+        const supabase = getSupabaseAdmin()
+        const { data: dbEmployees, error: dbError } = await supabase
+            .from("Employee")
+            .select("id, cpf, name, phone")
+            .eq("companyId", companyId)
+            .in("cpf", cpfs)
 
-    const found = finalRows
-        .filter((r: PayrollRow) => dbMap.has(r.cpf))
-        .map((r: PayrollRow) => { const e = dbMap.get(r.cpf)!; return { id: e.id, nome: toTitleCase(e.name), cpf: r.cpf, valor: r.valor, sheet: r.sheet } })
+        if (dbError) {
+            console.error("[ANALYZE_ROUTE] DB Error:", dbError)
+            return NextResponse.json({ error: "Erro ao conectar ao banco de dados" }, { status: 500 })
+        }
 
-    const missing = finalRows
-        .filter((r: PayrollRow) => !dbMap.has(r.cpf))
-        .map((r: PayrollRow) => ({ cpf: r.cpf, nome: r.nome, valor: r.valor, sheet: r.sheet, telefone: r.telefone }))
+        const dbMap = new Map((dbEmployees || []).map((e) => [e.cpf ?? "", e]))
 
-    // Employees found in DB but missing phone there, yet spreadsheet has a phone
-    const phoneUpdates = finalRows
-        .filter((r: PayrollRow) => {
-            if (!r.telefone) return false
-            const e = dbMap.get(r.cpf)
-            return e && !e.phone
-        })
-        .map((r: PayrollRow) => {
-            const e = dbMap.get(r.cpf)!
-            return { id: e.id, nome: toTitleCase(e.name), cpf: r.cpf, phoneInSheet: r.telefone! }
-        })
+        const found = finalRows
+            .filter((r: PayrollRow) => dbMap.has(r.cpf))
+            .map((r: PayrollRow) => {
+                const e = dbMap.get(r.cpf)!;
+                return {
+                    id: e.id,
+                    nome: toTitleCase(e.name),
+                    cpf: r.cpf,
+                    valor: r.valor,
+                    sheet: r.sheet,
+                    telefone: e.phone || r.telefone
+                }
+            })
 
-    const total = finalRows.reduce((sum: number, r: PayrollRow) => sum + r.valor, 0)
+        const missing = finalRows
+            .filter((r: PayrollRow) => !dbMap.has(r.cpf))
+            .map((r: PayrollRow) => ({ cpf: r.cpf, nome: r.nome, valor: r.valor, sheet: r.sheet, telefone: r.telefone }))
 
-    // Per-sheet summary (all rows preserved)
-    const sheetSummary: { sheet: string; count: number; total: number }[] = []
-    for (const [sheet] of sheetMap.entries()) {
-        const inSheet = allRows.filter((r) => r.sheet === sheet)
-        sheetSummary.push({ sheet, count: inSheet.length, total: inSheet.reduce((s, r) => s + r.valor, 0) })
-    }
+        // Employees found in DB but missing phone there, yet spreadsheet has a phone
+        const phoneUpdates = finalRows
+            .filter((r: PayrollRow) => {
+                if (!r.telefone) return false
+                const e = dbMap.get(r.cpf)
+                return e && !e.phone
+            })
+            .map((r: PayrollRow) => {
+                const e = dbMap.get(r.cpf)!
+                return { id: e.id, nome: toTitleCase(e.name), cpf: r.cpf, phoneInSheet: r.telefone! }
+            })
 
-    return NextResponse.json({ found, missing, total, sheetSummary, duplicates, phoneUpdates, debug: debugInfo })
+        const total = finalRows.reduce((sum: number, r: PayrollRow) => sum + r.valor, 0)
+
+        // Per-sheet summary (all rows preserved)
+        const sheetSummary: { sheet: string; count: number; total: number }[] = []
+        for (const [sheet] of sheetMap.entries()) {
+            const inSheet = allRows.filter((r) => r.sheet === sheet)
+            sheetSummary.push({ sheet, count: inSheet.length, total: inSheet.reduce((s, r) => s + r.valor, 0) })
+        }
+
+        return NextResponse.json({ found, missing, total, sheetSummary, duplicates, phoneUpdates, debug: debugInfo })
     } catch (e: any) {
         console.error("[ANALYZE_ROUTE] Unhandled error:", e)
         return NextResponse.json(

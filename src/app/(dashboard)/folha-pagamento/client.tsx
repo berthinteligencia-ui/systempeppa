@@ -30,9 +30,9 @@ import {
 
 type Department = { id: string; name: string }
 
-type FoundRow = { id: string; nome: string; cpf: string; valor: number; sheet: string }
+type FoundRow = { id: string; nome: string; cpf: string; valor: number; sheet: string; telefone?: string }
 type MissingRow = { cpf: string; nome: string; valor: number; sheet: string; telefone?: string }
-type ExtraRow = { nome: string; cpfCnpj: string; valor: number; sheet: string }
+type ExtraRow = { nome: string; cpfCnpj: string; valor: number; sheet: string; telefone?: string }
 type SheetSummary = { sheet: string; count: number; total: number }
 type PhoneUpdateRow = { id: string; nome: string; cpf: string; phoneInSheet: string }
 type AnalysisResult = { found: FoundRow[]; missing: MissingRow[]; extras: ExtraRow[]; total: number; sheetSummary: SheetSummary[]; duplicates?: string[]; phoneUpdates?: PhoneUpdateRow[] }
@@ -123,7 +123,7 @@ export function FolhaPagamentoClient({ departments }: { departments: Department[
     const [isAddingExtra, setIsAddingExtra] = useState(false)
     const [isAddingSheet, setIsAddingSheet] = useState(false)
     const [newSheetName, setNewSheetName] = useState("")
-    const [manualForm, setManualForm] = useState({ nome: "", cpf: "", valor: "", sheet: "", id: "" })
+    const [manualForm, setManualForm] = useState({ nome: "", cpf: "", valor: "", sheet: "", id: "", telefone: "" })
     const [extraForm, setExtraForm] = useState({ nome: "", cpfCnpj: "", valor: "", sheet: "" })
     const [isSearchingCpf, setIsSearchingCpf] = useState(false)
 
@@ -264,7 +264,7 @@ export function FolhaPagamentoClient({ departments }: { departments: Department[
     function reset() {
         setMes(""); setAno(String(CURRENT_YEAR)); setUnidade(""); setFile(null)
         setResult(null); setMissing([]); setPhase("form"); setError(null); setDebugInfo(null); setPhoneUpdates([])
-        setManualForm({ nome: "", cpf: "", valor: "", sheet: "", id: "" })
+        setManualForm({ nome: "", cpf: "", valor: "", sheet: "", id: "", telefone: "" })
         setExtraForm({ nome: "", cpfCnpj: "", valor: "", sheet: "" })
         setNewSheetName("")
         setAnalysisId(null)
@@ -357,7 +357,7 @@ export function FolhaPagamentoClient({ departments }: { departments: Department[
         try {
             const emp = await getEmployeeByCpf(manualForm.cpf)
             if (emp) {
-                setManualForm(f => ({ ...f, nome: emp.name, id: emp.id }))
+                setManualForm(f => ({ ...f, nome: emp.name, id: emp.id, telefone: emp.phone || "" }))
             } else {
                 setManualForm(f => ({ ...f, id: "" }))
                 alert("Funcionário não encontrado no sistema. Ele será adicionado como pendente de cadastro.")
@@ -381,7 +381,8 @@ export function FolhaPagamentoClient({ departments }: { departments: Department[
                 nome: manualForm.nome,
                 cpf: manualForm.cpf.replace(/\D/g, ""),
                 valor: val,
-                sheet: manualForm.sheet
+                sheet: manualForm.sheet,
+                telefone: manualForm.telefone || undefined
             }
             if (result) {
                 const nextResult = { ...result }
@@ -395,7 +396,8 @@ export function FolhaPagamentoClient({ departments }: { departments: Department[
                 nome: manualForm.nome,
                 cpf: manualForm.cpf.replace(/\D/g, ""),
                 valor: val,
-                sheet: manualForm.sheet
+                sheet: manualForm.sheet,
+                telefone: manualForm.telefone || undefined
             }
             setMissing(prev => [...prev, newRow])
             if (result) {
@@ -407,7 +409,7 @@ export function FolhaPagamentoClient({ departments }: { departments: Department[
             }
         }
 
-        setManualForm({ nome: "", cpf: "", valor: "", sheet: manualForm.sheet, id: "" })
+        setManualForm({ nome: "", cpf: "", valor: "", sheet: manualForm.sheet, id: "", telefone: "" })
         setIsAddingEmp(false)
     }
 
@@ -723,6 +725,7 @@ export function FolhaPagamentoClient({ departments }: { departments: Department[
                                     <tr className="border-b bg-amber-50 text-left text-[11px] font-semibold uppercase tracking-wide text-amber-600">
                                         <th className="px-4 py-2.5">Nome do empregado</th>
                                         <th className="px-4 py-2.5">CPF</th>
+                                        <th className="px-4 py-2.5">Telefone</th>
                                         <th className="px-4 py-2.5 text-right">Valor</th>
                                     </tr>
                                 </thead>
@@ -731,6 +734,7 @@ export function FolhaPagamentoClient({ departments }: { departments: Department[
                                         <tr key={i} className="hover:bg-amber-50/50">
                                             <td className="px-4 py-2.5 font-medium text-slate-800">{row.nome || "—"}</td>
                                             <td className="px-4 py-2.5 font-mono text-xs text-slate-600">{row.cpf}</td>
+                                            <td className="px-4 py-2.5 font-mono text-xs text-slate-600">{row.telefone || "—"}</td>
                                             <td className="px-4 py-2.5 text-right font-semibold text-slate-800">{fmtBRL(row.valor)}</td>
                                         </tr>
                                     ))}
@@ -972,6 +976,7 @@ export function FolhaPagamentoClient({ departments }: { departments: Department[
                                     <tr className="border-b bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                                         <th className="px-5 py-3">Nome do empregado</th>
                                         <th className="px-5 py-3">CPF</th>
+                                        <th className="px-5 py-3">Telefone</th>
                                         <th className="px-5 py-3 text-right">Valor</th>
                                     </tr>
                                 </thead>
@@ -999,6 +1004,9 @@ export function FolhaPagamentoClient({ departments }: { departments: Department[
                                                 <td className={`px-5 py-3 font-mono text-xs ${isDuplicate ? "font-bold text-amber-700" : "text-slate-600"}`}>
                                                     {row.cpf ? fmtCpf(row.cpf) : "—"}
                                                 </td>
+                                                <td className="px-5 py-3 font-mono text-xs text-slate-600">
+                                                    {row.telefone || "—"}
+                                                </td>
                                                 <td className={`px-5 py-3 text-right font-bold ${isDuplicate ? "text-amber-900" : "text-slate-900"}`}>
                                                     {fmtBRL(row.valor)}
                                                 </td>
@@ -1008,7 +1016,7 @@ export function FolhaPagamentoClient({ departments }: { departments: Department[
                                 </tbody>
                                 <tfoot>
                                     <tr className="border-t-2 border-slate-200 bg-slate-50">
-                                        <td colSpan={2} className="px-5 py-3 text-sm font-semibold text-slate-700">Total Geral</td>
+                                        <td colSpan={3} className="px-5 py-3 text-sm font-semibold text-slate-700">Total Geral</td>
                                         <td className="px-5 py-3 text-right text-base font-bold text-blue-700">{fmtBRL(result.total)}</td>
                                     </tr>
                                 </tfoot>
@@ -1062,6 +1070,14 @@ export function FolhaPagamentoClient({ departments }: { departments: Department[
                                     placeholder="0,00"
                                     value={manualForm.valor}
                                     onChange={e => setManualForm(f => ({ ...f, valor: e.target.value }))}
+                                />
+                            </div>
+                            <div className="space-y-2 col-span-2">
+                                <Label>Telefone (Opcional)</Label>
+                                <Input
+                                    placeholder="(00) 00000-0000"
+                                    value={manualForm.telefone}
+                                    onChange={e => setManualForm(f => ({ ...f, telefone: e.target.value }))}
                                 />
                             </div>
                         </div>
