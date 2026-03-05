@@ -36,7 +36,7 @@ type ExtraRow = { nome: string; cpfCnpj: string; valor: number; sheet: string; t
 type SheetSummary = { sheet: string; count: number; total: number }
 type PhoneUpdateRow = { id: string; nome: string; cpf: string; phoneInSheet: string }
 type AnalysisResult = { found: FoundRow[]; missing: MissingRow[]; extras: ExtraRow[]; total: number; sheetSummary: SheetSummary[]; duplicates?: string[]; phoneUpdates?: PhoneUpdateRow[] }
-type SheetDebug = { sheet: string; headers: string[]; totalRows: number; detected: { cpf: string | null; nome: string | null; valor: string | null } }
+type SheetDebug = { sheet: string; headers: string[]; totalRows: number; detected: { cpf: string | null; nome: string | null; valor: string | null; telefone: string | null; cargo: string | null } }
 
 type AnalyzedRow =
     | (FoundRow & { status: "found" })
@@ -48,6 +48,7 @@ type Phase =
     | "confirm"       // modal: show selections, ask to proceed
     | "loading"       // calling API
     | "pending"       // show missing CPFs banner
+    | "cargo-confirm" // confirm if the detected cargo column is correct
     | "result"        // show summary table
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -117,6 +118,7 @@ export function FolhaPagamentoClient({ departments }: { departments: Department[
     const [debugInfo, setDebugInfo] = useState<SheetDebug[] | null>(null)
     const [phoneUpdates, setPhoneUpdates] = useState<PhoneUpdateRow[]>([])
     const [isUpdatingPhones, setIsUpdatingPhones] = useState(false)
+    const [cargoSelections, setCargoSelections] = useState<Record<string, boolean>>({})
 
     // Manual additions
     const [isAddingEmp, setIsAddingEmp] = useState(false)
@@ -209,8 +211,22 @@ export function FolhaPagamentoClient({ departments }: { departments: Department[
             setResult(data)
             setMissing(data.missing)
             setPhoneUpdates(data.phoneUpdates ?? [])
+            setDebugInfo(data.debug as SheetDebug[])
 
-            if (data.missing.length > 0) {
+            // Initialize cargo selections as true (enabled) for all sheets with a detected cargo
+            const initialSelections: Record<string, boolean> = {}
+            if (data.debug) {
+                (data.debug as SheetDebug[]).forEach(s => {
+                    if (s.detected.cargo) initialSelections[s.sheet] = true
+                })
+            }
+            setCargoSelections(initialSelections)
+
+            // If any sheet has a detected cargo, go to confirm phase
+            const hasCargo = data.debug && (data.debug as SheetDebug[]).some(s => !!s.detected.cargo)
+            if (hasCargo) {
+                setPhase("cargo-confirm")
+            } else if (data.missing.length > 0) {
                 setPhase("pending")
             } else {
                 setPhase("result")
@@ -255,6 +271,54 @@ export function FolhaPagamentoClient({ departments }: { departments: Department[
         } finally {
             setIsUpdatingPhones(false)
         }
+    }
+
+    function handleCargoConfirmation() {
+        if (!result) return
+
+        // Create a copy of the result to modify
+        const updatedResult = { ...result }
+
+        // Determine which sheets should have their cargo cleared
+        const sheetsToClear = Object.entries(cargoSelections)
+            .filter(([_, isSelected]) => !isSelected)
+            .map(([sheet, _]) => sheet)
+
+        if (sheetsToClear.length > 0) {
+            // Clear cargo in found rows
+            updatedResult.found = updatedResult.found.map(row => {
+                if (sheetsToClear.includes(row.sheet)) {
+                    return { ...row, cargo: undefined }
+                }
+                return row
+            })
+
+            // Clear cargo in missing rows
+            updatedResult.missing = updatedResult.missing.map(row => {
+                if (sheetsToClear.includes(row.sheet)) {
+                    return { ...row, cargo: undefined }
+                }
+                return row
+            })
+
+            // Update local state
+            setResult(updatedResult)
+            setMissing(updatedResult.missing)
+        }
+
+        // Proceed to next phase
+        if (updatedResult.missing.length > 0) {
+            setPhase("pending")
+        } else {
+            setPhase("result")
+        }
+    }
+
+    function toggleCargoSelection(sheet: string) {
+        setCargoSelections(prev => ({
+            ...prev,
+            [sheet]: !prev[sheet]
+        }))
     }
 
     function setFormCpf(val: string) {
@@ -689,6 +753,97 @@ export function FolhaPagamentoClient({ departments }: { departments: Department[
                     <Loader2 className="h-10 w-10 animate-spin text-blue-600" />
                     <p className="text-sm font-medium text-slate-600">Analisando planilha...</p>
                     <p className="text-xs text-slate-400">Verificando CPFs no sistema</p>
+                </div>
+            )}
+
+            {/* ════════════════════════════════════════════════════════════════════
+          PHASE: CARGO-CONFIRM
+      ════════════════════════════════════════════════════════════════════ */}
+            {phase === "cargo-confirm" && result && debugInfo && (
+                <div className="flex items-center justify-center py-8">
+                    <div className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-8 shadow-lg">
+                        <div className="mb-6 flex flex-col items-center gap-3 text-center">
+                            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-50">
+                                <SearchSlash className="h-7 w-7 text-violet-600" />
+                            </div>
+                            <h2 className="text-xl font-bold text-slate-800">Coluna de cargo detectada</h2>
+                            <p className="text-sm text-slate-500 max-w-sm">
+                                O sistema encontrou uma coluna que pode conter cargos/profissões.
+                                Confirme se deve usá-la no cadastro dos funcionários.
+                            </p>
+                        </div>
+
+                        <div className="space-y-3 mb-6">
+                            {debugInfo.filter(s => !!s.detected.cargo).map((s) => (
+                                <div
+                                    key={s.sheet}
+                                    onClick={() => toggleCargoSelection(s.sheet)}
+                                    className={`flex cursor-pointer items-start gap-4 rounded-xl border p-4 transition-all ${cargoSelections[s.sheet]
+                                        ? "border-violet-300 bg-violet-50"
+                                        : "border-slate-200 bg-slate-50 opacity-60"
+                                        }`}
+                                >
+                                    <div className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition-colors ${cargoSelections[s.sheet]
+                                        ? "border-violet-600 bg-violet-600"
+                                        : "border-slate-300 bg-white"
+                                        }`}>
+                                        {cargoSelections[s.sheet] && (
+                                            <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                            </svg>
+                                        )}
+                                    </div>
+                                    <div className="flex-1">
+                                        <div className="flex items-center gap-2">
+                                            <p className="font-semibold text-slate-800 text-sm">Aba: {s.sheet}</p>
+                                            <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-700">
+                                                {cargoSelections[s.sheet] ? "Usar cargo" : "Ignorar"}
+                                            </span>
+                                        </div>
+                                        <p className="mt-0.5 text-xs text-slate-500">
+                                            Coluna detectada: <span className="font-mono font-semibold text-slate-700">&quot;{s.detected.cargo}&quot;</span>
+                                        </p>
+                                        {/* Sample values from found/missing rows */}
+                                        <div className="mt-2 flex flex-wrap gap-1">
+                                            {[...result.found, ...result.missing]
+                                                .filter(r => r.sheet === s.sheet && r.cargo)
+                                                .slice(0, 4)
+                                                .map((r, i) => (
+                                                    <span key={i} className="rounded bg-white border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-600">
+                                                        {r.cargo}
+                                                    </span>
+                                                ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => {
+                                    // Deselect all and proceed without cargo
+                                    setCargoSelections({})
+                                    const next = { ...result }
+                                    next.found = next.found.map(r => ({ ...r, cargo: undefined }))
+                                    next.missing = next.missing.map(r => ({ ...r, cargo: undefined }))
+                                    setResult(next)
+                                    setMissing(next.missing)
+                                    if (next.missing.length > 0) setPhase("pending")
+                                    else setPhase("result")
+                                }}
+                                className="flex-1 rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+                            >
+                                Ignorar cargos
+                            </button>
+                            <button
+                                onClick={handleCargoConfirmation}
+                                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white shadow-md shadow-violet-600/30 transition hover:bg-violet-700"
+                            >
+                                Confirmar e continuar <ChevronRight className="h-4 w-4" />
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
 

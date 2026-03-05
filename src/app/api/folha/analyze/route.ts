@@ -25,6 +25,17 @@ function looksLikeNumeric(value: unknown): boolean {
     return !isNaN(n) && n >= 0
 }
 
+function looksLikeProfession(value: unknown): boolean {
+    const s = String(value ?? "").trim()
+    if (s.length < 3) return false
+    // Reject strings that are mostly digits (IDs or codes)
+    const digits = s.replace(/\D/g, "")
+    if (digits.length > s.length * 0.4) return false
+    // Reject strings that contain only numbers and symbols
+    if (/^[\d\s\-\.\/]+$/.test(s)) return false
+    return true
+}
+
 function parseValue(raw: unknown): number {
     return parseFloat(String(raw ?? "0").replace(/[^\d,.-]/g, "").replace(",", ".")) || 0
 }
@@ -44,8 +55,8 @@ function toTitleCase(str: string): string {
 const CPF_NAMES = ["cpf", "doc", "documento", "cpf/cnpj", "cnpj/cpf", "nr documento", "nr.documento", "nrdocumento", "registro", "matricula", "matrícula", "id", "c.p.f"]
 const NOME_NAMES = ["nome", "name", "funcionario", "funcionário", "colaborador", "empregado", "trabalhador", "nomefuncionario", "nome funcionário", "nome funcionario", "servidor", "beneficiario", "beneficiário"]
 const VALOR_NAMES = ["valor", "total", "liquido", "líquido", "bruto", "vencimento", "salario", "salário", "remuneracao", "remuneração", "pagamento", "totalvencimentos", "total vencimentos", "vlr", "vlrliquido", "vlrbruto", "proventos", "creditado", "valor pago", "vlr.pago"]
-const TELEFONE_NAMES = ["telefone", "fone", "celular", "cel", "phone", "contato", "tel", "whatsapp", "zap", "fone/cel", "cel/fone", "numero", "número"]
-const CARGO_NAMES = ["cargo", "função", "funcao", "ocupação", "ocupacao", "atividade", "posição", "posicao", "função/cargo", "cargo/função"]
+const TELEFONE_NAMES = ["telefone", "fone", "celular", "cel", "phone", "contato", "tel", "whatsapp", "zap", "fone/cel", "cel/fone", "numero", "número", "tel.", "cel.", "contato 1", "contato 2", "tel_contato", "telefone residencial", "telefone celular"]
+const CARGO_NAMES = ["cargo", "função", "funcao", "ocupação", "ocupacao", "atividade", "posição", "posicao", "função/cargo", "cargo/função", "descr cargo", "descrição cargo", "cbo", "car.", "func.", "cargo atual", "função atual", "profissão", "profissao"]
 
 function matchHeader(header: string, candidates: string[]): boolean {
     const h = header.toLowerCase().trim().replace(/\s+/g, " ")
@@ -97,6 +108,32 @@ function detectColumns(
         }
     }
 
+    // 5th pass: find phone column = numeric, length 8-15, starts with a common prefix or just digits
+    if (telefoneIdx === -1) {
+        for (let col = 0; col < headers.length; col++) {
+            if (col === cpfIdx || col === nomeIdx || col === valorIdx) continue
+            const sample = rows.slice(0, 10)
+            const telHits = sample.filter((r) => {
+                const v = String(r[headers[col]] ?? "").replace(/\D/g, "")
+                return v.length >= 8 && v.length <= 15
+            }).length
+            if (telHits >= sample.length * 0.3) { telefoneIdx = col; break }
+        }
+    }
+
+    // 6th pass: find cargo column = string, not cpf/nome/valor/telefone
+    if (cargoIdx === -1) {
+        for (let col = 0; col < headers.length; col++) {
+            if (col === cpfIdx || col === nomeIdx || col === valorIdx || col === telefoneIdx) continue
+            const sample = rows.slice(0, 10)
+            const strHits = sample.filter((r) => {
+                const val = String(r[headers[col]] ?? "").trim()
+                return looksLikeProfession(val) && !val.includes("@")
+            }).length
+            if (strHits >= sample.length * 0.4) { cargoIdx = col; break }
+        }
+    }
+
     return { cpfIdx, nomeIdx, valorIdx, telefoneIdx, cargoIdx }
 }
 
@@ -128,8 +165,19 @@ export async function POST(req: NextRequest) {
             const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" })
             if (rawRows.length === 0) continue
 
-            const headers = Object.keys(rawRows[0])
+            const headers = Object.keys(rawRows[0] || {})
             const { cpfIdx, nomeIdx, valorIdx, telefoneIdx, cargoIdx } = detectColumns(headers, rawRows)
+
+            console.log(`[Analyze] Sheet: ${sheetName}`, {
+                headers,
+                detected: {
+                    cpf: cpfIdx !== -1 ? headers[cpfIdx] : "MISSING",
+                    nome: nomeIdx !== -1 ? headers[nomeIdx] : "MISSING",
+                    valor: valorIdx !== -1 ? headers[valorIdx] : "MISSING",
+                    telefone: telefoneIdx !== -1 ? headers[telefoneIdx] : "MISSING",
+                    cargo: cargoIdx !== -1 ? headers[cargoIdx] : "MISSING"
+                }
+            })
 
             debugInfo.push({
                 sheet: sheetName,
@@ -155,9 +203,8 @@ export async function POST(req: NextRequest) {
                 const telefone = telefoneIdx !== -1
                     ? String(row[headers[telefoneIdx]] ?? "").replace(/\D/g, "").slice(0, 20) || undefined
                     : undefined
-                const cargo = cargoIdx !== -1
-                    ? String(row[headers[cargoIdx]] ?? "").trim() || undefined
-                    : undefined
+                const cargoRaw = cargoIdx !== -1 ? String(row[headers[cargoIdx]] ?? "").trim() : ""
+                const cargo = (cargoRaw && looksLikeProfession(cargoRaw)) ? toTitleCase(cargoRaw) : undefined
                 allRows.push({ cpf, nome, valor, sheet: sheetName, telefone, cargo })
 
                 const entry = sheetMap.get(sheetName) ?? { count: 0, total: 0 }
@@ -179,6 +226,9 @@ export async function POST(req: NextRequest) {
                 if (existing.sheet !== row.sheet) {
                     existing.sheet = "várias"
                 }
+                // Merge phone and cargo if missing in the first row
+                if (!existing.telefone && row.telefone) existing.telefone = row.telefone
+                if (!existing.cargo && row.cargo) existing.cargo = row.cargo
                 duplicateCpfs.add(row.cpf)
             } else {
                 aggregatedMap.set(row.cpf, { ...row, isAggregated: false })
@@ -254,6 +304,12 @@ export async function POST(req: NextRequest) {
             sheetSummary.push({ sheet, count: inSheet.length, total: inSheet.reduce((s, r) => s + r.valor, 0) })
         }
 
+        console.log(`[Analyze] Final response:`, {
+            foundCount: found.length,
+            missingCount: missing.length,
+            hasDebug: !!debugInfo,
+            hasCargoInDebug: debugInfo.some(s => !!(s.detected as any).cargo)
+        })
         return NextResponse.json({ found, missing, total, sheetSummary, duplicates, phoneUpdates, debug: debugInfo })
     } catch (e: any) {
         console.error("[ANALYZE_ROUTE] Unhandled error:", e)
