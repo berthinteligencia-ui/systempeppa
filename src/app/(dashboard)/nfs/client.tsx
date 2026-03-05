@@ -27,6 +27,17 @@ type NF = {
   createdAt: Date | string
 }
 
+type Form = {
+  numero: string
+  tomador: string
+  cnpj: string
+  valor: string
+  dataEmissao: string
+  descricao: string
+}
+
+const FORM_EMPTY: Form = { numero: "", tomador: "", cnpj: "", valor: "", dataEmissao: "", descricao: "" }
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtBRL(n: number | string) {
@@ -37,10 +48,10 @@ function fmtDate(d: Date | string) {
 }
 
 const STATUS_CONFIG: Record<NfStatus, { label: string; icon: React.ReactNode; cls: string }> = {
-  PENDENTE: { label: "Pendente", icon: <Clock className="h-3 w-3" />, cls: "bg-amber-100 text-amber-700" },
-  ANALISADA: { label: "Analisada", icon: <Eye className="h-3 w-3" />, cls: "bg-blue-100 text-blue-700" },
-  APROVADA: { label: "Aprovada", icon: <CheckCircle2 className="h-3 w-3" />, cls: "bg-emerald-100 text-emerald-700" },
-  REJEITADA: { label: "Rejeitada", icon: <XCircle className="h-3 w-3" />, cls: "bg-red-100 text-red-700" },
+  PENDENTE:  { label: "Pendente",  icon: <Clock       className="h-3 w-3" />, cls: "bg-amber-100 text-amber-700"   },
+  ANALISADA: { label: "Analisada", icon: <Eye         className="h-3 w-3" />, cls: "bg-blue-100 text-blue-700"     },
+  APROVADA:  { label: "Aprovada",  icon: <CheckCircle2 className="h-3 w-3" />, cls: "bg-emerald-100 text-emerald-700" },
+  REJEITADA: { label: "Rejeitada", icon: <XCircle     className="h-3 w-3" />, cls: "bg-red-100 text-red-700"       },
 }
 
 function StatusBadge({ status }: { status: NfStatus }) {
@@ -62,7 +73,7 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
   const [isExtracting, setIsExtracting] = useState(false)
   const [pdfFile, setPdfFile] = useState<File | null>(null)
   const [isDragging, setIsDragging] = useState(false)
-  const [form, setForm] = useState({ numero: "", emitente: "", valor: "", dataEmissao: "", descricao: "" })
+  const [form, setForm] = useState<Form>(FORM_EMPTY)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // ── PDF drag & drop ────────────────────────────────────────────────────────
@@ -70,19 +81,18 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
   async function handlePdfFile(file: File) {
     if (file.type !== "application/pdf") { alert("Envie apenas arquivos PDF."); return }
     setPdfFile(file)
-
     setIsExtracting(true)
     try {
       const fd = new FormData()
       fd.append("file", file)
       const data = await extractNfData(fd)
-
       setForm({
         numero: data.numero || "",
-        emitente: data.emitente || "",
+        tomador: data.tomador || "",
+        cnpj: data.cnpj || "",
         valor: data.valor?.toString() || "",
         dataEmissao: data.dataEmissao || "",
-        descricao: data.descricao || ""
+        descricao: data.descricao || "",
       })
     } catch (err: any) {
       alert("Erro ao extrair dados: " + err.message)
@@ -100,20 +110,21 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!form.numero || !form.emitente || !form.valor || !form.dataEmissao) {
+    if (!form.numero || !form.tomador || !form.valor || !form.dataEmissao) {
       alert("Preencha todos os campos obrigatórios."); return
     }
     setIsSaving(true)
     try {
+      const emitente = form.cnpj ? `${form.tomador} - ${form.cnpj}` : form.tomador
       const nf = await createNotaFiscal({
         numero: form.numero,
-        emitente: form.emitente,
+        emitente,
         valor: parseFloat(form.valor.replace(",", ".")),
         dataEmissao: form.dataEmissao,
         descricao: form.descricao || undefined,
       })
       setNfs(prev => [nf as unknown as NF, ...prev])
-      setForm({ numero: "", emitente: "", valor: "", dataEmissao: "", descricao: "" })
+      setForm(FORM_EMPTY)
       setPdfFile(null)
     } catch (err: any) {
       alert("Erro ao salvar NF: " + err.message)
@@ -122,14 +133,12 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
     }
   }
 
-  // ── Status update ─────────────────────────────────────────────────────────
+  // ── Status / Delete ────────────────────────────────────────────────────────
 
   async function handleStatus(id: string, status: NfStatus) {
     await updateNotaFiscalStatus(id, status)
     setNfs(prev => prev.map(n => n.id === id ? { ...n, status } : n))
   }
-
-  // ── Delete ────────────────────────────────────────────────────────────────
 
   async function handleDelete(id: string) {
     if (!confirm("Excluir esta nota fiscal?")) return
@@ -156,9 +165,9 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
         <p className="text-sm text-slate-500">Receba e gerencie documentos fiscais</p>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[420px_1fr]">
+      <div className="grid gap-6 lg:grid-cols-[400px_1fr]">
 
-        {/* ── COLUNA ESQUERDA: upload + formulário ────────────────────── */}
+        {/* ── COLUNA ESQUERDA: upload + formulário ──────────────────────── */}
         <div className="space-y-4">
 
           {/* PDF Upload */}
@@ -173,7 +182,7 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
                 onDragLeave={() => setIsDragging(false)}
                 onDrop={onDrop}
                 onClick={() => fileInputRef.current?.click()}
-                className={`flex min-h-[160px] cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed transition-all ${isDragging ? "border-blue-500 bg-blue-50" : "border-slate-200 bg-slate-50 hover:border-blue-400 hover:bg-blue-50/40"}`}
+                className={`flex min-h-[140px] cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed transition-all ${isDragging ? "border-blue-500 bg-blue-50" : "border-slate-200 bg-slate-50 hover:border-blue-400 hover:bg-blue-50/40"}`}
               >
                 <input
                   ref={fileInputRef}
@@ -182,7 +191,7 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
                   className="hidden"
                   onChange={e => { const f = e.target.files?.[0]; if (f) handlePdfFile(f) }}
                 />
-                <FileUp className={`mb-3 h-8 w-8 ${isDragging ? "text-blue-500" : "text-slate-300"}`} />
+                <FileUp className={`mb-2 h-8 w-8 ${isDragging ? "text-blue-500" : "text-slate-300"}`} />
                 <p className="text-sm font-medium text-slate-600">{isDragging ? "Solte o PDF aqui" : "Arraste ou clique para selecionar"}</p>
                 <p className="mt-1 text-xs text-slate-400">Apenas arquivos .pdf</p>
               </div>
@@ -196,7 +205,7 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
                       <p className="text-xs text-slate-400">{(pdfFile.size / 1024).toFixed(1)} KB</p>
                     </div>
                   </div>
-                  <button onClick={() => setPdfFile(null)} className="text-slate-400 hover:text-red-500">
+                  <button onClick={() => { setPdfFile(null); setForm(FORM_EMPTY) }} className="text-slate-400 hover:text-red-500">
                     <XCircle className="h-5 w-5" />
                   </button>
                 </div>
@@ -214,6 +223,7 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <h3 className="font-semibold text-slate-800 mb-4">Dados da Nota Fiscal</h3>
             <form onSubmit={handleSubmit} className="space-y-4">
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <Label>Número NF <span className="text-red-500">*</span></Label>
@@ -232,22 +242,34 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
                   />
                 </div>
               </div>
+
               <div className="space-y-1.5">
-                <Label>Tomador / CNPJ <span className="text-red-500">*</span></Label>
+                <Label>Tomador <span className="text-red-500">*</span></Label>
                 <Input
-                  placeholder="Nome do Tomador e CNPJ"
-                  value={form.emitente}
-                  onChange={e => setForm(f => ({ ...f, emitente: e.target.value }))}
+                  placeholder="Nome ou razão social do tomador"
+                  value={form.tomador}
+                  onChange={e => setForm(f => ({ ...f, tomador: e.target.value }))}
                 />
               </div>
+
               <div className="space-y-1.5">
-                <Label>Valor (R$) <span className="text-red-500">*</span></Label>
+                <Label>CNPJ do Tomador</Label>
+                <Input
+                  placeholder="00.000.000/0000-00"
+                  value={form.cnpj}
+                  onChange={e => setForm(f => ({ ...f, cnpj: e.target.value }))}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Valor Retido (R$) <span className="text-red-500">*</span></Label>
                 <Input
                   placeholder="0,00"
                   value={form.valor}
                   onChange={e => setForm(f => ({ ...f, valor: e.target.value }))}
                 />
               </div>
+
               <div className="space-y-1.5">
                 <Label>Descrição / Observação</Label>
                 <textarea
@@ -258,6 +280,7 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
                   className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                 />
               </div>
+
               <Button type="submit" disabled={isSaving} className="w-full bg-blue-600 hover:bg-blue-700 gap-2">
                 {isSaving ? "Salvando..." : <><Upload className="h-4 w-4" /> Registrar Nota Fiscal</>}
               </Button>
@@ -265,7 +288,7 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
           </div>
         </div>
 
-        {/* ── COLUNA DIREITA: lista ────────────────────────────────────── */}
+        {/* ── COLUNA DIREITA: lista ──────────────────────────────────────── */}
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h3 className="font-semibold text-slate-800 flex items-center gap-2">
@@ -305,54 +328,63 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
                 <p className="text-sm font-medium">Nenhuma nota fiscal encontrada</p>
               </div>
             ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                    <th className="px-4 py-3">Número</th>
-                    <th className="px-4 py-3">Tomador / CNPJ</th>
-                    <th className="px-4 py-3">Emissão</th>
-                    <th className="px-4 py-3 text-right">Valor</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">Alterar</th>
-                    <th className="px-4 py-3" />
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {filtered.map(nf => (
-                    <tr key={nf.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-4 py-3 font-mono font-semibold text-slate-800">{nf.numero}</td>
-                      <td className="px-4 py-3 text-slate-600 max-w-[160px] truncate">{nf.emitente}</td>
-                      <td className="px-4 py-3 text-slate-500">{fmtDate(nf.dataEmissao)}</td>
-                      <td className="px-4 py-3 text-right font-bold text-slate-800">{fmtBRL(nf.valor)}</td>
-                      <td className="px-4 py-3"><StatusBadge status={nf.status} /></td>
-                      <td className="px-4 py-3">
-                        <div className="relative inline-block">
-                          <select
-                            value={nf.status}
-                            onChange={e => handleStatus(nf.id, e.target.value as NfStatus)}
-                            className="appearance-none rounded-lg border border-slate-200 bg-white py-1.5 pl-3 pr-7 text-xs font-medium text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
-                          >
-                            <option value="PENDENTE">Pendente</option>
-                            <option value="ANALISADA">Analisada</option>
-                            <option value="APROVADA">Aprovada</option>
-                            <option value="REJEITADA">Rejeitada</option>
-                          </select>
-                          <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400" />
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <button
-                          onClick={() => handleDelete(nf.id)}
-                          className="text-slate-300 hover:text-red-500 transition-colors"
-                          title="Excluir"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                      <th className="px-4 py-3">Número</th>
+                      <th className="px-4 py-3">Tomador</th>
+                      <th className="px-4 py-3">CNPJ</th>
+                      <th className="px-4 py-3">Emissão</th>
+                      <th className="px-4 py-3 text-right">Valor</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Alterar</th>
+                      <th className="px-4 py-3" />
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y">
+                    {filtered.map(nf => {
+                      const [tomador, cnpj] = nf.emitente.includes(" - ")
+                        ? nf.emitente.split(" - ", 2)
+                        : [nf.emitente, ""]
+                      return (
+                        <tr key={nf.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="px-4 py-3 font-mono font-semibold text-slate-800">{nf.numero}</td>
+                          <td className="px-4 py-3 text-slate-600 max-w-[160px] truncate">{tomador}</td>
+                          <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{cnpj || "—"}</td>
+                          <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{fmtDate(nf.dataEmissao)}</td>
+                          <td className="px-4 py-3 text-right font-bold text-slate-800 whitespace-nowrap">{fmtBRL(nf.valor)}</td>
+                          <td className="px-4 py-3"><StatusBadge status={nf.status} /></td>
+                          <td className="px-4 py-3">
+                            <div className="relative inline-block">
+                              <select
+                                value={nf.status}
+                                onChange={e => handleStatus(nf.id, e.target.value as NfStatus)}
+                                className="appearance-none rounded-lg border border-slate-200 bg-white py-1.5 pl-3 pr-7 text-xs font-medium text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                              >
+                                <option value="PENDENTE">Pendente</option>
+                                <option value="ANALISADA">Analisada</option>
+                                <option value="APROVADA">Aprovada</option>
+                                <option value="REJEITADA">Rejeitada</option>
+                              </select>
+                              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400" />
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <button
+                              onClick={() => handleDelete(nf.id)}
+                              className="text-slate-300 hover:text-red-500 transition-colors"
+                              title="Excluir"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
 

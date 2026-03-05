@@ -111,14 +111,10 @@ export async function extractNfData(formData: FormData) {
 
     const parsed = JSON.parse(resultText)
 
-    // Combine Tomador and CNPJ for the emitente field
-    const tomadorInfo = parsed.tomador && parsed.cnpjTomador
-      ? `${parsed.tomador} - ${parsed.cnpjTomador}`
-      : (parsed.tomador || parsed.cnpjTomador || "")
-
     return {
       numero: String(parsed.numero || ""),
-      emitente: String(tomadorInfo),
+      tomador: String(parsed.tomador || ""),
+      cnpj: String(parsed.cnpjTomador || ""),
       valor: parseFloat(String(parsed.valorRetido || 0).replace(",", ".")) || 0,
       dataEmissao: String(parsed.dataEmissao || ""),
       descricao: String(parsed.descricao || "")
