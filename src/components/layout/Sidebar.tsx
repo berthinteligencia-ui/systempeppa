@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useSession, signOut } from "next-auth/react"
+import { useState, useRef, useEffect } from "react"
 import {
   LayoutDashboard,
   Building2,
@@ -16,6 +17,8 @@ import {
   MessageSquare,
   FileText,
   Receipt,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -45,6 +48,18 @@ export function Sidebar() {
   const pathname = usePathname()
   const { data: session } = useSession()
   const user = session?.user
+  const [collapsed, setCollapsed] = useState(false)
+  const sidebarRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (!collapsed && sidebarRef.current && !sidebarRef.current.contains(e.target as Node)) {
+        setCollapsed(true)
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => document.removeEventListener("mousedown", handleClickOutside)
+  }, [collapsed])
 
   const NavItem = ({
     href,
@@ -55,32 +70,42 @@ export function Sidebar() {
     label: string
     icon: React.ElementType
   }) => (
-    <Link href={href}>
+    <Link href={href} title={collapsed ? label : undefined}>
       <span
         className={cn(
-          "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
+          "flex items-center rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
+          collapsed ? "justify-center gap-0" : "gap-3",
           pathname === href
             ? "bg-blue-600 text-white shadow-sm"
             : "text-slate-300 hover:bg-white/10 hover:text-white"
         )}
       >
         <Icon className="h-4 w-4 shrink-0" />
-        {label}
+        {!collapsed && <span>{label}</span>}
       </span>
     </Link>
   )
 
   return (
-    <aside className="flex h-screen w-64 flex-col" style={{ backgroundColor: "#152138" }}>
+    <aside
+      ref={sidebarRef}
+      className={cn(
+        "flex h-screen flex-col transition-all duration-300",
+        collapsed ? "w-16" : "w-64"
+      )}
+      style={{ backgroundColor: "#152138" }}
+    >
       {/* Logo */}
-      <div className="flex items-center gap-3 px-5 py-5">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600">
+      <div className={cn("flex items-center py-5", collapsed ? "justify-center px-2" : "gap-3 px-5")}>
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-600">
           <Landmark className="h-5 w-5 text-white" />
         </div>
-        <div>
-          <p className="text-sm font-bold text-white uppercase tracking-wider">PEPACORP</p>
-          <p className="text-[10px] text-slate-400 font-medium">Controle Financeiro</p>
-        </div>
+        {!collapsed && (
+          <div>
+            <p className="text-sm font-bold text-white uppercase tracking-wider">PEPACORP</p>
+            <p className="text-[10px] text-slate-400 font-medium">Controle Financeiro</p>
+          </div>
+        )}
       </div>
 
       <div className="mx-4 border-t border-white/10" />
@@ -91,34 +116,69 @@ export function Sidebar() {
           <NavItem key={item.href} {...item} />
         ))}
 
-        <p className="mt-4 px-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
-          Administração
-        </p>
+        {!collapsed && (
+          <p className="mt-4 px-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+            Administração
+          </p>
+        )}
+        {collapsed && <div className="mt-4 mx-1 border-t border-white/10" />}
         {adminNav.map((item) => (
           <NavItem key={item.href} {...item} />
         ))}
       </nav>
 
+      {/* Collapse toggle */}
+      <div className="mx-4 border-t border-white/10" />
+      <div className={cn("flex py-2", collapsed ? "justify-center" : "justify-end px-2")}>
+        <button
+          onClick={() => setCollapsed(!collapsed)}
+          className="rounded-lg p-2 text-slate-400 hover:bg-white/10 hover:text-white transition-colors"
+          title={collapsed ? "Expandir menu" : "Recolher menu"}
+        >
+          {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+        </button>
+      </div>
+
       {/* User profile */}
       <div className="mx-4 border-t border-white/10" />
-      <div className="flex items-center gap-3 px-4 py-4">
-        <Avatar className="h-9 w-9 shrink-0">
+      <div className={cn("flex items-center py-4", collapsed ? "justify-center px-2" : "gap-3 px-4")}>
+        <Avatar className="h-9 w-9 shrink-0" title={collapsed ? (user?.name ?? "Usuário") : undefined}>
           <AvatarFallback className="bg-blue-600 text-xs text-white">
             {user?.name ? initials(user.name) : "??"}
           </AvatarFallback>
         </Avatar>
-        <div className="flex-1 overflow-hidden">
-          <p className="truncate text-sm font-medium text-white">{user?.name ?? "Usuário"}</p>
-          <p className="truncate text-xs text-slate-400">{user?.role ?? "RH"}</p>
-        </div>
-        <button
-          onClick={() => signOut({ callbackUrl: "/login" })}
-          className="text-slate-400 transition-colors hover:text-white"
-          title="Sair"
-        >
-          <LogOut className="h-4 w-4" />
-        </button>
+        {!collapsed && (
+          <>
+            <div className="flex-1 overflow-hidden">
+              <p className="truncate text-sm font-medium text-white">{user?.name ?? "Usuário"}</p>
+              <p className="truncate text-xs text-slate-400">{user?.role ?? "RH"}</p>
+            </div>
+            <button
+              onClick={() => signOut({ callbackUrl: "/login" })}
+              className="text-slate-400 transition-colors hover:text-white"
+              title="Sair"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          </>
+        )}
+        {collapsed && (
+          <div className="sr-only">
+            <button onClick={() => signOut({ callbackUrl: "/login" })}>Sair</button>
+          </div>
+        )}
       </div>
+      {collapsed && (
+        <div className="flex justify-center pb-3">
+          <button
+            onClick={() => signOut({ callbackUrl: "/login" })}
+            className="text-slate-400 transition-colors hover:text-white"
+            title="Sair"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
+        </div>
+      )}
     </aside>
   )
 }
