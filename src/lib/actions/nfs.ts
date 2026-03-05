@@ -3,9 +3,6 @@
 import { prisma } from "@/lib/prisma"
 import { auth } from "@/lib/auth"
 import { revalidatePath } from "next/cache"
-import { createRequire } from "module"
-
-const require = createRequire(import.meta.url)
 
 export type NfStatus = "PENDENTE" | "ANALISADA" | "APROVADA" | "REJEITADA"
 
@@ -81,11 +78,11 @@ export async function extractNfData(formData: FormData) {
   if (!apiKey) throw new Error("Chave de API da OpenAI (OPENAI_API_KEY) não configurada no .env")
 
   const { OpenAI } = await import("openai")
-  const pdfParse = require("pdf-parse") as (buffer: Buffer) => Promise<{ text: string }>
 
   const openai = new OpenAI({ apiKey })
 
   const buffer = Buffer.from(await file.arrayBuffer())
+  const pdfParse = require("pdf-parse")
   const data = await pdfParse(buffer)
   const textContent = data.text
 
