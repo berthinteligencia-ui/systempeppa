@@ -1,6 +1,6 @@
 "use server"
 
-import { getPrisma } from "@/lib/prisma"
+import { prisma } from "@/lib/prisma"
 import { auth } from "@/lib/auth"
 import { revalidatePath } from "next/cache"
 
@@ -18,7 +18,7 @@ export async function createNotaFiscal(data: NotaFiscalInput) {
   const session = await auth()
   if (!session?.user?.companyId) throw new Error("Não autorizado")
 
-  const prisma = getPrisma()
+  const prisma = prisma
   const nf = await prisma.notaFiscal.create({
     data: {
       numero: data.numero,
@@ -39,7 +39,7 @@ export async function listNotasFiscais() {
   const session = await auth()
   if (!session?.user?.companyId) throw new Error("Não autorizado")
 
-  const prisma = getPrisma()
+  const prisma = prisma
   return prisma.notaFiscal.findMany({
     where: { companyId: session.user.companyId },
     orderBy: { createdAt: "desc" },
@@ -50,7 +50,7 @@ export async function updateNotaFiscalStatus(id: string, status: NfStatus) {
   const session = await auth()
   if (!session?.user?.companyId) throw new Error("Não autorizado")
 
-  const prisma = getPrisma()
+  const prisma = prisma
   await prisma.notaFiscal.update({
     where: { id, companyId: session.user.companyId },
     data: { status },
@@ -63,7 +63,7 @@ export async function deleteNotaFiscal(id: string) {
   const session = await auth()
   if (!session?.user?.companyId) throw new Error("Não autorizado")
 
-  const prisma = getPrisma()
+  const prisma = prisma
   await prisma.notaFiscal.delete({
     where: { id, companyId: session.user.companyId },
   })
