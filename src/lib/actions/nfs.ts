@@ -81,15 +81,15 @@ export async function extractNfData(formData: FormData) {
 
   const openai = new OpenAI({ apiKey })
 
-  const buffer = Buffer.from(await file.arrayBuffer())
-  const pdfParse = require("pdf-parse")
-  const data = await pdfParse(buffer)
-  const textContent = data.text
+  const buffer = await file.arrayBuffer()
+  const { extractText } = await import("unpdf")
+  const { text: textContent } = await extractText(new Uint8Array(buffer))
 
   const prompt = `Analise o texto abaixo extraído de uma Nota Fiscal e extraia os seguintes dados em formato JSON puro, sem markdown:
   - numero: o número da nota (string)
-  - emitente: nome ou razão social de quem emitiu (string)
-  - valor: o valor total da nota (number)
+  - tomador: nome ou razão social do tomador do serviço (string)
+  - cnpjTomador: CNPJ do tomador do serviço (string)
+  - valorRetido: especificamente o valor da "Contribuição Previdenciária - Retida" (number)
   - dataEmissao: data de emissão no formato YYYY-MM-DD (string)
   - descricao: um breve resumo dos serviços ou produtos (string)
 
@@ -111,10 +111,15 @@ export async function extractNfData(formData: FormData) {
 
     const parsed = JSON.parse(resultText)
 
+    // Combine Tomador and CNPJ for the emitente field
+    const tomadorInfo = parsed.tomador && parsed.cnpjTomador
+      ? `${parsed.tomador} - ${parsed.cnpjTomador}`
+      : (parsed.tomador || parsed.cnpjTomador || "")
+
     return {
       numero: String(parsed.numero || ""),
-      emitente: String(parsed.emitente || ""),
-      valor: parseFloat(String(parsed.valor).replace(",", ".")) || 0,
+      emitente: String(tomadorInfo),
+      valor: parseFloat(String(parsed.valorRetido || 0).replace(",", ".")) || 0,
       dataEmissao: String(parsed.dataEmissao || ""),
       descricao: String(parsed.descricao || "")
     }

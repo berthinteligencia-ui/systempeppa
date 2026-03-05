@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback } from "react"
 import {
-  FileText, Upload, List, CheckCircle2, XCircle,
+  FileText, Upload, CheckCircle2, XCircle,
   Clock, Search, Trash2, ChevronDown, Eye, FileUp,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -55,7 +55,6 @@ function StatusBadge({ status }: { status: NfStatus }) {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
-  const [tab, setTab] = useState<"receber" | "lista">("receber")
   const [nfs, setNfs] = useState<NF[]>(initialNfs)
   const [search, setSearch] = useState("")
   const [filterStatus, setFilterStatus] = useState<NfStatus | "">("")
@@ -116,7 +115,6 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
       setNfs(prev => [nf as unknown as NF, ...prev])
       setForm({ numero: "", emitente: "", valor: "", dataEmissao: "", descricao: "" })
       setPdfFile(null)
-      setTab("lista")
     } catch (err: any) {
       alert("Erro ao salvar NF: " + err.message)
     } finally {
@@ -253,9 +251,9 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
                 </div>
               </div>
               <div className="space-y-1.5">
-                <Label>Emitente <span className="text-red-500">*</span></Label>
+                <Label>Tomador / CNPJ <span className="text-red-500">*</span></Label>
                 <Input
-                  placeholder="Nome ou CNPJ do emitente"
+                  placeholder="Nome do Tomador e CNPJ"
                   value={form.emitente}
                   onChange={e => setForm(f => ({ ...f, emitente: e.target.value }))}
                 />
@@ -328,7 +326,7 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
                 <thead>
                   <tr className="border-b bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                     <th className="px-5 py-3">Número</th>
-                    <th className="px-5 py-3">Emitente</th>
+                    <th className="px-5 py-3">Tomador / CNPJ</th>
                     <th className="px-5 py-3">Emissão</th>
                     <th className="px-5 py-3 text-right">Valor</th>
                     <th className="px-5 py-3">Status</th>
