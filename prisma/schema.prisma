@@ -61,6 +61,7 @@ model Company {
   settings        Settings?
   conversations   Conversation[]
   backups         Backup[]
+  notasFiscais    NotaFiscal[]
 }
 
 model Settings {
@@ -194,4 +195,25 @@ model Backup {
   createdAt  DateTime @default(now())
   companyId  String
   company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+}
+
+model NotaFiscal {
+  id          String   @id @default(cuid())
+  numero      String
+  emitente    String
+  valor       Decimal  @db.Decimal(10, 2)
+  dataEmissao DateTime
+  descricao   String?
+  status      NfStatus @default(PENDENTE)
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+enum NfStatus {
+  PENDENTE
+  ANALISADA
+  APROVADA
+  REJEITADA
 }
