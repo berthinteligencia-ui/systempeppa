@@ -72,13 +72,13 @@ function fmtPhone(p: string | null) {
 }
 
 // Column detection for import
-const NAME_COLS = ["nome", "name", "funcionario", "funcionário", "colaborador", "empregado"]
-const CPF_COLS = ["cpf", "doc", "documento", "cpf/cnpj", "registro", "matricula", "matrícula"]
-const PHONE_COLS = ["telefone", "fone", "celular", "cel", "phone", "whatsapp", "zap"]
-const EMAIL_COLS = ["email", "e-mail", "mail", "correio"]
-const POSITION_COLS = ["cargo", "position", "funcao", "função", "ocupacao", "ocupação", "atividade"]
-const SALARY_COLS = ["salario", "salário", "salary", "remuneracao", "remuneração", "vencimento", "pagamento", "valor"]
-const DEPT_COLS = ["unidade", "departamento", "setor", "department", "dept", "lotacao", "lotação"]
+const NAME_COLS = ["nome", "name", "funcionario", "funcionário", "colaborador", "empregado", "nome completo", "trabalhador"]
+const CPF_COLS = ["cpf", "doc", "documento", "cpf/cnpj", "registro", "matricula", "matrícula", "identidade"]
+const PHONE_COLS = ["telefone", "fone", "celular", "cel", "phone", "whatsapp", "zap", "contato"]
+const EMAIL_COLS = ["email", "e-mail", "mail", "correio", "endereço eletrônico"]
+const POSITION_COLS = ["cargo", "position", "funcao", "função", "ocupacao", "ocupação", "atividade", "setor/função"]
+const SALARY_COLS = ["salario", "salário", "salary", "remuneracao", "remuneração", "vencimento", "pagamento", "valor", "base", "líquido", "bruto"]
+const DEPT_COLS = ["unidade", "departamento", "setor", "department", "dept", "lotacao", "lotação", "filial", "estabelecimento"]
 
 function matchCol(header: string, candidates: string[]) {
   const h = header.toLowerCase().trim().replace(/\s+/g, " ")
@@ -109,8 +109,14 @@ function parseImportRows(rawRows: Record<string, unknown>[], headers: string[], 
       const name = String(r[headers[nameIdx]] ?? "").trim()
       if (!name) return null
 
+      // Improved CPF cleaning: remove non-digits, take 11 digits
       const cpfRaw = cpfIdx !== -1 ? String(r[headers[cpfIdx]] ?? "").replace(/\D/g, "") : ""
-      const cpf = cpfRaw.length >= 11 ? cpfRaw.slice(0, 11).padStart(11, "0") : undefined
+      let cpf = undefined
+      if (cpfRaw.length >= 11) {
+        cpf = cpfRaw.slice(-11) // Take the last 11 digits in case of leading zeros or other garbage
+      } else if (cpfRaw.length > 0) {
+        cpf = cpfRaw.padStart(11, "0")
+      }
 
       const phone = phoneIdx !== -1
         ? String(r[headers[phoneIdx]] ?? "").replace(/\D/g, "").slice(0, 20) || undefined
@@ -124,10 +130,22 @@ function parseImportRows(rawRows: Record<string, unknown>[], headers: string[], 
         ? String(r[headers[positionIdx]] ?? "").trim() || undefined
         : undefined
 
-      const salaryRaw = salaryIdx !== -1
-        ? parseFloat(String(r[headers[salaryIdx]] ?? "0").replace(/[^\d,.-]/g, "").replace(",", "."))
-        : 0
-      const salary = isNaN(salaryRaw) ? 0 : salaryRaw
+      // Improved salary parsing: handles BRL format (1.200,50) and simple dots (1200.50)
+      const salaryStr = salaryIdx !== -1 ? String(r[headers[salaryIdx]] ?? "0") : "0"
+      let salary = 0
+      if (salaryStr) {
+        const cleanSalary = salaryStr.replace(/[^\d,.-]/g, "")
+        if (cleanSalary.includes(",") && cleanSalary.includes(".")) {
+          // Likely 1.234,56
+          salary = parseFloat(cleanSalary.replace(/\./g, "").replace(",", "."))
+        } else if (cleanSalary.includes(",")) {
+          // Likely 1234,56
+          salary = parseFloat(cleanSalary.replace(",", "."))
+        } else {
+          salary = parseFloat(cleanSalary)
+        }
+      }
+      salary = isNaN(salary) ? 0 : salary
 
       let departmentId: string | undefined
       let _deptName: string | undefined
@@ -663,32 +681,51 @@ ${rows.map((emp, i) => `<tr>
             {/* Preview table */}
             {importRows.length > 0 && (
               <div className="overflow-hidden rounded-xl border border-slate-200">
-                <div className="overflow-x-auto max-h-[300px]">
+                <div className="overflow-x-auto max-h-[350px]">
                   <table className="w-full text-sm">
-                    <thead className="sticky top-0 bg-slate-50 z-10">
+                    <thead className="sticky top-0 bg-slate-50 z-10 shadow-sm">
                       <tr className="border-b text-[11px] font-semibold uppercase tracking-wide text-slate-400 text-left">
                         <th className="px-4 py-2.5">Nome</th>
                         <th className="px-4 py-2.5">CPF</th>
-                        <th className="px-4 py-2.5">Cargo</th>
-                        <th className="px-4 py-2.5">Unidade</th>
-                        <th className="px-4 py-2.5">Telefone</th>
+                        <th className="px-5 py-2.5">Unidade / Departamento</th>
                         <th className="px-4 py-2.5 text-right">Salário</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y">
+                    <tbody className="divide-y bg-white">
                       {importRows.map((r, i) => (
-                        <tr key={i} className="hover:bg-slate-50">
-                          <td className="px-4 py-2.5 font-medium text-slate-800">{r.name}</td>
-                          <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{fmtCpf(r.cpf ?? null)}</td>
-                          <td className="px-4 py-2.5 text-slate-600">{r.position ?? "—"}</td>
+                        <tr key={i} className="hover:bg-slate-50/50">
                           <td className="px-4 py-2.5">
-                            {r._deptName ? (
-                              r.departmentId
-                                ? <span className="text-slate-600">{r._deptName}</span>
-                                : <span className="text-amber-600 text-xs">{r._deptName} (não encontrado)</span>
-                            ) : "—"}
+                            <p className="font-medium text-slate-800">{r.name}</p>
+                            <p className="text-[10px] text-slate-400 uppercase tracking-tight">{r.position || "Sem cargo"}</p>
                           </td>
-                          <td className="px-4 py-2.5 text-slate-500">{r.phone ? fmtPhone(r.phone) : "—"}</td>
+                          <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{fmtCpf(r.cpf ?? null)}</td>
+                          <td className="px-4 py-2.5">
+                            <div className="flex flex-col gap-1">
+                              <Select
+                                value={r.departmentId ?? "missing"}
+                                onValueChange={(val) => {
+                                  const next = [...importRows]
+                                  next[i] = { ...next[i], departmentId: val === "missing" ? undefined : val }
+                                  setImportRows(next)
+                                }}
+                              >
+                                <SelectTrigger className={`h-8 text-xs ${!r.departmentId ? "border-amber-200 bg-amber-50 text-amber-700" : "bg-white"}`}>
+                                  <SelectValue placeholder="Selecione a unidade..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="missing" disabled>Selecione...</SelectItem>
+                                  {departments.map((d) => (
+                                    <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              {r._deptName && !r.departmentId && (
+                                <p className="text-[10px] text-amber-600 font-medium">
+                                  Planilha: &quot;{r._deptName}&quot; (não mapeada)
+                                </p>
+                              )}
+                            </div>
+                          </td>
                           <td className="px-4 py-2.5 text-right font-semibold text-slate-800">{fmtBRL(r.salary ?? 0)}</td>
                         </tr>
                       ))}
@@ -699,23 +736,27 @@ ${rows.map((emp, i) => `<tr>
             )}
 
             {importRows.length === 0 && importFile && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                Nenhum funcionário detectado. Certifique-se de que a planilha tem uma coluna &quot;Nome&quot; com os nomes dos colaboradores.
+              <div className="flex flex-col items-center justify-center py-8 rounded-xl border border-amber-100 bg-amber-50 text-center">
+                <AlertCircle className="h-8 w-8 text-amber-500 mb-2" />
+                <p className="text-sm font-semibold text-amber-800">Nenhum funcionário detectado</p>
+                <p className="mt-1 text-xs text-amber-600 max-w-xs mx-auto">
+                  Certifique-se de que a planilha tem uma coluna chamada &quot;Nome&quot; ou similar para identificarmos os colaboradores.
+                </p>
               </div>
             )}
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setImportOpen(false)}>Cancelar</Button>
+          <DialogFooter className="bg-slate-50 -mx-6 -mb-6 p-6 rounded-b-xl border-t">
+            <Button variant="ghost" onClick={() => setImportOpen(false)} className="text-slate-500">Cancelar</Button>
             <Button
               onClick={handleConfirmImport}
               disabled={importRows.length === 0 || isImporting}
-              className="bg-blue-600 hover:bg-blue-700 gap-2"
+              className="bg-blue-600 hover:bg-blue-700 gap-2 px-8 shadow-lg shadow-blue-600/20"
             >
               {isImporting ? (
                 <><Loader2 className="h-4 w-4 animate-spin" /> Importando...</>
               ) : (
-                <><FileUp className="h-4 w-4" /> Importar {importRows.length} funcionário{importRows.length !== 1 ? "s" : ""}</>
+                <><CheckCircle2 className="h-4 w-4" /> Importar {importRows.length} {importRows.length === 1 ? 'Funcionário' : 'Funcionários'}</>
               )}
             </Button>
           </DialogFooter>
