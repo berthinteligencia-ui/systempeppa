@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
   createNotaFiscal, updateNotaFiscalStatus, deleteNotaFiscal,
+  extractNfData,
   type NfStatus,
 } from "@/lib/actions/nfs"
 
@@ -36,10 +37,10 @@ function fmtDate(d: Date | string) {
 }
 
 const STATUS_CONFIG: Record<NfStatus, { label: string; icon: React.ReactNode; cls: string }> = {
-  PENDENTE:  { label: "Pendente",  icon: <Clock className="h-3 w-3" />,        cls: "bg-amber-100 text-amber-700" },
-  ANALISADA: { label: "Analisada", icon: <Eye className="h-3 w-3" />,          cls: "bg-blue-100 text-blue-700" },
-  APROVADA:  { label: "Aprovada",  icon: <CheckCircle2 className="h-3 w-3" />, cls: "bg-emerald-100 text-emerald-700" },
-  REJEITADA: { label: "Rejeitada", icon: <XCircle className="h-3 w-3" />,      cls: "bg-red-100 text-red-700" },
+  PENDENTE: { label: "Pendente", icon: <Clock className="h-3 w-3" />, cls: "bg-amber-100 text-amber-700" },
+  ANALISADA: { label: "Analisada", icon: <Eye className="h-3 w-3" />, cls: "bg-blue-100 text-blue-700" },
+  APROVADA: { label: "Aprovada", icon: <CheckCircle2 className="h-3 w-3" />, cls: "bg-emerald-100 text-emerald-700" },
+  REJEITADA: { label: "Rejeitada", icon: <XCircle className="h-3 w-3" />, cls: "bg-red-100 text-red-700" },
 }
 
 function StatusBadge({ status }: { status: NfStatus }) {
@@ -59,19 +60,36 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
   const [search, setSearch] = useState("")
   const [filterStatus, setFilterStatus] = useState<NfStatus | "">("")
   const [isSaving, setIsSaving] = useState(false)
+  const [isExtracting, setIsExtracting] = useState(false)
   const [pdfFile, setPdfFile] = useState<File | null>(null)
   const [isDragging, setIsDragging] = useState(false)
-  const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null)
   const [form, setForm] = useState({ numero: "", emitente: "", valor: "", dataEmissao: "", descricao: "" })
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // ── PDF drag & drop ────────────────────────────────────────────────────────
 
-  function handlePdfFile(file: File) {
+  async function handlePdfFile(file: File) {
     if (file.type !== "application/pdf") { alert("Envie apenas arquivos PDF."); return }
     setPdfFile(file)
-    const url = URL.createObjectURL(file)
-    setPdfPreviewUrl(url)
+
+    setIsExtracting(true)
+    try {
+      const fd = new FormData()
+      fd.append("file", file)
+      const data = await extractNfData(fd)
+
+      setForm({
+        numero: data.numero || "",
+        emitente: data.emitente || "",
+        valor: data.valor?.toString() || "",
+        dataEmissao: data.dataEmissao || "",
+        descricao: data.descricao || ""
+      })
+    } catch (err: any) {
+      alert("Erro ao extrair dados: " + err.message)
+    } finally {
+      setIsExtracting(false)
+    }
   }
 
   const onDrop = useCallback((e: React.DragEvent) => {
@@ -97,7 +115,7 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
       })
       setNfs(prev => [nf as unknown as NF, ...prev])
       setForm({ numero: "", emitente: "", valor: "", dataEmissao: "", descricao: "" })
-      setPdfFile(null); setPdfPreviewUrl(null)
+      setPdfFile(null)
       setTab("lista")
     } catch (err: any) {
       alert("Erro ao salvar NF: " + err.message)
@@ -198,12 +216,15 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
                       <p className="text-xs text-slate-400">{(pdfFile.size / 1024).toFixed(1)} KB</p>
                     </div>
                   </div>
-                  <button onClick={() => { setPdfFile(null); setPdfPreviewUrl(null) }} className="text-slate-400 hover:text-red-500">
+                  <button onClick={() => setPdfFile(null)} className="text-slate-400 hover:text-red-500">
                     <XCircle className="h-5 w-5" />
                   </button>
                 </div>
-                {pdfPreviewUrl && (
-                  <iframe src={pdfPreviewUrl} className="h-[300px] w-full rounded-xl border border-slate-200" title="Preview NF" />
+                {isExtracting && (
+                  <div className="flex flex-col items-center justify-center py-8 gap-2 border border-slate-100 rounded-xl bg-slate-50/50">
+                    <Clock className="h-8 w-8 text-blue-500 animate-pulse" />
+                    <p className="text-sm font-medium text-slate-600">Extraindo dados com IA...</p>
+                  </div>
                 )}
               </div>
             )}

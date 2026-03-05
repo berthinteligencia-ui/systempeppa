@@ -66,3 +66,60 @@ export async function deleteNotaFiscal(id: string) {
 
   revalidatePath("/nfs")
 }
+
+export async function extractNfData(formData: FormData) {
+  const session = await auth()
+  if (!session?.user?.companyId) throw new Error("Não autorizado")
+
+  const file = formData.get("file") as File
+  if (!file) throw new Error("Arquivo não enviado")
+
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) throw new Error("Chave de API da OpenAI (OPENAI_API_KEY) não configurada no .env")
+
+  const { OpenAI } = await import("openai")
+  const pdfParse = (await import("pdf-parse")).default
+
+  const openai = new OpenAI({ apiKey })
+
+  const buffer = Buffer.from(await file.arrayBuffer())
+  const data = await pdfParse(buffer)
+  const textContent = data.text
+
+  const prompt = `Analise o texto abaixo extraído de uma Nota Fiscal e extraia os seguintes dados em formato JSON puro, sem markdown:
+  - numero: o número da nota (string)
+  - emitente: nome ou razão social de quem emitiu (string)
+  - valor: o valor total da nota (number)
+  - dataEmissao: data de emissão no formato YYYY-MM-DD (string)
+  - descricao: um breve resumo dos serviços ou produtos (string)
+
+  Texto da NF:
+  ${textContent}`
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: "Você é um assistente especializado em extração de dados fiscais brasileiros. Responda apenas com o JSON puro." },
+        { role: "user", content: prompt }
+      ],
+      response_format: { type: "json_object" }
+    })
+
+    const resultText = response.choices[0].message.content
+    if (!resultText) throw new Error("OpenAI retornou uma resposta vazia")
+
+    const parsed = JSON.parse(resultText)
+
+    return {
+      numero: String(parsed.numero || ""),
+      emitente: String(parsed.emitente || ""),
+      valor: parseFloat(String(parsed.valor).replace(",", ".")) || 0,
+      dataEmissao: String(parsed.dataEmissao || ""),
+      descricao: String(parsed.descricao || "")
+    }
+  } catch (err: any) {
+    console.error("[EXTRACT_NF] OpenAI error:", err)
+    throw new Error("Falha ao analisar a nota com OpenAI: " + err.message)
+  }
+}
