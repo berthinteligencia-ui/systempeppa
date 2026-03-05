@@ -156,28 +156,10 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
         <p className="text-sm text-slate-500">Receba e gerencie documentos fiscais</p>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1 w-fit">
-        <button
-          onClick={() => setTab("receber")}
-          className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all ${tab === "receber" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
-        >
-          <Upload className="h-4 w-4" /> Receber NF
-        </button>
-        <button
-          onClick={() => setTab("lista")}
-          className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all ${tab === "lista" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
-        >
-          <List className="h-4 w-4" /> Notas Analisadas
-          {nfs.length > 0 && (
-            <span className="rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-600">{nfs.length}</span>
-          )}
-        </button>
-      </div>
+      <div className="grid gap-6 xl:grid-cols-[420px_1fr]">
 
-      {/* ── TAB: RECEBER NF ─────────────────────────────────────────────── */}
-      {tab === "receber" && (
-        <div className="grid gap-6 lg:grid-cols-2">
+        {/* ── COLUNA ESQUERDA: upload + formulário ────────────────────── */}
+        <div className="space-y-4">
 
           {/* PDF Upload */}
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
@@ -191,7 +173,7 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
                 onDragLeave={() => setIsDragging(false)}
                 onDrop={onDrop}
                 onClick={() => fileInputRef.current?.click()}
-                className={`flex min-h-[220px] cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed transition-all ${isDragging ? "border-blue-500 bg-blue-50" : "border-slate-200 bg-slate-50 hover:border-blue-400 hover:bg-blue-50/40"}`}
+                className={`flex min-h-[160px] cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed transition-all ${isDragging ? "border-blue-500 bg-blue-50" : "border-slate-200 bg-slate-50 hover:border-blue-400 hover:bg-blue-50/40"}`}
               >
                 <input
                   ref={fileInputRef}
@@ -200,7 +182,7 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
                   className="hidden"
                   onChange={e => { const f = e.target.files?.[0]; if (f) handlePdfFile(f) }}
                 />
-                <FileUp className={`mb-3 h-10 w-10 ${isDragging ? "text-blue-500" : "text-slate-300"}`} />
+                <FileUp className={`mb-3 h-8 w-8 ${isDragging ? "text-blue-500" : "text-slate-300"}`} />
                 <p className="text-sm font-medium text-slate-600">{isDragging ? "Solte o PDF aqui" : "Arraste ou clique para selecionar"}</p>
                 <p className="mt-1 text-xs text-slate-400">Apenas arquivos .pdf</p>
               </div>
@@ -219,8 +201,8 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
                   </button>
                 </div>
                 {isExtracting && (
-                  <div className="flex flex-col items-center justify-center py-8 gap-2 border border-slate-100 rounded-xl bg-slate-50/50">
-                    <Clock className="h-8 w-8 text-blue-500 animate-pulse" />
+                  <div className="flex flex-col items-center justify-center py-6 gap-2 border border-slate-100 rounded-xl bg-slate-50/50">
+                    <Clock className="h-7 w-7 text-blue-500 animate-pulse" />
                     <p className="text-sm font-medium text-slate-600">Extraindo dados com IA...</p>
                   </div>
                 )}
@@ -282,67 +264,68 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
             </form>
           </div>
         </div>
-      )}
 
-      {/* ── TAB: LISTA ──────────────────────────────────────────────────── */}
-      {tab === "lista" && (
+        {/* ── COLUNA DIREITA: lista ────────────────────────────────────── */}
         <div className="space-y-4">
-          {/* Filters */}
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="relative flex-1 min-w-[200px] max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-              <Input
-                placeholder="Buscar por número ou emitente..."
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                className="pl-9"
-              />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+              Notas Cadastradas
+              {nfs.length > 0 && (
+                <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-bold text-slate-600">{nfs.length}</span>
+              )}
+            </h3>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <Input
+                  placeholder="Buscar..."
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  className="pl-9 w-48"
+                />
+              </div>
+              <select
+                value={filterStatus}
+                onChange={e => setFilterStatus(e.target.value as NfStatus | "")}
+                className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Todos os status</option>
+                <option value="PENDENTE">Pendente</option>
+                <option value="ANALISADA">Analisada</option>
+                <option value="APROVADA">Aprovada</option>
+                <option value="REJEITADA">Rejeitada</option>
+              </select>
             </div>
-            <select
-              value={filterStatus}
-              onChange={e => setFilterStatus(e.target.value as NfStatus | "")}
-              className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">Todos os status</option>
-              <option value="PENDENTE">Pendente</option>
-              <option value="ANALISADA">Analisada</option>
-              <option value="APROVADA">Aprovada</option>
-              <option value="REJEITADA">Rejeitada</option>
-            </select>
           </div>
 
-          {/* Table */}
           <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
             {filtered.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-slate-400">
                 <FileText className="h-12 w-12 mb-3 opacity-20" />
                 <p className="text-sm font-medium">Nenhuma nota fiscal encontrada</p>
-                <button onClick={() => setTab("receber")} className="mt-3 text-sm text-blue-600 hover:underline font-medium">
-                  Registrar primeira NF
-                </button>
               </div>
             ) : (
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                    <th className="px-5 py-3">Número</th>
-                    <th className="px-5 py-3">Tomador / CNPJ</th>
-                    <th className="px-5 py-3">Emissão</th>
-                    <th className="px-5 py-3 text-right">Valor</th>
-                    <th className="px-5 py-3">Status</th>
-                    <th className="px-5 py-3">Alterar Status</th>
-                    <th className="px-5 py-3" />
+                    <th className="px-4 py-3">Número</th>
+                    <th className="px-4 py-3">Tomador / CNPJ</th>
+                    <th className="px-4 py-3">Emissão</th>
+                    <th className="px-4 py-3 text-right">Valor</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Alterar</th>
+                    <th className="px-4 py-3" />
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {filtered.map(nf => (
                     <tr key={nf.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-5 py-3.5 font-mono font-semibold text-slate-800">{nf.numero}</td>
-                      <td className="px-5 py-3.5 text-slate-600 max-w-[180px] truncate">{nf.emitente}</td>
-                      <td className="px-5 py-3.5 text-slate-500">{fmtDate(nf.dataEmissao)}</td>
-                      <td className="px-5 py-3.5 text-right font-bold text-slate-800">{fmtBRL(nf.valor)}</td>
-                      <td className="px-5 py-3.5"><StatusBadge status={nf.status} /></td>
-                      <td className="px-5 py-3.5">
+                      <td className="px-4 py-3 font-mono font-semibold text-slate-800">{nf.numero}</td>
+                      <td className="px-4 py-3 text-slate-600 max-w-[160px] truncate">{nf.emitente}</td>
+                      <td className="px-4 py-3 text-slate-500">{fmtDate(nf.dataEmissao)}</td>
+                      <td className="px-4 py-3 text-right font-bold text-slate-800">{fmtBRL(nf.valor)}</td>
+                      <td className="px-4 py-3"><StatusBadge status={nf.status} /></td>
+                      <td className="px-4 py-3">
                         <div className="relative inline-block">
                           <select
                             value={nf.status}
@@ -357,7 +340,7 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
                           <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400" />
                         </div>
                       </td>
-                      <td className="px-5 py-3.5">
+                      <td className="px-4 py-3">
                         <button
                           onClick={() => handleDelete(nf.id)}
                           className="text-slate-300 hover:text-red-500 transition-colors"
@@ -377,7 +360,7 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
             <p className="text-xs text-slate-400 text-right">{filtered.length} nota{filtered.length > 1 ? "s" : ""} encontrada{filtered.length > 1 ? "s" : ""}</p>
           )}
         </div>
-      )}
+      </div>
     </div>
   )
 }
