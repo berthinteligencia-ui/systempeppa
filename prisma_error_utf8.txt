@@ -1,0 +1,42 @@
+﻿node.exe : warn The configuration 
+property `package.json#prisma` is 
+deprecated and will be removed in Prisma 
+7. Please migrate to a Prisma config 
+file (e.g., `prisma.config.ts`).
+No linha:1 caractere:1
++ & "C:\Program Files\nodejs/node.exe" 
+"C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecifi 
+   ed: (warn The config...ma.config.ts`  
+  ).:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeComm 
+   andError
+ 
+For more information, see: 
+https://pris.ly/prisma-config
+
+Loaded Prisma config from 
+prisma.config.ts.
+
+warn The Prisma config file in 
+prisma.config.ts overrides the 
+deprecated `package.json#prisma` 
+property in package.json.
+  For more information, see: 
+https://pris.ly/prisma-config
+
+Prisma config detected, skipping 
+environment variable loading.
+Prisma schema loaded from prisma\schema.prisma
+Error: 
+Cannot find module 'C:\PROJETOS\folhapro\
+pepacorpatual\node_modules\@prisma\client
+\runtime\query_engine_bg.postgresql.wasm-
+base64.js'
+Require stack:
+- C:\PROJETOS\folhapro\pepacorpatual\node
+_modules\prisma\build\index.js
+
+
