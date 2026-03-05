@@ -185,7 +185,7 @@ export async function getEmployeeByCpf(cpf: string) {
   const supabase = getSupabaseAdmin()
   const { data } = await supabase
     .from("Employee")
-    .select("id, name, cpf, phone")
+    .select("id, name, cpf, phone, position")
     .eq("cpf", cleanCpf)
     .eq("companyId", companyId)
     .maybeSingle()

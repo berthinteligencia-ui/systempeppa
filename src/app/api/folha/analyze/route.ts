@@ -121,18 +121,8 @@ function detectColumns(
         }
     }
 
-    // 6th pass: find cargo column = string, not cpf/nome/valor/telefone
-    if (cargoIdx === -1) {
-        for (let col = 0; col < headers.length; col++) {
-            if (col === cpfIdx || col === nomeIdx || col === valorIdx || col === telefoneIdx) continue
-            const sample = rows.slice(0, 10)
-            const strHits = sample.filter((r) => {
-                const val = String(r[headers[col]] ?? "").trim()
-                return looksLikeProfession(val) && !val.includes("@")
-            }).length
-            if (strHits >= sample.length * 0.4) { cargoIdx = col; break }
-        }
-    }
+    // Cargo is detected ONLY by header name (passes 1). No content scan.
+    // cargoIdx is already set (or -1) from the 1st pass above.
 
     return { cpfIdx, nomeIdx, valorIdx, telefoneIdx, cargoIdx }
 }

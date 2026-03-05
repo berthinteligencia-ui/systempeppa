@@ -318,7 +318,47 @@ ${rows.map((emp, i) => `<tr>
     ws["!cols"] = [{ wch: 35 }, { wch: 16 }, { wch: 22 }, { wch: 20 }, { wch: 28 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 12 }]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, "Funcionários")
-    XLSX.writeFile(wb, `funcionarios-${new Date().toISOString().slice(0, 10)}.xlsx`)
+    const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as Uint8Array
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `funcionarios-${new Date().toISOString().slice(0, 10)}.xlsx`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  // ── Download template ─────────────────────────────────────────────────────────
+
+  function handleDownloadTemplate() {
+    const template = [
+      {
+        "Nome": "João da Silva",
+        "CPF": "000.000.000-00",
+        "Cargo": "Auxiliar Administrativo",
+        "E-mail": "joao@empresa.com",
+        "Telefone": "(11) 99999-9999",
+        "Salário": 2000,
+        "Data Admissão": "01/01/2024",
+        "Unidade/Departamento": "Administrativo",
+      },
+    ]
+    const ws = XLSX.utils.json_to_sheet(template)
+    ws["!cols"] = [{ wch: 35 }, { wch: 16 }, { wch: 25 }, { wch: 28 }, { wch: 20 }, { wch: 12 }, { wch: 16 }, { wch: 25 }]
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, "Funcionários")
+    const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as Uint8Array
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = "modelo-funcionarios.xlsx"
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
   }
 
   // ── Import ────────────────────────────────────────────────────────────────────
@@ -391,7 +431,10 @@ ${rows.map((emp, i) => `<tr>
             <FileDown className="h-4 w-4" /> PDF
           </Button>
           <Button variant="outline" onClick={handleExportExcel} className="gap-2">
-            <Download className="h-4 w-4" /> Planilha
+            <FileSpreadsheet className="h-4 w-4" /> Exportar Excel
+          </Button>
+          <Button variant="outline" onClick={handleDownloadTemplate} className="gap-2">
+            <Download className="h-4 w-4" /> Baixar Modelo
           </Button>
           <Button variant="outline" onClick={openImport} className="gap-2">
             <FileUp className="h-4 w-4" /> Importar
