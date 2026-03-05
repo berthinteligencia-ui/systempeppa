@@ -2,11 +2,12 @@ import {
   Wallet, Users, ClipboardCheck, TrendingUp,
   ArrowUpRight, ArrowDownRight, AlertTriangle,
   CheckCircle2, ChevronDown, Download,
+  FileText, Landmark, ClipboardList, CreditCard,
 } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { getDashboardData } from "@/lib/actions/dashboard"
+import { MonthSelector } from "./MonthSelector"
 
 const MESES = [
   "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -149,35 +150,50 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       <div className="grid gap-4 xl:grid-cols-3">
         <div className="xl:col-span-2 rounded-xl border bg-white shadow-sm overflow-hidden">
           <div className="flex items-center justify-between border-b px-5 py-4 bg-white">
-            <h3 className="font-semibold text-slate-800">Listagem de Unidades</h3>
-            <Badge variant="secondary" className="bg-slate-100 text-slate-600 hover:bg-slate-100">{unitList.length} unidades</Badge>
+            <div className="flex items-center">
+              <h3 className="font-semibold text-slate-800">Listagem de Unidades</h3>
+              <MonthSelector currentMonth={period.month} currentYear={period.year} />
+            </div>
+            <a href="/unidades" className="text-sm font-semibold text-blue-600 hover:underline">Ver todos</a>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                  <th className="px-5 py-3">Unidade / Código</th>
-                  <th className="px-5 py-3">Status</th>
-                  <th className="px-5 py-3 text-right">Colaboradores</th>
-                  <th className="px-5 py-3 text-right">Custo Mensal</th>
+                  <th className="px-5 py-3 w-52">Unidade / Código</th>
+                  <th className="px-5 py-3">Fluxo de Processamento</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {unitList.map((u) => (
-                  <tr key={u.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-5 py-3.5">
-                      <p className="font-semibold text-slate-800">{u.name}</p>
-                      <p className="text-[10px] font-mono text-slate-400 uppercase tracking-tight">{u.code}</p>
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <StatusBadge status={u.status} />
-                    </td>
-                    <td className="px-5 py-3.5 text-right text-sm font-medium text-slate-600">{u.headcount}</td>
-                    <td className="px-5 py-3.5 text-right text-sm font-bold text-slate-800">
-                      {u.cost > 0 ? fmtBRL(u.cost) : <span className="text-slate-300">—</span>}
-                    </td>
-                  </tr>
-                ))}
+                {unitList.map((u) => {
+                  const step1 = true
+                  const step2 = true
+                  const step3 = u.headcount > 0
+                  const step4 = u.cost > 0
+                  const step5 = u.status === "FECHADO"
+                  const ic = (on: boolean) => on ? "text-blue-600" : "text-slate-300"
+                  const ln = (on: boolean) => `flex-1 h-0.5 mx-1 ${on ? "bg-blue-600" : "bg-slate-200"}`
+                  return (
+                    <tr key={u.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-5 py-4">
+                        <p className="font-bold text-slate-800">{u.name}</p>
+                      </td>
+                      <td className="px-5 py-4">
+                        <div className="flex items-center">
+                          <FileText className={`h-5 w-5 shrink-0 ${ic(step1)}`} />
+                          <div className={ln(step2)} />
+                          <Landmark className={`h-5 w-5 shrink-0 ${ic(step2)}`} />
+                          <div className={ln(step3)} />
+                          <ClipboardList className={`h-5 w-5 shrink-0 ${ic(step3)}`} />
+                          <div className={ln(step4)} />
+                          <CreditCard className={`h-5 w-5 shrink-0 ${ic(step4)}`} />
+                          <div className={ln(step5)} />
+                          <CheckCircle2 className={`h-5 w-5 shrink-0 ${step5 ? "text-emerald-500" : "text-slate-300"}`} />
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

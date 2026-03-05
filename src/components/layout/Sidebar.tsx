@@ -15,6 +15,7 @@ import {
   FileSpreadsheet,
   MessageSquare,
   FileText,
+  Receipt,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -25,6 +26,7 @@ const mainNav = [
   { href: "/unidades", label: "Unidades", icon: Building2 },
   { href: "/comprovante", label: "Comprovante", icon: FileText },
   { href: "/folha-pagamento", label: "Folha de Pagamento", icon: FileSpreadsheet },
+  { href: "/nfs", label: "NFs", icon: Receipt },
   { href: "/alertas", label: "Alertas Financeiros", icon: AlertTriangle },
   { href: "/relatorios", label: "Relatórios", icon: BarChart3 },
   { href: "/whatsapp-business", label: "WhatsApp Business", icon: MessageSquare },
