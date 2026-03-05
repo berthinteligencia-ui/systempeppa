@@ -336,8 +336,8 @@ ${rows.map((emp, i) => `<tr>
     ws["!cols"] = [{ wch: 35 }, { wch: 16 }, { wch: 22 }, { wch: 20 }, { wch: 28 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 12 }]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, "Funcionários")
-    const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as Uint8Array
-    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })
+    const raw = XLSX.write(wb, { bookType: "xlsx", type: "array" })
+    const blob = new Blob([new Uint8Array(raw)], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
@@ -367,8 +367,8 @@ ${rows.map((emp, i) => `<tr>
     ws["!cols"] = [{ wch: 35 }, { wch: 16 }, { wch: 25 }, { wch: 28 }, { wch: 20 }, { wch: 12 }, { wch: 16 }, { wch: 25 }]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, "Funcionários")
-    const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as Uint8Array
-    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })
+    const raw = XLSX.write(wb, { bookType: "xlsx", type: "array" })
+    const blob = new Blob([new Uint8Array(raw)], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
