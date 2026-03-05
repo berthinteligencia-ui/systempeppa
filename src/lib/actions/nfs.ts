@@ -38,10 +38,18 @@ export async function listNotasFiscais() {
   const session = await auth()
   if (!session?.user?.companyId) throw new Error("Não autorizado")
 
-  return prisma.notaFiscal.findMany({
+  const rows = await prisma.notaFiscal.findMany({
     where: { companyId: session.user.companyId },
     orderBy: { createdAt: "desc" },
   })
+
+  return rows.map(r => ({
+    ...r,
+    valor: Number(r.valor),
+    dataEmissao: r.dataEmissao.toISOString(),
+    createdAt: r.createdAt.toISOString(),
+    updatedAt: r.updatedAt.toISOString(),
+  }))
 }
 
 export async function updateNotaFiscalStatus(id: string, status: NfStatus) {

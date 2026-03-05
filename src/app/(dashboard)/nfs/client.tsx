@@ -1,17 +1,16 @@
 "use client"
 
-import { useState, useRef, useCallback } from "react"
+import { useState, useRef } from "react"
 import {
-  FileText, Upload, CheckCircle2, XCircle,
-  Clock, Search, Trash2, ChevronDown, Eye, FileUp,
+  FileText, Upload, XCircle, Clock, Search, Trash2,
+  FileUp, CloudUpload, MoreVertical, ChevronLeft, ChevronRight,
+  TrendingUp, AlertCircle, Receipt, SlidersHorizontal,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import {
   createNotaFiscal, updateNotaFiscalStatus, deleteNotaFiscal,
-  extractNfData,
-  type NfStatus,
+  extractNfData, type NfStatus,
 } from "@/lib/actions/nfs"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -27,56 +26,74 @@ type NF = {
   createdAt: Date | string
 }
 
+type Dept = { id: string; name: string; cnpj: string | null }
+
 type Form = {
   numero: string
-  tomador: string
-  cnpj: string
+  departmentId: string
   valor: string
   dataEmissao: string
-  descricao: string
 }
 
-const FORM_EMPTY: Form = { numero: "", tomador: "", cnpj: "", valor: "", dataEmissao: "", descricao: "" }
+type TabFilter = "todas" | "pendentes" | "processadas"
+
+const FORM_EMPTY: Form = { numero: "", departmentId: "", valor: "", dataEmissao: "" }
+const PER_PAGE = 5
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+const MONTHS = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
+
+function fmtDateBR(d: Date | string) {
+  const dt = new Date(d)
+  return `${dt.getDate()} ${MONTHS[dt.getMonth()]}, ${dt.getFullYear()}`
+}
 
 function fmtBRL(n: number | string) {
   return Number(n).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
 }
-function fmtDate(d: Date | string) {
-  return new Date(d).toLocaleDateString("pt-BR")
+
+function splitEmitente(emitente: string) {
+  const idx = emitente.indexOf(" - ")
+  if (idx === -1) return { tomador: emitente, cnpj: "" }
+  return { tomador: emitente.slice(0, idx), cnpj: emitente.slice(idx + 3) }
 }
 
-const STATUS_CONFIG: Record<NfStatus, { label: string; icon: React.ReactNode; cls: string }> = {
-  PENDENTE:  { label: "Pendente",  icon: <Clock       className="h-3 w-3" />, cls: "bg-amber-100 text-amber-700"   },
-  ANALISADA: { label: "Analisada", icon: <Eye         className="h-3 w-3" />, cls: "bg-blue-100 text-blue-700"     },
-  APROVADA:  { label: "Aprovada",  icon: <CheckCircle2 className="h-3 w-3" />, cls: "bg-emerald-100 text-emerald-700" },
-  REJEITADA: { label: "Rejeitada", icon: <XCircle     className="h-3 w-3" />, cls: "bg-red-100 text-red-700"       },
+const STATUS_MAP: Record<NfStatus, { label: string; cls: string; dot: string }> = {
+  PENDENTE:  { label: "Pendente",   cls: "bg-amber-50 text-amber-700 border border-amber-200", dot: "bg-amber-500"   },
+  ANALISADA: { label: "Processada", cls: "bg-green-50 text-green-700 border border-green-200",  dot: "bg-green-500"   },
+  APROVADA:  { label: "Processada", cls: "bg-green-50 text-green-700 border border-green-200",  dot: "bg-green-500"   },
+  REJEITADA: { label: "Cancelado",  cls: "bg-red-50 text-red-700 border border-red-200",        dot: "bg-red-500"     },
 }
 
 function StatusBadge({ status }: { status: NfStatus }) {
-  const cfg = STATUS_CONFIG[status]
+  const s = STATUS_MAP[status]
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${cfg.cls}`}>
-      {cfg.icon} {cfg.label}
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${s.cls}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />
+      {s.label}
     </span>
   )
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
-  const [nfs, setNfs] = useState<NF[]>(initialNfs)
-  const [search, setSearch] = useState("")
-  const [filterStatus, setFilterStatus] = useState<NfStatus | "">("")
-  const [isSaving, setIsSaving] = useState(false)
+export function NfsClient({ initialNfs, departments }: { initialNfs: NF[]; departments: Dept[] }) {
+  const [nfs, setNfs]               = useState<NF[]>(initialNfs)
+  const [tabFilter, setTabFilter]   = useState<TabFilter>("todas")
+  const [search, setSearch]         = useState("")
+  const [page, setPage]             = useState(1)
+  const [isSaving, setIsSaving]     = useState(false)
   const [isExtracting, setIsExtracting] = useState(false)
-  const [pdfFile, setPdfFile] = useState<File | null>(null)
-  const [isDragging, setIsDragging] = useState(false)
-  const [form, setForm] = useState<Form>(FORM_EMPTY)
+  const [pdfFile, setPdfFile]       = useState<File | null>(null)
+  const [form, setForm]             = useState<Form>(FORM_EMPTY)
+  const [cnpjWarning, setCnpjWarning] = useState<string | null>(null)
+  const [openMenu, setOpenMenu]     = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // ── PDF drag & drop ────────────────────────────────────────────────────────
+  const selectedDept = departments.find(d => d.id === form.departmentId) ?? null
+
+  // ── PDF upload ─────────────────────────────────────────────────────────────
 
   async function handlePdfFile(file: File) {
     if (file.type !== "application/pdf") { alert("Envie apenas arquivos PDF."); return }
@@ -86,14 +103,26 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
       const fd = new FormData()
       fd.append("file", file)
       const data = await extractNfData(fd)
-      setForm({
-        numero: data.numero || "",
-        tomador: data.tomador || "",
-        cnpj: data.cnpj || "",
-        valor: data.valor?.toString() || "",
+
+      // Tenta encontrar a unidade pelo CNPJ extraído
+      const cnpjExtracted = (data.cnpj || "").replace(/\D/g, "")
+      const matchedDept = cnpjExtracted
+        ? departments.find(d => (d.cnpj ?? "").replace(/\D/g, "") === cnpjExtracted)
+        : undefined
+
+      setForm(f => ({
+        ...f,
+        numero:      data.numero      || "",
+        valor:       data.valor?.toString() || "",
         dataEmissao: data.dataEmissao || "",
-        descricao: data.descricao || "",
-      })
+        departmentId: matchedDept ? matchedDept.id : f.departmentId,
+      }))
+
+      if (cnpjExtracted && !matchedDept) {
+        setCnpjWarning(`CNPJ ${data.cnpj} não corresponde a nenhuma unidade cadastrada. Selecione manualmente.`)
+      } else {
+        setCnpjWarning(null)
+      }
     } catch (err: any) {
       alert("Erro ao extrair dados: " + err.message)
     } finally {
@@ -101,31 +130,27 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
     }
   }
 
-  const onDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault(); setIsDragging(false)
-    const f = e.dataTransfer.files[0]; if (f) handlePdfFile(f)
-  }, [])
-
-  // ── Submit NF ─────────────────────────────────────────────────────────────
+  // ── Submit ─────────────────────────────────────────────────────────────────
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!form.numero || !form.tomador || !form.valor || !form.dataEmissao) {
+    if (!form.numero || !form.departmentId || !form.valor || !form.dataEmissao) {
       alert("Preencha todos os campos obrigatórios."); return
     }
+    const dept = departments.find(d => d.id === form.departmentId)!
     setIsSaving(true)
     try {
-      const emitente = form.cnpj ? `${form.tomador} - ${form.cnpj}` : form.tomador
+      const emitente = dept.cnpj ? `${dept.name} - ${dept.cnpj}` : dept.name
       const nf = await createNotaFiscal({
-        numero: form.numero,
+        numero:      form.numero,
         emitente,
-        valor: parseFloat(form.valor.replace(",", ".")),
+        valor:       parseFloat(form.valor.replace(",", ".")),
         dataEmissao: form.dataEmissao,
-        descricao: form.descricao || undefined,
       })
       setNfs(prev => [nf as unknown as NF, ...prev])
       setForm(FORM_EMPTY)
       setPdfFile(null)
+      setCnpjWarning(null)
     } catch (err: any) {
       alert("Erro ao salvar NF: " + err.message)
     } finally {
@@ -138,246 +163,300 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
   async function handleStatus(id: string, status: NfStatus) {
     await updateNotaFiscalStatus(id, status)
     setNfs(prev => prev.map(n => n.id === id ? { ...n, status } : n))
+    setOpenMenu(null)
   }
 
   async function handleDelete(id: string) {
     if (!confirm("Excluir esta nota fiscal?")) return
     await deleteNotaFiscal(id)
     setNfs(prev => prev.filter(n => n.id !== id))
+    setOpenMenu(null)
   }
 
-  // ── Filter ────────────────────────────────────────────────────────────────
+  // ── Filter + Pagination ───────────────────────────────────────────────────
 
-  const filtered = nfs.filter(n => {
-    const q = search.toLowerCase()
-    const matchSearch = !q || n.numero.toLowerCase().includes(q) || n.emitente.toLowerCase().includes(q)
-    const matchStatus = !filterStatus || n.status === filterStatus
-    return matchSearch && matchStatus
-  })
+  const filtered = nfs
+    .filter(n => {
+      if (tabFilter === "pendentes")   return n.status === "PENDENTE"
+      if (tabFilter === "processadas") return n.status === "APROVADA" || n.status === "ANALISADA"
+      return true
+    })
+    .filter(n => {
+      const q = search.toLowerCase()
+      return !q || n.numero.toLowerCase().includes(q) || n.emitente.toLowerCase().includes(q)
+    })
+
+  const totalPages  = Math.max(1, Math.ceil(filtered.length / PER_PAGE))
+  const curPage     = Math.min(page, totalPages)
+  const paginated   = filtered.slice((curPage - 1) * PER_PAGE, curPage * PER_PAGE)
+
+  // ── Summaries ─────────────────────────────────────────────────────────────
+
+  const totalProcessado = nfs.filter(n => n.status === "APROVADA" || n.status === "ANALISADA").reduce((a, n) => a + Number(n.valor), 0)
+  const totalPendente   = nfs.filter(n => n.status === "PENDENTE").reduce((a, n) => a + Number(n.valor), 0)
+  const totalImpostos   = nfs.reduce((a, n) => a + Number(n.valor), 0)
+  const pendentesCount  = nfs.filter(n => n.status === "PENDENTE").length
 
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h2 className="text-xl font-bold text-slate-800">Notas Fiscais</h2>
-        <p className="text-sm text-slate-500">Receba e gerencie documentos fiscais</p>
-      </div>
+    <div className="grid gap-6 lg:grid-cols-[400px_1fr]">
 
-      <div className="grid gap-6 lg:grid-cols-[400px_1fr]">
+      {/* ── COLUNA ESQUERDA ──────────────────────────────────────────────── */}
+      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden self-start">
 
-        {/* ── COLUNA ESQUERDA: upload + formulário ──────────────────────── */}
-        <div className="space-y-4">
+        {/* Header do card */}
+        <div className="flex items-center gap-2 border-b border-slate-100 px-6 py-4">
+          <div className="rounded-lg bg-slate-100 p-1.5">
+            <FileText className="h-4 w-4 text-slate-600" />
+          </div>
+          <h3 className="font-semibold text-slate-800">Registrar Nova NF-e</h3>
+        </div>
 
-          {/* PDF Upload */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
-            <h3 className="font-semibold text-slate-800 flex items-center gap-2">
-              <FileText className="h-5 w-5 text-slate-400" /> Documento PDF
-            </h3>
+        <div className="p-6 space-y-5">
 
-            {!pdfFile ? (
-              <div
-                onDragOver={e => { e.preventDefault(); setIsDragging(true) }}
-                onDragLeave={() => setIsDragging(false)}
-                onDrop={onDrop}
-                onClick={() => fileInputRef.current?.click()}
-                className={`flex min-h-[140px] cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed transition-all ${isDragging ? "border-blue-500 bg-blue-50" : "border-slate-200 bg-slate-50 hover:border-blue-400 hover:bg-blue-50/40"}`}
-              >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="application/pdf"
-                  className="hidden"
-                  onChange={e => { const f = e.target.files?.[0]; if (f) handlePdfFile(f) }}
-                />
-                <FileUp className={`mb-2 h-8 w-8 ${isDragging ? "text-blue-500" : "text-slate-300"}`} />
-                <p className="text-sm font-medium text-slate-600">{isDragging ? "Solte o PDF aqui" : "Arraste ou clique para selecionar"}</p>
-                <p className="mt-1 text-xs text-slate-400">Apenas arquivos .pdf</p>
+          {/* Upload */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/pdf"
+            className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; if (f) handlePdfFile(f) }}
+          />
+
+          {!pdfFile ? (
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 py-7 hover:border-blue-400 hover:bg-blue-50/30 transition-all"
+            >
+              <div className="rounded-full bg-white p-3 shadow-sm border border-slate-100">
+                <CloudUpload className="h-6 w-6 text-blue-500" />
               </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <FileText className="h-5 w-5 text-red-500" />
-                    <div>
-                      <p className="text-sm font-medium text-slate-700 truncate max-w-[180px]">{pdfFile.name}</p>
-                      <p className="text-xs text-slate-400">{(pdfFile.size / 1024).toFixed(1)} KB</p>
-                    </div>
-                  </div>
-                  <button onClick={() => { setPdfFile(null); setForm(FORM_EMPTY) }} className="text-slate-400 hover:text-red-500">
-                    <XCircle className="h-5 w-5" />
-                  </button>
+              <div className="text-center">
+                <p className="text-sm font-semibold text-slate-700">Upload de PDF / XML</p>
+                <p className="text-xs text-slate-400 mt-0.5">Arraste a nota aqui ou clique para buscar</p>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <FileText className="h-5 w-5 shrink-0 text-red-500" />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-slate-700 truncate">{pdfFile.name}</p>
+                  <p className="text-xs text-slate-400">{(pdfFile.size / 1024).toFixed(1)} KB</p>
                 </div>
-                {isExtracting && (
-                  <div className="flex flex-col items-center justify-center py-6 gap-2 border border-slate-100 rounded-xl bg-slate-50/50">
-                    <Clock className="h-7 w-7 text-blue-500 animate-pulse" />
-                    <p className="text-sm font-medium text-slate-600">Extraindo dados com IA...</p>
-                  </div>
-                )}
+              </div>
+              {isExtracting ? (
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <Clock className="h-4 w-4 text-blue-500 animate-pulse" />
+                  <span className="text-xs text-slate-500">Extraindo...</span>
+                </div>
+              ) : (
+                <button onClick={() => { setPdfFile(null); setForm(FORM_EMPTY); setCnpjWarning(null) }} className="shrink-0 text-slate-400 hover:text-red-500">
+                  <XCircle className="h-5 w-5" />
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Formulário */}
+          <form onSubmit={handleSubmit} className="space-y-4">
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Número da NF</label>
+                <Input placeholder="000.000" value={form.numero} onChange={e => setForm(f => ({ ...f, numero: e.target.value }))} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Data de Emissão</label>
+                <Input type="date" value={form.dataEmissao} onChange={e => setForm(f => ({ ...f, dataEmissao: e.target.value }))} />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Unidade <span className="text-red-400">*</span></label>
+              <select
+                value={form.departmentId}
+                onChange={e => { setForm(f => ({ ...f, departmentId: e.target.value })); setCnpjWarning(null) }}
+                className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                <option value="">Selecione a unidade...</option>
+                {departments.map(d => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* CNPJ da unidade selecionada */}
+            {selectedDept && (
+              <div className="flex items-center gap-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">CNPJ:</span>
+                <span className="text-sm text-slate-600">{selectedDept.cnpj || <span className="text-slate-300 italic">não cadastrado</span>}</span>
               </div>
             )}
-          </div>
 
-          {/* Form */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="font-semibold text-slate-800 mb-4">Dados da Nota Fiscal</h3>
-            <form onSubmit={handleSubmit} className="space-y-4">
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <Label>Número NF <span className="text-red-500">*</span></Label>
-                  <Input
-                    placeholder="Ex: NF-0001"
-                    value={form.numero}
-                    onChange={e => setForm(f => ({ ...f, numero: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Data de Emissão <span className="text-red-500">*</span></Label>
-                  <Input
-                    type="date"
-                    value={form.dataEmissao}
-                    onChange={e => setForm(f => ({ ...f, dataEmissao: e.target.value }))}
-                  />
-                </div>
+            {/* Aviso de CNPJ divergente */}
+            {cnpjWarning && (
+              <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                <AlertCircle className="h-4 w-4 shrink-0 text-amber-500 mt-0.5" />
+                <p className="text-xs text-amber-700">{cnpjWarning}</p>
               </div>
+            )}
 
-              <div className="space-y-1.5">
-                <Label>Tomador <span className="text-red-500">*</span></Label>
-                <Input
-                  placeholder="Nome ou razão social do tomador"
-                  value={form.tomador}
-                  onChange={e => setForm(f => ({ ...f, tomador: e.target.value }))}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label>CNPJ do Tomador</Label>
-                <Input
-                  placeholder="00.000.000/0000-00"
-                  value={form.cnpj}
-                  onChange={e => setForm(f => ({ ...f, cnpj: e.target.value }))}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label>Valor Retido (R$) <span className="text-red-500">*</span></Label>
+            <div className="space-y-1">
+              <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Valor Retido (R$)</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">R$</span>
                 <Input
                   placeholder="0,00"
                   value={form.valor}
                   onChange={e => setForm(f => ({ ...f, valor: e.target.value }))}
+                  className="pl-9"
                 />
               </div>
+            </div>
 
-              <div className="space-y-1.5">
-                <Label>Descrição / Observação</Label>
-                <textarea
-                  placeholder="Descrição do serviço ou produto..."
-                  value={form.descricao}
-                  onChange={e => setForm(f => ({ ...f, descricao: e.target.value }))}
-                  rows={3}
-                  className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                />
-              </div>
+            <Button type="submit" disabled={isSaving} className="w-full gap-2 bg-slate-900 hover:bg-slate-800">
+              {isSaving ? "Salvando..." : <><Upload className="h-4 w-4" /> Salvar Nota Fiscal</>}
+            </Button>
+          </form>
 
-              <Button type="submit" disabled={isSaving} className="w-full bg-blue-600 hover:bg-blue-700 gap-2">
-                {isSaving ? "Salvando..." : <><Upload className="h-4 w-4" /> Registrar Nota Fiscal</>}
-              </Button>
-            </form>
+          {/* Dica */}
+          <div className="flex gap-2 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
+            <AlertCircle className="h-4 w-4 shrink-0 text-blue-500 mt-0.5" />
+            <div>
+              <p className="text-xs font-semibold text-blue-700">Dica de Produtividade</p>
+              <p className="text-xs text-blue-600 mt-0.5">
+                Você pode importar arquivos PDF para preenchimento automático clicando no ícone de upload acima.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── COLUNA DIREITA ───────────────────────────────────────────────── */}
+      <div className="space-y-4">
+
+        {/* Header + filtros */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-slate-800">Notas Registradas</h3>
+            <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-bold text-slate-600">
+              {nfs.length} total
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Tab filters */}
+            <div className="flex overflow-hidden rounded-lg border border-slate-200 bg-white">
+              {(["todas", "pendentes", "processadas"] as TabFilter[]).map((t, i, arr) => (
+                <button
+                  key={t}
+                  onClick={() => { setTabFilter(t); setPage(1) }}
+                  className={`px-4 py-1.5 text-sm font-medium transition-colors ${i < arr.length - 1 ? "border-r border-slate-200" : ""} ${tabFilter === t ? "bg-blue-600 text-white" : "text-slate-500 hover:text-slate-700"}`}
+                >
+                  {t.charAt(0).toUpperCase() + t.slice(1)}
+                </button>
+              ))}
+            </div>
+
+            {/* Busca */}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+              <input
+                placeholder="Buscar..."
+                value={search}
+                onChange={e => { setSearch(e.target.value); setPage(1) }}
+                className="w-36 rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <button className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50">
+              <SlidersHorizontal className="h-3.5 w-3.5" /> Filtros
+            </button>
           </div>
         </div>
 
-        {/* ── COLUNA DIREITA: lista ──────────────────────────────────────── */}
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h3 className="font-semibold text-slate-800 flex items-center gap-2">
-              Notas Cadastradas
-              {nfs.length > 0 && (
-                <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-bold text-slate-600">{nfs.length}</span>
-              )}
-            </h3>
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                <Input
-                  placeholder="Buscar..."
-                  value={search}
-                  onChange={e => setSearch(e.target.value)}
-                  className="pl-9 w-48"
-                />
-              </div>
-              <select
-                value={filterStatus}
-                onChange={e => setFilterStatus(e.target.value as NfStatus | "")}
-                className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">Todos os status</option>
-                <option value="PENDENTE">Pendente</option>
-                <option value="ANALISADA">Analisada</option>
-                <option value="APROVADA">Aprovada</option>
-                <option value="REJEITADA">Rejeitada</option>
-              </select>
+        {/* Tabela */}
+        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          {filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-slate-400">
+              <FileText className="h-12 w-12 mb-3 opacity-20" />
+              <p className="text-sm font-medium">Nenhuma nota fiscal encontrada</p>
             </div>
-          </div>
+          ) : (
+            <>
+              {/* overlay para fechar menu ao clicar fora */}
+              {openMenu && <div className="fixed inset-0 z-0" onClick={() => setOpenMenu(null)} />}
 
-          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-            {filtered.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-                <FileText className="h-12 w-12 mb-3 opacity-20" />
-                <p className="text-sm font-medium">Nenhuma nota fiscal encontrada</p>
-              </div>
-            ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                      <th className="px-4 py-3">Número</th>
-                      <th className="px-4 py-3">Tomador</th>
-                      <th className="px-4 py-3">CNPJ</th>
-                      <th className="px-4 py-3">Emissão</th>
-                      <th className="px-4 py-3 text-right">Valor</th>
-                      <th className="px-4 py-3">Status</th>
-                      <th className="px-4 py-3">Alterar</th>
-                      <th className="px-4 py-3" />
+                    <tr className="border-b border-slate-100 bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                      <th className="px-5 py-3">Número NF</th>
+                      <th className="px-5 py-3">Data</th>
+                      <th className="px-5 py-3">Tomador</th>
+                      <th className="px-5 py-3">Valor</th>
+                      <th className="px-5 py-3">Status</th>
+                      <th className="px-5 py-3">Ações</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y">
-                    {filtered.map(nf => {
-                      const [tomador, cnpj] = nf.emitente.includes(" - ")
-                        ? nf.emitente.split(" - ", 2)
-                        : [nf.emitente, ""]
+                  <tbody className="divide-y divide-slate-100">
+                    {paginated.map(nf => {
+                      const { tomador, cnpj } = splitEmitente(nf.emitente)
                       return (
                         <tr key={nf.id} className="hover:bg-slate-50 transition-colors">
-                          <td className="px-4 py-3 font-mono font-semibold text-slate-800">{nf.numero}</td>
-                          <td className="px-4 py-3 text-slate-600 max-w-[160px] truncate">{tomador}</td>
-                          <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{cnpj || "—"}</td>
-                          <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{fmtDate(nf.dataEmissao)}</td>
-                          <td className="px-4 py-3 text-right font-bold text-slate-800 whitespace-nowrap">{fmtBRL(nf.valor)}</td>
-                          <td className="px-4 py-3"><StatusBadge status={nf.status} /></td>
-                          <td className="px-4 py-3">
-                            <div className="relative inline-block">
-                              <select
-                                value={nf.status}
-                                onChange={e => handleStatus(nf.id, e.target.value as NfStatus)}
-                                className="appearance-none rounded-lg border border-slate-200 bg-white py-1.5 pl-3 pr-7 text-xs font-medium text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
-                              >
-                                <option value="PENDENTE">Pendente</option>
-                                <option value="ANALISADA">Analisada</option>
-                                <option value="APROVADA">Aprovada</option>
-                                <option value="REJEITADA">Rejeitada</option>
-                              </select>
-                              <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400" />
-                            </div>
+                          <td className="px-5 py-3.5">
+                            <span className="font-semibold text-blue-600">#{nf.numero}</span>
                           </td>
-                          <td className="px-4 py-3">
-                            <button
-                              onClick={() => handleDelete(nf.id)}
-                              className="text-slate-300 hover:text-red-500 transition-colors"
-                              title="Excluir"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
+                          <td className="px-5 py-3.5 whitespace-nowrap text-slate-500">
+                            {fmtDateBR(nf.dataEmissao)}
+                          </td>
+                          <td className="px-5 py-3.5">
+                            <p className="font-medium text-slate-800">{tomador}</p>
+                            {cnpj && <p className="mt-0.5 text-xs text-slate-400">{cnpj}</p>}
+                          </td>
+                          <td className="px-5 py-3.5 whitespace-nowrap font-semibold text-slate-800">
+                            {fmtBRL(nf.valor)}
+                          </td>
+                          <td className="px-5 py-3.5">
+                            <StatusBadge status={nf.status} />
+                          </td>
+                          <td className="px-5 py-3.5">
+                            <div className="relative">
+                              <button
+                                onClick={() => setOpenMenu(openMenu === nf.id ? null : nf.id)}
+                                className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                              >
+                                <MoreVertical className="h-4 w-4" />
+                              </button>
+
+                              {openMenu === nf.id && (
+                                <div className="absolute right-0 z-10 mt-1 w-48 rounded-xl border border-slate-200 bg-white shadow-lg">
+                                  <div className="p-1">
+                                    <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                                      Alterar Status
+                                    </p>
+                                    {(["PENDENTE", "ANALISADA", "APROVADA", "REJEITADA"] as NfStatus[]).map(s => (
+                                      <button
+                                        key={s}
+                                        onClick={() => handleStatus(nf.id, s)}
+                                        className={`flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm hover:bg-slate-50 ${nf.status === s ? "font-semibold text-blue-600" : "text-slate-600"}`}
+                                      >
+                                        {STATUS_MAP[s].label}
+                                      </button>
+                                    ))}
+                                    <hr className="my-1 border-slate-100" />
+                                    <button
+                                      onClick={() => handleDelete(nf.id)}
+                                      className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-red-500 hover:bg-red-50"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" /> Excluir
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       )
@@ -385,12 +464,65 @@ export function NfsClient({ initialNfs }: { initialNfs: NF[] }) {
                   </tbody>
                 </table>
               </div>
-            )}
-          </div>
 
-          {filtered.length > 0 && (
-            <p className="text-xs text-slate-400 text-right">{filtered.length} nota{filtered.length > 1 ? "s" : ""} encontrada{filtered.length > 1 ? "s" : ""}</p>
+              {/* Paginação */}
+              <div className="flex items-center justify-between border-t border-slate-100 px-5 py-3">
+                <p className="text-xs text-slate-400">
+                  Mostrando {Math.min((curPage - 1) * PER_PAGE + 1, filtered.length)}–{Math.min(curPage * PER_PAGE, filtered.length)} de {filtered.length} registros
+                </p>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                    disabled={curPage === 1}
+                    className="rounded-lg border border-slate-200 p-1.5 text-slate-400 hover:bg-slate-50 disabled:opacity-40"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </button>
+                  {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => i + 1).map(p => (
+                    <button
+                      key={p}
+                      onClick={() => setPage(p)}
+                      className={`min-w-[28px] rounded-lg border px-2 py-1 text-xs font-medium ${curPage === p ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                    disabled={curPage === totalPages}
+                    className="rounded-lg border border-slate-200 p-1.5 text-slate-400 hover:bg-slate-50 disabled:opacity-40"
+                  >
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            </>
           )}
+        </div>
+
+        {/* Cards resumo */}
+        <div className="grid grid-cols-3 gap-4">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Total Processado</p>
+            <p className="mt-1 text-2xl font-bold text-slate-800">{fmtBRL(totalProcessado)}</p>
+            <p className="mt-1.5 flex items-center gap-1 text-xs text-emerald-600">
+              <TrendingUp className="h-3 w-3" /> Notas aprovadas
+            </p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Pendentes</p>
+            <p className="mt-1 text-2xl font-bold text-slate-800">{fmtBRL(totalPendente)}</p>
+            <p className="mt-1.5 flex items-center gap-1 text-xs text-amber-600">
+              <Clock className="h-3 w-3" /> {pendentesCount} nota{pendentesCount !== 1 ? "s" : ""} aguardando
+            </p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Impostos Retidos</p>
+            <p className="mt-1 text-2xl font-bold text-slate-800">{fmtBRL(totalImpostos)}</p>
+            <p className="mt-1.5 flex items-center gap-1 text-xs text-slate-400">
+              <Receipt className="h-3 w-3" /> Acumulado do período
+            </p>
+          </div>
         </div>
       </div>
     </div>

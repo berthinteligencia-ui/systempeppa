@@ -100,6 +100,7 @@ enum Role {
 model Department {
   id              String            @id @default(cuid())
   name            String
+  cnpj            String?
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
   companyId       String

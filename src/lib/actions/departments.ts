@@ -12,7 +12,7 @@ async function getCompanyId() {
 
 import { randomUUID } from "crypto"
 
-export async function createDepartment(data: { name: string }) {
+export async function createDepartment(data: { name: string; cnpj?: string }) {
   const companyId = await getCompanyId()
   const supabase = getSupabaseAdmin()
   const now = new Date().toISOString()
@@ -27,7 +27,7 @@ export async function createDepartment(data: { name: string }) {
   revalidatePath("/unidades")
 }
 
-export async function updateDepartment(id: string, data: { name: string }) {
+export async function updateDepartment(id: string, data: { name: string; cnpj?: string }) {
   const companyId = await getCompanyId()
   const supabase = getSupabaseAdmin()
   check(await supabase.from("Department").update({ ...data, updatedAt: new Date().toISOString() }).eq("id", id).eq("companyId", companyId))
