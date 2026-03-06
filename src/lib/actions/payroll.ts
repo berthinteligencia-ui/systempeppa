@@ -45,6 +45,7 @@ export async function savePayrollAnalysis(data: {
     }
 
     revalidatePath("/folha-pagamento")
+    revalidatePath("/dashboard")
 }
 
 export async function listPayrollAnalyses() {

@@ -31,7 +31,18 @@ export async function createNotaFiscal(data: NotaFiscalInput) {
   })
 
   revalidatePath("/nfs")
-  return nf
+  return {
+    id: nf.id,
+    numero: nf.numero,
+    emitente: nf.emitente,
+    valor: Number(nf.valor),
+    dataEmissao: nf.dataEmissao.toISOString(),
+    descricao: nf.descricao,
+    status: nf.status,
+    companyId: nf.companyId,
+    createdAt: nf.createdAt.toISOString(),
+    updatedAt: nf.updatedAt.toISOString(),
+  }
 }
 
 export async function listNotasFiscais() {
@@ -44,9 +55,14 @@ export async function listNotasFiscais() {
   })
 
   return rows.map(r => ({
-    ...r,
+    id: r.id,
+    numero: r.numero,
+    emitente: r.emitente,
     valor: Number(r.valor),
     dataEmissao: r.dataEmissao.toISOString(),
+    descricao: r.descricao,
+    status: r.status,
+    companyId: r.companyId,
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
   }))

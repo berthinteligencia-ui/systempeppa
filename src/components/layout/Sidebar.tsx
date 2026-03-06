@@ -27,12 +27,12 @@ const mainNav = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/funcionarios", label: "Funcionários", icon: Users },
   { href: "/unidades", label: "Unidades", icon: Building2 },
-  { href: "/comprovante", label: "Comprovante", icon: FileText },
-  { href: "/folha-pagamento", label: "Folha de Pagamento", icon: FileSpreadsheet },
   { href: "/nfs", label: "NFs", icon: Receipt },
-  { href: "/alertas", label: "Alertas Financeiros", icon: AlertTriangle },
-  { href: "/relatorios", label: "Relatórios", icon: BarChart3 },
+  { href: "/folha-pagamento", label: "Folha de Pagamento", icon: FileSpreadsheet },
+  { href: "/comprovante", label: "Comprovante", icon: FileText },
   { href: "/whatsapp-business", label: "WhatsApp Business", icon: MessageSquare },
+  { href: "/relatorios", label: "Relatórios", icon: BarChart3 },
+  { href: "/alertas", label: "Alertas Financeiros", icon: AlertTriangle },
 ]
 
 const adminNav = [

@@ -3,8 +3,8 @@
 import { useState, useRef } from "react"
 import {
   FileText, Upload, XCircle, Clock, Search, Trash2,
-  FileUp, CloudUpload, MoreVertical, ChevronLeft, ChevronRight,
-  TrendingUp, AlertCircle, Receipt, SlidersHorizontal,
+  FileUp, CloudUpload, ChevronLeft, ChevronRight,
+  TrendingUp, AlertCircle, Receipt, SlidersHorizontal, CheckCircle2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -60,10 +60,10 @@ function splitEmitente(emitente: string) {
 }
 
 const STATUS_MAP: Record<NfStatus, { label: string; cls: string; dot: string }> = {
-  PENDENTE:  { label: "Pendente",   cls: "bg-amber-50 text-amber-700 border border-amber-200", dot: "bg-amber-500"   },
-  ANALISADA: { label: "Processada", cls: "bg-green-50 text-green-700 border border-green-200",  dot: "bg-green-500"   },
-  APROVADA:  { label: "Processada", cls: "bg-green-50 text-green-700 border border-green-200",  dot: "bg-green-500"   },
-  REJEITADA: { label: "Cancelado",  cls: "bg-red-50 text-red-700 border border-red-200",        dot: "bg-red-500"     },
+  PENDENTE:  { label: "Pendente", cls: "bg-amber-50 text-amber-700 border border-amber-200", dot: "bg-amber-500" },
+  ANALISADA: { label: "Paga",     cls: "bg-green-50 text-green-700 border border-green-200", dot: "bg-green-500" },
+  APROVADA:  { label: "Paga",     cls: "bg-green-50 text-green-700 border border-green-200", dot: "bg-green-500" },
+  REJEITADA: { label: "Pendente", cls: "bg-amber-50 text-amber-700 border border-amber-200", dot: "bg-amber-500" },
 }
 
 function StatusBadge({ status }: { status: NfStatus }) {
@@ -88,7 +88,6 @@ export function NfsClient({ initialNfs, departments }: { initialNfs: NF[]; depar
   const [pdfFile, setPdfFile]       = useState<File | null>(null)
   const [form, setForm]             = useState<Form>(FORM_EMPTY)
   const [cnpjWarning, setCnpjWarning] = useState<string | null>(null)
-  const [openMenu, setOpenMenu]     = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const selectedDept = departments.find(d => d.id === form.departmentId) ?? null
@@ -163,14 +162,12 @@ export function NfsClient({ initialNfs, departments }: { initialNfs: NF[]; depar
   async function handleStatus(id: string, status: NfStatus) {
     await updateNotaFiscalStatus(id, status)
     setNfs(prev => prev.map(n => n.id === id ? { ...n, status } : n))
-    setOpenMenu(null)
   }
 
   async function handleDelete(id: string) {
     if (!confirm("Excluir esta nota fiscal?")) return
     await deleteNotaFiscal(id)
     setNfs(prev => prev.filter(n => n.id !== id))
-    setOpenMenu(null)
   }
 
   // ── Filter + Pagination ───────────────────────────────────────────────────
@@ -386,16 +383,12 @@ export function NfsClient({ initialNfs, departments }: { initialNfs: NF[]; depar
             </div>
           ) : (
             <>
-              {/* overlay para fechar menu ao clicar fora */}
-              {openMenu && <div className="fixed inset-0 z-0" onClick={() => setOpenMenu(null)} />}
-
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-slate-100 bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                       <th className="px-5 py-3">Número NF</th>
-                      <th className="px-5 py-3">Data</th>
-                      <th className="px-5 py-3">Tomador</th>
+                      <th className="px-5 py-3">Unidade</th>
                       <th className="px-5 py-3">Valor</th>
                       <th className="px-5 py-3">Status</th>
                       <th className="px-5 py-3">Ações</th>
@@ -409,9 +402,6 @@ export function NfsClient({ initialNfs, departments }: { initialNfs: NF[]; depar
                           <td className="px-5 py-3.5">
                             <span className="font-semibold text-blue-600">#{nf.numero}</span>
                           </td>
-                          <td className="px-5 py-3.5 whitespace-nowrap text-slate-500">
-                            {fmtDateBR(nf.dataEmissao)}
-                          </td>
                           <td className="px-5 py-3.5">
                             <p className="font-medium text-slate-800">{tomador}</p>
                             {cnpj && <p className="mt-0.5 text-xs text-slate-400">{cnpj}</p>}
@@ -423,39 +413,26 @@ export function NfsClient({ initialNfs, departments }: { initialNfs: NF[]; depar
                             <StatusBadge status={nf.status} />
                           </td>
                           <td className="px-5 py-3.5">
-                            <div className="relative">
+                            <div className="flex items-center gap-2">
                               <button
-                                onClick={() => setOpenMenu(openMenu === nf.id ? null : nf.id)}
-                                className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                                onClick={() => handleStatus(nf.id, nf.status === "APROVADA" || nf.status === "ANALISADA" ? "PENDENTE" : "APROVADA")}
+                                title={nf.status === "APROVADA" || nf.status === "ANALISADA" ? "Marcar como Pendente" : "Marcar como Paga"}
+                                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                                  nf.status === "APROVADA" || nf.status === "ANALISADA"
+                                    ? "bg-green-100 text-green-700 hover:bg-green-200"
+                                    : "bg-slate-100 text-slate-500 hover:bg-green-100 hover:text-green-700"
+                                }`}
                               >
-                                <MoreVertical className="h-4 w-4" />
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                {nf.status === "APROVADA" || nf.status === "ANALISADA" ? "Paga" : "Pagar"}
                               </button>
-
-                              {openMenu === nf.id && (
-                                <div className="absolute right-0 z-10 mt-1 w-48 rounded-xl border border-slate-200 bg-white shadow-lg">
-                                  <div className="p-1">
-                                    <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                                      Alterar Status
-                                    </p>
-                                    {(["PENDENTE", "ANALISADA", "APROVADA", "REJEITADA"] as NfStatus[]).map(s => (
-                                      <button
-                                        key={s}
-                                        onClick={() => handleStatus(nf.id, s)}
-                                        className={`flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm hover:bg-slate-50 ${nf.status === s ? "font-semibold text-blue-600" : "text-slate-600"}`}
-                                      >
-                                        {STATUS_MAP[s].label}
-                                      </button>
-                                    ))}
-                                    <hr className="my-1 border-slate-100" />
-                                    <button
-                                      onClick={() => handleDelete(nf.id)}
-                                      className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-red-500 hover:bg-red-50"
-                                    >
-                                      <Trash2 className="h-3.5 w-3.5" /> Excluir
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
+                              <button
+                                onClick={() => handleDelete(nf.id)}
+                                title="Excluir"
+                                className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
                             </div>
                           </td>
                         </tr>
