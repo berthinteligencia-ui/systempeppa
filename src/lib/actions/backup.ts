@@ -2,8 +2,8 @@
 
 import { getSupabaseAdmin } from "@/lib/supabase-admin"
 import { auth } from "@/lib/auth"
-import { prisma } from "@/lib/prisma"
 import { revalidatePath } from "next/cache"
+import { randomUUID } from "crypto"
 
 export async function runBackup() {
     const session = await auth()
@@ -13,29 +13,24 @@ export async function runBackup() {
     const supabase = getSupabaseAdmin()
 
     try {
-        // 1. Coletar dados de todas as tabelas relevantes para a empresa
         const [
-            company,
-            users,
-            employees,
-            departments,
-            banks,
-            payrollAnalyses,
-            conversations,
-            messages
+            { data: company },
+            { data: users },
+            { data: employees },
+            { data: departments },
+            { data: banks },
+            { data: payrollAnalyses },
+            { data: conversations },
+            { data: messages },
         ] = await Promise.all([
-            prisma.company.findUnique({ where: { id: companyId }, include: { settings: true } }),
-            prisma.user.findMany({ where: { companyId } }),
-            prisma.employee.findMany({ where: { companyId } }),
-            prisma.department.findMany({ where: { companyId } }),
-            prisma.bank.findMany(),
-            prisma.payrollAnalysis.findMany({ where: { companyId } }),
-            prisma.conversation.findMany({ where: { companyId }, include: { messages: true } }),
-            prisma.message.findMany({
-                where: {
-                    conversation: { companyId }
-                }
-            })
+            supabase.from("Company").select("*, settings:Settings(*)").eq("id", companyId).maybeSingle(),
+            supabase.from("User").select("*").eq("companyId", companyId),
+            supabase.from("Employee").select("*").eq("companyId", companyId),
+            supabase.from("Department").select("*").eq("companyId", companyId),
+            supabase.from("Bank").select("*"),
+            supabase.from("PayrollAnalysis").select("*").eq("companyId", companyId),
+            supabase.from("Conversation").select("*").eq("companyId", companyId),
+            supabase.from("Message").select("*, conversation:Conversation!inner(companyId)").eq("conversation.companyId", companyId),
         ])
 
         const backupData = {
@@ -43,46 +38,30 @@ export async function runBackup() {
                 version: "1.0",
                 timestamp: new Date().toISOString(),
                 companyId,
-                companyName: company?.name
+                companyName: (company as any)?.name,
             },
-            data: {
-                company,
-                users,
-                employees,
-                departments,
-                banks,
-                payrollAnalyses,
-                conversations,
-                messages
-            }
+            data: { company, users, employees, departments, banks, payrollAnalyses, conversations, messages },
         }
 
         const timestamp = new Date().getTime()
-        const fileName = `${companyId}/backup_${timestamp}.json` // Usando sub pasta por empresa
+        const fileName = `${companyId}/backup_${timestamp}.json`
         const fileContent = JSON.stringify(backupData, null, 2)
         const fileSize = Buffer.byteLength(fileContent)
 
-        // 2. Upload para o Supabase Storage (Bucket: backups)
         const { error: uploadError } = await supabase.storage
             .from("backups")
-            .upload(fileName, fileContent, {
-                contentType: "application/json",
-                upsert: true
-            })
+            .upload(fileName, fileContent, { contentType: "application/json", upsert: true })
 
-        if (uploadError) {
-            console.error("[BACKUP] Erro no upload:", uploadError)
-            throw new Error(`Erro ao salvar backup no storage: ${uploadError.message}`)
-        }
+        if (uploadError) throw new Error(`Erro ao salvar backup no storage: ${uploadError.message}`)
 
-        // 3. Registrar no banco de dados
-        await prisma.backup.create({
-            data: {
-                fileName,
-                fileSize,
-                companyId,
-                status: "SUCCESS"
-            }
+        const now = new Date().toISOString()
+        await supabase.from("Backup").insert({
+            id: randomUUID(),
+            fileName,
+            fileSize,
+            companyId,
+            status: "SUCCESS",
+            createdAt: now,
         })
 
         revalidatePath("/(dashboard)/configuracoes")
@@ -97,14 +76,15 @@ export async function listBackups() {
     const session = await auth()
     if (!session?.user?.companyId) throw new Error("Não autorizado")
 
-    const companyId = session.user.companyId
+    const supabase = getSupabaseAdmin()
+    const { data } = await supabase
+        .from("Backup")
+        .select("*")
+        .eq("companyId", session.user.companyId)
+        .order("createdAt", { ascending: false })
+        .limit(10)
 
-    // Retorna do banco de dados (mais rápido e permite metadados)
-    return await prisma.backup.findMany({
-        where: { companyId },
-        orderBy: { createdAt: "desc" },
-        take: 10
-    })
+    return data ?? []
 }
 
 export async function getBackupUrl(fileName: string) {
@@ -112,10 +92,7 @@ export async function getBackupUrl(fileName: string) {
     if (!session?.user?.companyId) throw new Error("Não autorizado")
 
     const supabase = getSupabaseAdmin()
-    const { data } = await supabase.storage
-        .from("backups")
-        .createSignedUrl(fileName, 3600) // URL válida por 1 hora
-
+    const { data } = await supabase.storage.from("backups").createSignedUrl(fileName, 3600)
     return data?.signedUrl || null
 }
 
@@ -123,29 +100,18 @@ export async function deleteBackup(id: string) {
     const session = await auth()
     if (!session?.user?.companyId) throw new Error("Não autorizado")
 
-    const companyId = session.user.companyId
     const supabase = getSupabaseAdmin()
-
-    const backup = await prisma.backup.findUnique({
-        where: { id, companyId }
-    })
+    const { data: backup } = await supabase
+        .from("Backup")
+        .select("*")
+        .eq("id", id)
+        .eq("companyId", session.user.companyId)
+        .maybeSingle()
 
     if (!backup) throw new Error("Backup não encontrado")
 
-    // 1. Remover do Storage
-    const { error: storageError } = await supabase.storage
-        .from("backups")
-        .remove([backup.fileName])
-
-    if (storageError) {
-        console.error("[BACKUP] Erro ao remover do storage:", storageError)
-        // Mesmo com erro no storage, prosseguimos para limpar o DB se o arquivo não existir mais
-    }
-
-    // 2. Remover do Banco
-    await prisma.backup.delete({
-        where: { id }
-    })
+    await supabase.storage.from("backups").remove([backup.fileName])
+    await supabase.from("Backup").delete().eq("id", id)
 
     revalidatePath("/(dashboard)/configuracoes")
 }

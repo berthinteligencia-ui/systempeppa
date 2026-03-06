@@ -1,8 +1,9 @@
 "use server"
 
-import { prisma } from "@/lib/prisma"
+import { getSupabaseAdmin, check } from "@/lib/supabase-admin"
 import { auth } from "@/lib/auth"
 import { revalidatePath } from "next/cache"
+import { randomUUID } from "crypto"
 
 export type NfStatus = "PENDENTE" | "ANALISADA" | "APROVADA" | "REJEITADA"
 
@@ -18,53 +19,51 @@ export async function createNotaFiscal(data: NotaFiscalInput) {
   const session = await auth()
   if (!session?.user?.companyId) throw new Error("Não autorizado")
 
-  const nf = await prisma.notaFiscal.create({
-    data: {
-      numero: data.numero,
-      emitente: data.emitente,
-      valor: data.valor,
-      dataEmissao: new Date(data.dataEmissao),
-      descricao: data.descricao ?? null,
-      status: "PENDENTE",
-      companyId: session.user.companyId,
-    },
-  })
+  const supabase = getSupabaseAdmin()
+  const now = new Date().toISOString()
+  const id = randomUUID()
+
+  const row = {
+    id,
+    numero: data.numero,
+    emitente: data.emitente,
+    valor: data.valor,
+    dataEmissao: new Date(data.dataEmissao).toISOString(),
+    descricao: data.descricao ?? null,
+    status: "PENDENTE",
+    companyId: session.user.companyId,
+    createdAt: now,
+    updatedAt: now,
+  }
+
+  check(await supabase.from("NotaFiscal").insert(row))
 
   revalidatePath("/nfs")
-  return {
-    id: nf.id,
-    numero: nf.numero,
-    emitente: nf.emitente,
-    valor: Number(nf.valor),
-    dataEmissao: nf.dataEmissao.toISOString(),
-    descricao: nf.descricao,
-    status: nf.status,
-    companyId: nf.companyId,
-    createdAt: nf.createdAt.toISOString(),
-    updatedAt: nf.updatedAt.toISOString(),
-  }
+  return { ...row, valor: Number(row.valor) }
 }
 
 export async function listNotasFiscais() {
   const session = await auth()
   if (!session?.user?.companyId) throw new Error("Não autorizado")
 
-  const rows = await prisma.notaFiscal.findMany({
-    where: { companyId: session.user.companyId },
-    orderBy: { createdAt: "desc" },
-  })
+  const supabase = getSupabaseAdmin()
+  const { data } = await supabase
+    .from("NotaFiscal")
+    .select("*")
+    .eq("companyId", session.user.companyId)
+    .order("createdAt", { ascending: false })
 
-  return rows.map(r => ({
+  return (data ?? []).map(r => ({
     id: r.id,
     numero: r.numero,
     emitente: r.emitente,
     valor: Number(r.valor),
-    dataEmissao: r.dataEmissao.toISOString(),
+    dataEmissao: r.dataEmissao,
     descricao: r.descricao,
     status: r.status,
     companyId: r.companyId,
-    createdAt: r.createdAt.toISOString(),
-    updatedAt: r.updatedAt.toISOString(),
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
   }))
 }
 
@@ -72,21 +71,29 @@ export async function updateNotaFiscalStatus(id: string, status: NfStatus) {
   const session = await auth()
   if (!session?.user?.companyId) throw new Error("Não autorizado")
 
-  await prisma.notaFiscal.update({
-    where: { id, companyId: session.user.companyId },
-    data: { status },
-  })
+  const supabase = getSupabaseAdmin()
+  check(await supabase
+    .from("NotaFiscal")
+    .update({ status, updatedAt: new Date().toISOString() })
+    .eq("id", id)
+    .eq("companyId", session.user.companyId)
+  )
 
   revalidatePath("/nfs")
+  revalidatePath("/dashboard")
 }
 
 export async function deleteNotaFiscal(id: string) {
   const session = await auth()
   if (!session?.user?.companyId) throw new Error("Não autorizado")
 
-  await prisma.notaFiscal.delete({
-    where: { id, companyId: session.user.companyId },
-  })
+  const supabase = getSupabaseAdmin()
+  check(await supabase
+    .from("NotaFiscal")
+    .delete()
+    .eq("id", id)
+    .eq("companyId", session.user.companyId)
+  )
 
   revalidatePath("/nfs")
 }
@@ -102,7 +109,6 @@ export async function extractNfData(formData: FormData) {
   if (!apiKey) throw new Error("Chave de API da OpenAI (OPENAI_API_KEY) não configurada no .env")
 
   const { OpenAI } = await import("openai")
-
   const openai = new OpenAI({ apiKey })
 
   const buffer = await file.arrayBuffer()
