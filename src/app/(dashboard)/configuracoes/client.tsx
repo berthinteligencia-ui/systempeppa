@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Building2, Phone, Mail, MapPin, Save, CheckCircle2, AlertCircle, Shield, Clock, RefreshCw as RefreshIcon } from "lucide-react"
+import { Building2, Phone, Mail, MapPin, Save, CheckCircle2, AlertCircle, Shield, Clock, RefreshCw as RefreshIcon, Users, UserCog, ChevronDown } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -9,11 +9,38 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { updateCompanySettings } from "@/lib/actions/settings"
 import { runBackup, listBackups, getBackupUrl, deleteBackup } from "@/lib/actions/backup"
+import { updateUser } from "@/lib/actions/users"
 import { Database, Download, History, Loader2, RefreshCw, Trash2 } from "lucide-react"
 import { useSession } from "next-auth/react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+
+type UserItem = { id: string; name: string; email: string; role: string; active: boolean }
 
 interface SettingsClientProps {
     initialData: any
+    initialUsers?: UserItem[]
+    currentUserId?: string
+}
+
+const ROLE_LABELS: Record<string, string> = {
+    ADMIN: "Administrador",
+    RH: "RH",
+    GESTOR: "Gestor",
+    FUNCIONARIO: "Funcionário",
+}
+
+const ROLE_COLORS: Record<string, string> = {
+    ADMIN: "bg-purple-100 text-purple-700",
+    RH: "bg-blue-100 text-blue-700",
+    GESTOR: "bg-indigo-100 text-indigo-700",
+    FUNCIONARIO: "bg-slate-100 text-slate-600",
+}
+
+const ROLE_DESC: Record<string, string> = {
+    ADMIN: "Acesso total ao sistema — pode gerenciar usuários, configurações e todos os módulos",
+    RH: "Acesso a funcionários, folha de pagamento, notas fiscais e relatórios",
+    GESTOR: "Acesso a relatórios, dashboard e visualização de dados da empresa",
+    FUNCIONARIO: "Acesso restrito — apenas visualização de comprovantes e informações próprias",
 }
 
 const ACTION_LABELS: Record<string, string> = {
@@ -24,7 +51,7 @@ const ACTION_LABELS: Record<string, string> = {
     LOGIN: "Login",
 }
 
-export function SettingsClient({ initialData }: SettingsClientProps) {
+export function SettingsClient({ initialData, initialUsers = [], currentUserId = "" }: SettingsClientProps) {
     const { data: session } = useSession()
     const isAdmin = session?.user?.role === "ADMIN"
 
@@ -38,6 +65,10 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
     const [logs, setLogs] = useState<any[]>([])
     const [loadingLogs, setLoadingLogs] = useState(false)
     const [logSearch, setLogSearch] = useState("")
+
+    const [users, setUsers] = useState<UserItem[]>(initialUsers)
+    const [userEdits, setUserEdits] = useState<Record<string, { role: string; active: boolean }>>({})
+    const [savingUser, setSavingUser] = useState<string | null>(null)
     const [formData, setFormData] = useState({
         name: initialData?.name || "",
         cnpj: initialData?.cnpj || "",
@@ -120,6 +151,31 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
             alert(err.message || "Erro ao excluir backup")
         } finally {
             setLoadingBackups(false)
+        }
+    }
+
+    function getUserEdit(user: UserItem) {
+        return userEdits[user.id] ?? { role: user.role, active: user.active }
+    }
+
+    function setUserEdit(userId: string, patch: Partial<{ role: string; active: boolean }>) {
+        setUserEdits(prev => ({
+            ...prev,
+            [userId]: { ...getUserEdit(users.find(u => u.id === userId)!), ...prev[userId], ...patch }
+        }))
+    }
+
+    async function handleSaveUser(user: UserItem) {
+        const edit = getUserEdit(user)
+        setSavingUser(user.id)
+        try {
+            await updateUser(user.id, { name: user.name, email: user.email, role: edit.role, active: edit.active })
+            setUsers(prev => prev.map(u => u.id === user.id ? { ...u, role: edit.role, active: edit.active } : u))
+            setUserEdits(prev => { const n = { ...prev }; delete n[user.id]; return n })
+        } catch (err: any) {
+            alert(err.message || "Erro ao salvar usuário")
+        } finally {
+            setSavingUser(null)
         }
     }
 
@@ -442,6 +498,117 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
                 </Card>
             </div>
         </div>
+
+        {isAdmin && users.length > 0 && (
+            <Card className="border-slate-200 shadow-sm">
+                <CardHeader className="bg-slate-50/50">
+                    <div className="flex items-center gap-3">
+                        <div className="rounded-lg bg-indigo-100 p-2 text-indigo-600">
+                            <UserCog className="h-5 w-5" />
+                        </div>
+                        <div>
+                            <CardTitle>Controle de Perfis de Usuários</CardTitle>
+                            <CardDescription>Gerencie os perfis de acesso e status dos usuários da empresa</CardDescription>
+                        </div>
+                    </div>
+                </CardHeader>
+                <CardContent className="p-0">
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="border-b bg-slate-50 text-[10px] uppercase tracking-wide text-slate-400 font-semibold">
+                                    <th className="text-left px-5 py-3">Usuário</th>
+                                    <th className="text-left px-5 py-3">Perfil de Acesso</th>
+                                    <th className="text-left px-5 py-3">Status</th>
+                                    <th className="text-right px-5 py-3">Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y">
+                                {users.map(user => {
+                                    const edit = getUserEdit(user)
+                                    const changed = edit.role !== user.role || edit.active !== user.active
+                                    const isSelf = user.id === currentUserId
+                                    return (
+                                        <tr key={user.id} className={`hover:bg-slate-50 transition-colors ${isSelf ? "bg-blue-50/30" : ""}`}>
+                                            <td className="px-5 py-3.5">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="h-8 w-8 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-600 shrink-0">
+                                                        {user.name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase()}
+                                                    </div>
+                                                    <div>
+                                                        <div className="font-medium text-slate-800 flex items-center gap-1.5">
+                                                            {user.name}
+                                                            {isSelf && <span className="text-[9px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full font-bold">Você</span>}
+                                                        </div>
+                                                        <div className="text-xs text-slate-400">{user.email}</div>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td className="px-5 py-3.5">
+                                                <div className="space-y-1">
+                                                    <Select
+                                                        value={edit.role}
+                                                        onValueChange={v => setUserEdit(user.id, { role: v })}
+                                                        disabled={isSelf}
+                                                    >
+                                                        <SelectTrigger className="h-8 w-44 text-xs">
+                                                            <SelectValue />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="ADMIN">Administrador</SelectItem>
+                                                            <SelectItem value="RH">RH</SelectItem>
+                                                            <SelectItem value="GESTOR">Gestor</SelectItem>
+                                                            <SelectItem value="FUNCIONARIO">Funcionário</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                    <p className="text-[10px] text-slate-400 max-w-xs">{ROLE_DESC[edit.role]}</p>
+                                                </div>
+                                            </td>
+                                            <td className="px-5 py-3.5">
+                                                <label className={`relative inline-flex items-center ${isSelf ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}>
+                                                    <input
+                                                        type="checkbox"
+                                                        className="sr-only peer"
+                                                        checked={edit.active}
+                                                        disabled={isSelf}
+                                                        onChange={e => setUserEdit(user.id, { active: e.target.checked })}
+                                                    />
+                                                    <div className="w-9 h-5 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+                                                    <span className="ml-2 text-xs font-medium text-slate-600">{edit.active ? "Ativo" : "Inativo"}</span>
+                                                </label>
+                                            </td>
+                                            <td className="px-5 py-3.5 text-right">
+                                                {!isSelf && (
+                                                    <Button
+                                                        size="sm"
+                                                        className={`h-8 text-xs gap-1.5 ${changed ? "bg-blue-600 hover:bg-blue-700 text-white" : "bg-slate-100 text-slate-400 cursor-not-allowed"}`}
+                                                        disabled={!changed || savingUser === user.id}
+                                                        onClick={() => handleSaveUser(user)}
+                                                    >
+                                                        {savingUser === user.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                                                        {savingUser === user.id ? "Salvando..." : "Salvar"}
+                                                    </Button>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    )
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div className="px-5 py-3 border-t bg-slate-50/50">
+                        <div className="flex flex-wrap gap-3">
+                            {Object.entries(ROLE_LABELS).map(([role, label]) => (
+                                <div key={role} className="flex items-center gap-1.5">
+                                    <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${ROLE_COLORS[role]}`}>{label}</span>
+                                    <span className="text-[10px] text-slate-400">{ROLE_DESC[role].split("—")[0].trim()}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </CardContent>
+            </Card>
+        )}
 
         {isAdmin && (
             <Card className="border-slate-200 shadow-sm mt-6">

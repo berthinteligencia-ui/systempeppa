@@ -1,8 +1,22 @@
 import { getCompanySettings } from "@/lib/actions/settings"
+import { getSupabaseAdmin } from "@/lib/supabase-admin"
+import { auth } from "@/lib/auth"
 import { SettingsClient } from "./client"
 
 export default async function SettingsPage() {
+    const session = await auth()
     const company = await getCompanySettings()
+
+    let users: any[] = []
+    if (session?.user?.role === "ADMIN" && session?.user?.companyId) {
+        const supabase = getSupabaseAdmin()
+        const { data } = await supabase
+            .from("User")
+            .select("id, name, email, role, active")
+            .eq("companyId", session.user.companyId)
+            .order("name")
+        users = data ?? []
+    }
 
     return (
         <div className="space-y-6">
@@ -11,7 +25,7 @@ export default async function SettingsPage() {
                 <p className="text-sm text-slate-500">Gerencie os dados da sua empresa e preferências do sistema</p>
             </div>
 
-            <SettingsClient initialData={company} />
+            <SettingsClient initialData={company} initialUsers={users} currentUserId={session?.user?.id ?? ""} />
         </div>
     )
 }
