@@ -1,31 +1,12 @@
 "use server"
 
 import { auth } from "@/lib/auth"
-import { query, queryOne } from "@/lib/db"
+import { query } from "@/lib/db"
 import { revalidatePath } from "next/cache"
+import { CONTROLLABLE_ROLES, DEFAULT_PERMISSIONS, type AllPermissions, type PermissionMap } from "@/lib/permissions-config"
 
-export type PermissionMap = Record<string, boolean>
-export type AllPermissions = Record<string, PermissionMap> // role -> feature -> bool
-
-export const ALL_FEATURES = [
-    { key: "funcionarios",   label: "Funcionários" },
-    { key: "unidades",       label: "Unidades" },
-    { key: "nfs",            label: "Notas Fiscais" },
-    { key: "folha_pagamento",label: "Folha de Pagamento" },
-    { key: "comprovante",    label: "Comprovante" },
-    { key: "whatsapp",       label: "WhatsApp Business" },
-    { key: "relatorios",     label: "Relatórios" },
-    { key: "bancos",         label: "Bancos" },
-]
-
-export const CONTROLLABLE_ROLES = ["RH", "GESTOR", "FUNCIONARIO"] as const
-
-// Permissões padrão quando não há registro no banco
-const DEFAULT_PERMISSIONS: Record<string, PermissionMap> = {
-    RH:          { funcionarios: true, unidades: true, nfs: true, folha_pagamento: true, comprovante: true, whatsapp: true, relatorios: true, bancos: true },
-    GESTOR:      { funcionarios: false, unidades: true, nfs: false, folha_pagamento: false, comprovante: true, whatsapp: true, relatorios: true, bancos: false },
-    FUNCIONARIO: { funcionarios: false, unidades: false, nfs: false, folha_pagamento: false, comprovante: true, whatsapp: false, relatorios: false, bancos: false },
-}
+export type { PermissionMap, AllPermissions }
+export { CONTROLLABLE_ROLES }
 
 export async function getRolePermissions(companyId: string): Promise<AllPermissions> {
     const rows = await query<{ role: string; permissions: PermissionMap }>(
