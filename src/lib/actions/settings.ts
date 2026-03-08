@@ -4,6 +4,7 @@ import { getSupabaseAdmin, check } from "@/lib/supabase-admin"
 import { auth } from "@/lib/auth"
 import { revalidatePath } from "next/cache"
 import { randomUUID } from "crypto"
+import { logActivity } from "@/lib/logActivity"
 
 export async function getCompanySettings() {
     const session = await auth()
@@ -68,6 +69,15 @@ export async function updateCompanySettings(data: {
             { onConflict: "companyId" }
         ))
     }
+
+    await logActivity({
+        userId: session.user.id,
+        userName: session.user.name ?? "",
+        userEmail: session.user.email ?? "",
+        companyId,
+        action: "SAVE_SETTINGS",
+        target: "Configurações da Empresa",
+    })
 
     revalidatePath("/(dashboard)/configuracoes")
     revalidatePath("/dashboard")

@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { Building2, Phone, Mail, MapPin, Save, CheckCircle2, AlertCircle } from "lucide-react"
+import { useState, useEffect } from "react"
+import { Building2, Phone, Mail, MapPin, Save, CheckCircle2, AlertCircle, Shield, Clock, RefreshCw as RefreshIcon } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -10,19 +10,34 @@ import { Separator } from "@/components/ui/separator"
 import { updateCompanySettings } from "@/lib/actions/settings"
 import { runBackup, listBackups, getBackupUrl, deleteBackup } from "@/lib/actions/backup"
 import { Database, Download, History, Loader2, RefreshCw, Trash2 } from "lucide-react"
-import { useEffect } from "react"
+import { useSession } from "next-auth/react"
 
 interface SettingsClientProps {
     initialData: any
 }
 
+const ACTION_LABELS: Record<string, string> = {
+    PAGE_VIEW: "Visualizou página",
+    SAVE_SETTINGS: "Salvou configurações",
+    RUN_BACKUP: "Executou backup",
+    SEND_MESSAGE: "Enviou mensagem",
+    LOGIN: "Login",
+}
+
 export function SettingsClient({ initialData }: SettingsClientProps) {
+    const { data: session } = useSession()
+    const isAdmin = session?.user?.role === "ADMIN"
+
     const [loading, setLoading] = useState(false)
     const [success, setSuccess] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [backups, setBackups] = useState<any[]>([])
     const [loadingBackups, setLoadingBackups] = useState(false)
     const [backingUp, setBackingUp] = useState(false)
+
+    const [logs, setLogs] = useState<any[]>([])
+    const [loadingLogs, setLoadingLogs] = useState(false)
+    const [logSearch, setLogSearch] = useState("")
     const [formData, setFormData] = useState({
         name: initialData?.name || "",
         cnpj: initialData?.cnpj || "",
@@ -108,11 +123,26 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
         }
     }
 
+    const loadLogs = async () => {
+        setLoadingLogs(true)
+        try {
+            const res = await fetch("/api/logs?limit=200")
+            if (res.ok) setLogs(await res.json())
+        } catch { /* silencioso */ } finally {
+            setLoadingLogs(false)
+        }
+    }
+
     useEffect(() => {
         loadBackups()
     }, [])
 
+    useEffect(() => {
+        if (isAdmin) loadLogs()
+    }, [isAdmin])
+
     return (
+        <div className="space-y-6">
         <div className="grid gap-6 md:grid-cols-3">
             <div className="md:col-span-2 space-y-6">
                 <form onSubmit={handleSubmit}>
@@ -411,6 +441,112 @@ export function SettingsClient({ initialData }: SettingsClientProps) {
                     </CardContent>
                 </Card>
             </div>
+        </div>
+
+        {isAdmin && (
+            <Card className="border-slate-200 shadow-sm mt-6">
+                <CardHeader className="bg-slate-50/50">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className="rounded-lg bg-violet-100 p-2 text-violet-600">
+                                <Shield className="h-5 w-5" />
+                            </div>
+                            <div>
+                                <CardTitle>Logs de Acesso</CardTitle>
+                                <CardDescription>Registro de acessos e comandos dos usuários</CardDescription>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <Input
+                                placeholder="Filtrar por usuário ou ação..."
+                                value={logSearch}
+                                onChange={e => setLogSearch(e.target.value)}
+                                className="h-8 text-xs w-56"
+                            />
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 gap-1 text-xs"
+                                onClick={loadLogs}
+                                disabled={loadingLogs}
+                            >
+                                <RefreshIcon className={`h-3.5 w-3.5 ${loadingLogs ? "animate-spin" : ""}`} />
+                                Atualizar
+                            </Button>
+                        </div>
+                    </div>
+                </CardHeader>
+                <CardContent className="pt-4 p-0">
+                    {loadingLogs ? (
+                        <div className="flex items-center justify-center py-12">
+                            <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+                        </div>
+                    ) : logs.length === 0 ? (
+                        <p className="text-sm text-slate-400 text-center py-10 italic">Nenhum log registrado ainda.</p>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                                <thead>
+                                    <tr className="border-b bg-slate-50 text-slate-500 uppercase tracking-wide text-[10px]">
+                                        <th className="text-left px-4 py-2.5 font-semibold">Data / Hora</th>
+                                        <th className="text-left px-4 py-2.5 font-semibold">Usuário</th>
+                                        <th className="text-left px-4 py-2.5 font-semibold">Ação</th>
+                                        <th className="text-left px-4 py-2.5 font-semibold">Página / Alvo</th>
+                                        <th className="text-left px-4 py-2.5 font-semibold">IP</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {logs
+                                        .filter(l => {
+                                            if (!logSearch) return true
+                                            const s = logSearch.toLowerCase()
+                                            return (
+                                                l.user_name?.toLowerCase().includes(s) ||
+                                                l.user_email?.toLowerCase().includes(s) ||
+                                                l.action?.toLowerCase().includes(s) ||
+                                                l.target?.toLowerCase().includes(s)
+                                            )
+                                        })
+                                        .map((log, i) => (
+                                            <tr key={log.id ?? i} className="border-b last:border-0 hover:bg-slate-50 transition-colors">
+                                                <td className="px-4 py-2.5 whitespace-nowrap text-slate-500">
+                                                    <div className="flex items-center gap-1.5">
+                                                        <Clock className="h-3 w-3 text-slate-300" />
+                                                        {new Date(log.created_at).toLocaleString('pt-BR', {
+                                                            day: '2-digit', month: '2-digit', year: '2-digit',
+                                                            hour: '2-digit', minute: '2-digit', second: '2-digit'
+                                                        })}
+                                                    </div>
+                                                </td>
+                                                <td className="px-4 py-2.5">
+                                                    <div className="font-semibold text-slate-700">{log.user_name}</div>
+                                                    <div className="text-[10px] text-slate-400">{log.user_email}</div>
+                                                </td>
+                                                <td className="px-4 py-2.5">
+                                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                                        log.action === 'PAGE_VIEW' ? 'bg-blue-50 text-blue-600' :
+                                                        log.action === 'SAVE_SETTINGS' ? 'bg-emerald-50 text-emerald-600' :
+                                                        log.action === 'RUN_BACKUP' ? 'bg-amber-50 text-amber-600' :
+                                                        'bg-slate-100 text-slate-600'
+                                                    }`}>
+                                                        {ACTION_LABELS[log.action] ?? log.action}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-2.5 text-slate-600">{log.target ?? "—"}</td>
+                                                <td className="px-4 py-2.5 text-slate-400 font-mono">{log.ip_address ?? "—"}</td>
+                                            </tr>
+                                        ))
+                                    }
+                                </tbody>
+                            </table>
+                            <p className="text-[10px] text-slate-400 text-right px-4 py-2">
+                                {logs.length} registros — últimos 200
+                            </p>
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
+        )}
         </div>
     )
 }

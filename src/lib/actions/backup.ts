@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from "@/lib/supabase-admin"
 import { auth } from "@/lib/auth"
 import { revalidatePath } from "next/cache"
 import { randomUUID } from "crypto"
+import { logActivity } from "@/lib/logActivity"
 
 export async function runBackup() {
     const session = await auth()
@@ -62,6 +63,15 @@ export async function runBackup() {
             companyId,
             status: "SUCCESS",
             createdAt: now,
+        })
+
+        await logActivity({
+            userId: session.user.id,
+            userName: session.user.name ?? "",
+            userEmail: session.user.email ?? "",
+            companyId,
+            action: "RUN_BACKUP",
+            target: fileName,
         })
 
         revalidatePath("/(dashboard)/configuracoes")
