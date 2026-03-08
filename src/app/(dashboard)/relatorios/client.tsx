@@ -238,7 +238,7 @@ export function RelatoriosClient({
                                     ))}
                                 </Pie>
                                 <Tooltip
-                                    formatter={(v: number | undefined) => formatBRL(v ?? 0)}
+                                    formatter={(v) => formatBRL(typeof v === 'number' ? v : 0)}
                                 />
                                 <Legend
                                     layout="vertical"
