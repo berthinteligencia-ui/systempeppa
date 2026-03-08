@@ -24,6 +24,7 @@ export const authConfig: NextAuthConfig = {
         token.companyId = (user as any).companyId || ""
         token.companyName = (user as any).companyName || ""
         token.companyCnpj = (user as any).companyCnpj || ""
+        token.mustChangePassword = (user as any).mustChangePassword ?? false
       }
       return token
     },
@@ -33,6 +34,7 @@ export const authConfig: NextAuthConfig = {
       session.user.companyId = token.companyId as string
       session.user.companyName = token.companyName as string
       session.user.companyCnpj = token.companyCnpj as string
+      ;(session.user as any).mustChangePassword = token.mustChangePassword ?? false
       return session
     },
   },

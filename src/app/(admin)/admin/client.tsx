@@ -3,7 +3,7 @@
 import { useState } from "react"
 import {
     Plus, Building2, Users, Trash2, Edit2, ToggleLeft, ToggleRight,
-    Search, Loader2, CheckCircle2, XCircle, LogOut, X, Landmark,
+    Search, Loader2, CheckCircle2, XCircle, LogOut, X, Landmark, Copy, Check,
 } from "lucide-react"
 import {
     createCompany, updateCompany, toggleCompanyActive, deleteCompany,
@@ -38,6 +38,8 @@ export function AdminClient({ initialCompanies }: { initialCompanies: Company[] 
     const [userForm, setUserForm] = useState(emptyUser)
     const [saving, setSaving] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const [createdCreds, setCreatedCreds] = useState<{ name: string; email: string; password: string } | null>(null)
+    const [copied, setCopied] = useState<string | null>(null)
 
     const filtered = companies.filter(c =>
         c.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -50,7 +52,20 @@ export function AdminClient({ initialCompanies }: { initialCompanies: Company[] 
         setForm(emptyForm)
         setUserForm(emptyUser)
         setError(null)
+        setCreatedCreds(null)
         setIsDialogOpen(true)
+    }
+
+    function copyToClipboard(text: string, key: string) {
+        navigator.clipboard.writeText(text).then(() => {
+            setCopied(key)
+            setTimeout(() => setCopied(null), 2000)
+        })
+    }
+
+    function closeDialog() {
+        setIsDialogOpen(false)
+        setCreatedCreds(null)
     }
 
     function openEdit(c: Company) {
@@ -76,6 +91,10 @@ export function AdminClient({ initialCompanies }: { initialCompanies: Company[] 
             } else {
                 const created = await createCompany(form, userForm) as any
                 setCompanies(cs => [{ ...created, _count: { users: 1, employees: 0 } }, ...cs])
+                if (created.credentials) {
+                    setCreatedCreds(created.credentials)
+                    return // keep dialog open to show credentials
+                }
             }
             setIsDialogOpen(false)
         } catch (e: any) {
@@ -254,15 +273,51 @@ export function AdminClient({ initialCompanies }: { initialCompanies: Company[] 
                             <h2 className="font-bold text-slate-800 text-lg">
                                 {editingId ? "Editar Empresa" : "Nova Empresa"}
                             </h2>
-                            <button onClick={() => setIsDialogOpen(false)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 transition-colors">
+                            <button onClick={closeDialog} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 transition-colors">
                                 <X className="h-5 w-5" />
                             </button>
                         </div>
 
                         {/* Body */}
                         <div className="px-6 py-5 space-y-4 max-h-[70vh] overflow-y-auto">
-                            {/* Company fields */}
-                            <p className="text-xs font-bold uppercase tracking-widest text-blue-600">Dados da Empresa</p>
+                            {/* Credentials display after creation */}
+                            {createdCreds && (
+                                <div className="space-y-3">
+                                    <div className="flex items-center gap-2">
+                                        <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                                        <p className="font-bold text-slate-800">Empresa criada com sucesso!</p>
+                                    </div>
+                                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3">
+                                        <p className="text-xs font-bold uppercase tracking-widest text-amber-700">Credenciais temporárias</p>
+                                        <p className="text-xs text-amber-600">Compartilhe com o usuário. No primeiro acesso, será obrigatório trocar as credenciais.</p>
+                                        {[
+                                            { label: "Nome", value: createdCreds.name, key: "name" },
+                                            { label: "E-mail", value: createdCreds.email, key: "email" },
+                                            { label: "Senha", value: createdCreds.password, key: "password" },
+                                        ].map(({ label, value, key }) => (
+                                            <div key={key} className="flex items-center justify-between gap-3 rounded-lg bg-white border border-amber-200 px-3 py-2">
+                                                <div className="min-w-0">
+                                                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+                                                    <p className="text-sm font-mono text-slate-800 truncate">{value}</p>
+                                                </div>
+                                                <button
+                                                    onClick={() => copyToClipboard(value, key)}
+                                                    className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 transition-colors"
+                                                    title="Copiar"
+                                                >
+                                                    {copied === key
+                                                        ? <Check className="h-3.5 w-3.5 text-emerald-500" />
+                                                        : <Copy className="h-3.5 w-3.5" />
+                                                    }
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {!createdCreds && (
+                            <><p className="text-xs font-bold uppercase tracking-widest text-blue-600">Dados da Empresa</p>
                             <div className="grid grid-cols-2 gap-3">
                                 <div className="col-span-2">
                                     <Field label="Nome da empresa *" value={form.name} onChange={v => setForm(f => ({ ...f, name: v }))} placeholder="Razão Social" />
@@ -298,24 +353,36 @@ export function AdminClient({ initialCompanies }: { initialCompanies: Company[] 
                                     <p className="text-sm font-medium text-red-700">{error}</p>
                                 </div>
                             )}
+                            </>)}
                         </div>
 
                         {/* Footer */}
                         <div className="flex justify-end gap-2 px-6 py-4 border-t bg-slate-50">
-                            <button
-                                onClick={() => setIsDialogOpen(false)}
-                                className="rounded-xl px-4 py-2 text-sm font-medium text-slate-600 border border-slate-200 hover:bg-slate-100 transition-colors"
-                            >
-                                Cancelar
-                            </button>
-                            <button
-                                onClick={handleSave}
-                                disabled={saving}
-                                className="flex items-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 px-5 py-2 text-sm font-semibold text-white disabled:opacity-60 transition-colors"
-                            >
-                                {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-                                {editingId ? "Salvar alterações" : "Cadastrar empresa"}
-                            </button>
+                            {createdCreds ? (
+                                <button
+                                    onClick={closeDialog}
+                                    className="rounded-xl px-5 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-colors"
+                                >
+                                    Fechar
+                                </button>
+                            ) : (
+                                <>
+                                    <button
+                                        onClick={closeDialog}
+                                        className="rounded-xl px-4 py-2 text-sm font-medium text-slate-600 border border-slate-200 hover:bg-slate-100 transition-colors"
+                                    >
+                                        Cancelar
+                                    </button>
+                                    <button
+                                        onClick={handleSave}
+                                        disabled={saving}
+                                        className="flex items-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 px-5 py-2 text-sm font-semibold text-white disabled:opacity-60 transition-colors"
+                                    >
+                                        {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+                                        {editingId ? "Salvar alterações" : "Cadastrar empresa"}
+                                    </button>
+                                </>
+                            )}
                         </div>
                     </div>
                 </div>

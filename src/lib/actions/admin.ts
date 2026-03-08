@@ -106,6 +106,7 @@ export async function createCompany(data: CompanyInput, adminUser: { name: strin
         password: hashed,
         role: "ADMIN",
         active: true,
+        mustChangePassword: true,
         companyId,
         createdAt: now,
         updatedAt: now,
@@ -116,7 +117,13 @@ export async function createCompany(data: CompanyInput, adminUser: { name: strin
         throw new Error(userError.message)
     }
 
-    return { id: companyId, name: data.name, active: true, createdAt: now }
+    return {
+        id: companyId,
+        name: data.name,
+        active: true,
+        createdAt: now,
+        credentials: { name: adminUser.name, email: adminUser.email, password: adminUser.password },
+    }
 }
 
 export async function updateCompany(id: string, data: CompanyInput) {

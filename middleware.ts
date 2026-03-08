@@ -29,6 +29,12 @@ export default auth(async (req) => {
 
     if (!isLoggedIn) return Response.redirect(new URL("/login", nextUrl))
 
+    // Força troca de senha no primeiro acesso
+    const mustChangePassword = (req.auth as any)?.user?.mustChangePassword
+    if (mustChangePassword && pathname !== "/change-password") {
+        return Response.redirect(new URL("/change-password", nextUrl))
+    }
+
     // Verificação de permissão para rotas controladas
     const role = (req.auth as any)?.user?.role as string | undefined
     const companyId = (req.auth as any)?.user?.companyId as string | undefined

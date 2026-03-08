@@ -28,7 +28,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth(() => ({
 
         const { data: user, error } = await supabase
           .from("User")
-          .select("id, name, email, password, role, active, companyId, Company(id, name, cnpj)")
+          .select("id, name, email, password, role, active, companyId, mustChangePassword, Company(id, name, cnpj)")
           .eq("email", credentials.email as string)
           .single()
 
@@ -52,6 +52,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth(() => ({
           companyId: user.companyId,
           companyName: company?.name ?? "",
           companyCnpj: company?.cnpj ?? "",
+          mustChangePassword: user.mustChangePassword ?? false,
         }
       },
     }),
