@@ -5,9 +5,6 @@ import { query } from "@/lib/db"
 import { revalidatePath } from "next/cache"
 import { CONTROLLABLE_ROLES, DEFAULT_PERMISSIONS, type AllPermissions, type PermissionMap } from "@/lib/permissions-config"
 
-export type { PermissionMap, AllPermissions }
-export { CONTROLLABLE_ROLES }
-
 export async function getRolePermissions(companyId: string): Promise<AllPermissions> {
     const rows = await query<{ role: string; permissions: PermissionMap }>(
         `SELECT role, permissions FROM role_permissions WHERE company_id = $1`,
