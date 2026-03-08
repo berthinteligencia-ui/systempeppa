@@ -11,14 +11,16 @@ interface WhatsAppSidebarProps {
     conversations: any[]
     selectedId: string | null
     onSelect: (id: string) => void
+    onRefresh: () => void
     loading: boolean
 }
 
-export function WhatsAppSidebar({ conversations, selectedId, onSelect, loading }: WhatsAppSidebarProps) {
+export function WhatsAppSidebar({ conversations, selectedId, onSelect, onRefresh, loading }: WhatsAppSidebarProps) {
     const [searchTerm, setSearchTerm] = useState("")
     const [activeTab, setActiveTab] = useState<Tab>("Ativos")
     const [employees, setEmployees] = useState<any[]>([])
     const [showEmployees, setShowEmployees] = useState(false)
+    const [creating, setCreating] = useState(false)
 
     useEffect(() => {
         if (showEmployees) {
@@ -29,24 +31,32 @@ export function WhatsAppSidebar({ conversations, selectedId, onSelect, loading }
         }
     }, [showEmployees])
 
+    const lc = searchTerm.toLowerCase()
     const filteredItems = showEmployees
-        ? employees.filter(e => e.name.toLowerCase().includes(searchTerm.toLowerCase()))
-        : conversations.filter(c => c.employee.name.toLowerCase().includes(searchTerm.toLowerCase()))
+        ? employees.filter(e => (e.name ?? "").toLowerCase().includes(lc))
+        : conversations.filter(c => (c.employee?.name ?? "").toLowerCase().includes(lc))
 
     const handleItemClick = async (item: any) => {
         if (showEmployees) {
+            setCreating(true)
             try {
                 const resp = await fetch("/api/whatsapp/messages", {
                     method: "POST",
+                    headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ content: "Iniciando conversa...", employeeId: item.id }),
                 })
                 if (resp.ok) {
                     const newMsg = await resp.json()
+                    await onRefresh()
                     onSelect(newMsg.conversationId)
                     setShowEmployees(false)
                     setSearchTerm("")
+                } else {
+                    const text = await resp.text()
+                    console.error("[SIDEBAR] Erro ao criar conversa:", resp.status, text)
                 }
-            } catch (err) { console.error(err) }
+            } catch (err) { console.error("[SIDEBAR] Erro:", err) }
+            finally { setCreating(false) }
         } else {
             onSelect(item.id)
         }
@@ -61,12 +71,13 @@ export function WhatsAppSidebar({ conversations, selectedId, onSelect, loading }
                 <h2 className="text-lg font-bold text-slate-900">Conversas</h2>
                 <button
                     onClick={() => setShowEmployees(!showEmployees)}
+                    disabled={creating}
                     className={cn(
                         "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors",
                         showEmployees ? "bg-blue-100 text-blue-700" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                     )}
                 >
-                    <MessageSquarePlus className="h-4 w-4" /> Nova
+                    <MessageSquarePlus className="h-4 w-4" /> {creating ? "..." : "Nova"}
                 </button>
             </div>
 
@@ -123,8 +134,10 @@ export function WhatsAppSidebar({ conversations, selectedId, onSelect, loading }
                     filteredItems.map(item => {
                         const isConv = !showEmployees
                         const convId = isConv ? item.id : null
-                        const name = isConv ? item.employee.name : item.name
-                        const subtitle = isConv ? (item.messages?.[0]?.content || item.employee.position) : item.position
+                        const name = isConv ? (item.employee?.name ?? "—") : item.name
+                        const subtitle = isConv
+                            ? (item.messages?.[0]?.content || item.employee?.department || "")
+                            : item.department
                         const time = isConv && item.messages?.[0]
                             ? new Date(item.messages[0].createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
                             : ""

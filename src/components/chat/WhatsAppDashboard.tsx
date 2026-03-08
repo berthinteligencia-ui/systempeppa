@@ -44,14 +44,14 @@ function StatCard({
     )
 }
 
-export function WhatsAppDashboard() {
+export function WhatsAppDashboard({ onSelect }: { onSelect: (id: string) => void }) {
     const [stats, setStats] = useState<Stats | null>(null)
     const [loading, setLoading] = useState(true)
 
     useEffect(() => {
         fetch("/api/whatsapp/stats")
-            .then(r => r.json())
-            .then(data => { setStats(data); setLoading(false) })
+            .then(r => r.ok ? r.json() : null)
+            .then(data => { if (data) setStats(data); setLoading(false) })
             .catch(() => setLoading(false))
     }, [])
 
@@ -114,20 +114,20 @@ export function WhatsAppDashboard() {
                         <span>Em tempo real</span>
                     </div>
                 </div>
-                <RecentConversations />
+                <RecentConversations onSelect={onSelect} />
             </div>
         </div>
     )
 }
 
-function RecentConversations() {
+function RecentConversations({ onSelect }: { onSelect: (id: string) => void }) {
     const [convs, setConvs] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
 
     useEffect(() => {
         fetch("/api/whatsapp/conversations")
-            .then(r => r.json())
-            .then(data => { setConvs(data.slice(0, 8)); setLoading(false) })
+            .then(r => r.ok ? r.json() : [])
+            .then(data => { setConvs(Array.isArray(data) ? data.slice(0, 8) : []); setLoading(false) })
             .catch(() => setLoading(false))
     }, [])
 
@@ -152,7 +152,7 @@ function RecentConversations() {
                 <thead>
                     <tr className="border-b bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                         <th className="px-5 py-3">Lead</th>
-                        <th className="px-5 py-3">Cargo</th>
+                        <th className="px-5 py-3">Unidade</th>
                         <th className="px-5 py-3">Última Mensagem</th>
                         <th className="px-5 py-3">Horário</th>
                         <th className="px-5 py-3">Mensagens</th>
@@ -162,7 +162,7 @@ function RecentConversations() {
                     {convs.map(conv => {
                         const lastMsg = conv.messages?.[0]
                         const name = conv.employee?.name || "—"
-                        const position = conv.employee?.position || "—"
+                        const department = conv.employee?.department || "—"
                         const time = lastMsg ? new Date(lastMsg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"
                         const preview = lastMsg?.content?.slice(0, 50) + (lastMsg?.content?.length > 50 ? "..." : "") || "—"
 
@@ -176,14 +176,17 @@ function RecentConversations() {
                                         <p className="font-semibold text-slate-800 text-sm">{name}</p>
                                     </div>
                                 </td>
-                                <td className="px-5 py-3.5 text-sm text-slate-500">{position}</td>
+                                <td className="px-5 py-3.5 text-sm text-slate-500">{department}</td>
                                 <td className="px-5 py-3.5 text-sm text-slate-600 max-w-xs truncate">{preview}</td>
                                 <td className="px-5 py-3.5 text-xs text-slate-400 font-mono">{time}</td>
                                 <td className="px-5 py-3.5">
-                                    <div className="flex items-center gap-1 text-xs text-slate-500">
-                                        <ArrowUpRight className="h-3.5 w-3.5 text-blue-500" />
+                                    <button
+                                        onClick={() => onSelect(conv.id)}
+                                        className="flex items-center gap-1 text-xs text-blue-600 font-semibold hover:underline"
+                                    >
+                                        <ArrowUpRight className="h-3.5 w-3.5" />
                                         Ver conversa
-                                    </div>
+                                    </button>
                                 </td>
                             </tr>
                         )

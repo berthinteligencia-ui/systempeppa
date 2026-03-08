@@ -1,78 +1,124 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { Send, MoreVertical, Paperclip, Smile, Phone, Video } from "lucide-react"
+import { Send, MoreVertical, Paperclip, Smile, Phone, Video, AlertCircle } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { cn } from "@/lib/utils"
+import { supabase } from "@/lib/supabase"
 
 interface WhatsAppChatWindowProps {
-    conversationId: string | null
-    onMessageSent: () => void
-    onConversationLoaded?: (conv: any) => void
+    conversation: any | null        // conversa selecionada (vinda do Container)
+    onMessageSent: () => void       // atualiza lista de conversas após envio
 }
 
-export function WhatsAppChatWindow({ conversationId, onMessageSent, onConversationLoaded }: WhatsAppChatWindowProps) {
+export function WhatsAppChatWindow({ conversation, onMessageSent }: WhatsAppChatWindowProps) {
     const [messages, setMessages] = useState<any[]>([])
-    const [conversation, setConversation] = useState<any>(null)
     const [inputValue, setInputValue] = useState("")
-    const [loading, setLoading] = useState(false)
+    const [sending, setSending] = useState(false)
+    const [error, setError] = useState<string | null>(null)
     const scrollRef = useRef<HTMLDivElement>(null)
+    const conversationId = conversation?.id ?? null
 
+    // Função para mapear mensagens do banco para o frontend
+    const mapMessage = (msg: any) => ({
+        id: msg.id,
+        content: msg.conteudo,
+        senderType: msg.tipo === 'lead' ? 'EMPLOYEE' : 'COMPANY',
+        createdAt: msg.created_at,
+        conversationId: msg.lead_id
+    })
+
+    // Busca mensagens da tabela mensagens
     const fetchMessages = async () => {
         if (!conversationId) return
         try {
             const resp = await fetch(`/api/whatsapp/messages?conversationId=${conversationId}`)
-            if (resp.ok) setMessages(await resp.json())
-        } catch (err) { console.error(err) }
-    }
-
-    const fetchConversationDetails = async () => {
-        if (!conversationId) return
-        try {
-            const resp = await fetch("/api/whatsapp/conversations")
             if (resp.ok) {
-                const conversations = await resp.json()
-                const conv = conversations.find((c: any) => c.id === conversationId)
-                if (conv) {
-                    setConversation(conv)
-                    onConversationLoaded?.(conv)
-                }
+                const data = await resp.json()
+                setMessages(Array.isArray(data) ? data : [])
+                setError(null)
+            } else {
+                const body = await resp.json().catch(() => ({}))
+                setError(`[${resp.status}] ${body?.error ?? resp.statusText}`)
             }
-        } catch (err) { console.error(err) }
+        } catch (err: any) {
+            setError(err.message)
+        }
     }
 
+    // Inicia ouvintes de Realtime e busca mensagens iniciais
     useEffect(() => {
         setMessages([])
-        setConversation(null)
+        setError(null)
+        setInputValue("")
+        if (!conversationId) return
+
         fetchMessages()
-        fetchConversationDetails()
-        const timer = setInterval(fetchMessages, 3000)
-        return () => clearInterval(timer)
+
+        // Inscreve no Realtime do Supabase para a tabela mensagens
+        const channel = supabase
+            .channel(`mensagens:lead_id=eq.${conversationId}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'mensagens',
+                    filter: `lead_id=eq.${conversationId}`
+                },
+                (payload) => {
+                    console.log('Realtime message received:', payload.new)
+                    const newMsg = mapMessage(payload.new)
+
+                    setMessages(prev => {
+                        // Evita duplicatas caso o fetch e o realtime ocorram quase juntos
+                        if (prev.some(m => m.id === newMsg.id)) return prev
+                        return [...prev, newMsg]
+                    })
+                    onMessageSent() // Notifica para atualizar a lista lateral
+                }
+            )
+            .subscribe()
+
+        return () => {
+            supabase.removeChannel(channel)
+        }
     }, [conversationId])
 
+    // Scroll automático para o final
     useEffect(() => {
-        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+        if (scrollRef.current)
+            scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }, [messages])
 
+    // Envia mensagem: salva no banco + dispara webhook
     const handleSend = async (e?: React.FormEvent) => {
         e?.preventDefault()
         if (!inputValue.trim() || !conversationId) return
-        setLoading(true)
+        setSending(true)
         try {
             const resp = await fetch("/api/whatsapp/messages", {
                 method: "POST",
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ content: inputValue, conversationId }),
             })
             if (resp.ok) {
                 setInputValue("")
-                fetchMessages()
+                await fetchMessages()
                 onMessageSent()
+            } else {
+                const body = await resp.json().catch(() => ({}))
+                console.error("[CHAT] Erro ao enviar:", resp.status, body)
             }
-        } catch (err) { console.error(err) }
-        finally { setLoading(false) }
+        } catch (err) {
+            console.error("[CHAT] Erro ao enviar:", err)
+        } finally {
+            setSending(false)
+        }
     }
 
-    if (!conversationId) {
+    // Sem conversa selecionada
+    if (!conversation) {
         return (
             <div className="flex-1 flex flex-col items-center justify-center bg-slate-50">
                 <div className="w-20 h-20 rounded-full bg-blue-100 flex items-center justify-center mb-5">
@@ -80,22 +126,25 @@ export function WhatsAppChatWindow({ conversationId, onMessageSent, onConversati
                 </div>
                 <h2 className="text-xl font-bold text-slate-800">WhatsApp Business</h2>
                 <p className="text-slate-500 mt-2 text-sm max-w-xs text-center leading-relaxed">
-                    Selecione uma conversa ou inicie uma nova para se comunicar com seus funcionários.
+                    Selecione uma conversa na lista para visualizar as mensagens.
                 </p>
             </div>
         )
     }
 
-    const employeeName = conversation?.employee?.name || "..."
+    const employeeName = conversation.employee?.name ?? "—"
     const employeeInitial = employeeName.charAt(0).toUpperCase()
 
     return (
         <div className="flex-1 flex flex-col min-w-0">
-            {/* Chat Header */}
+
+            {/* Cabeçalho */}
             <div className="px-5 py-3 bg-white border-b border-slate-100 flex items-center justify-between shadow-sm z-10">
                 <div className="flex items-center gap-3">
                     <Avatar className="h-10 w-10">
-                        <AvatarFallback className="bg-blue-600 text-white font-bold">{employeeInitial}</AvatarFallback>
+                        <AvatarFallback className="bg-blue-600 text-white font-bold">
+                            {employeeInitial}
+                        </AvatarFallback>
                     </Avatar>
                     <div>
                         <p className="font-bold text-slate-900 text-sm leading-tight">{employeeName}</p>
@@ -115,15 +164,27 @@ export function WhatsAppChatWindow({ conversationId, onMessageSent, onConversati
                 </div>
             </div>
 
-            {/* Messages Area */}
+            {/* Área de mensagens */}
             <div ref={scrollRef} className="flex-1 overflow-y-auto p-5 flex flex-col gap-2 bg-slate-50">
-                {messages.length === 0 && (
+
+                {/* Erro de fetch */}
+                {error && (
+                    <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-xs px-3 py-2 rounded-lg">
+                        <AlertCircle className="h-4 w-4 shrink-0" />
+                        <span className="font-mono break-all">{error}</span>
+                    </div>
+                )}
+
+                {/* Sem mensagens */}
+                {!error && messages.length === 0 && (
                     <div className="flex items-center justify-center py-8">
                         <p className="text-xs text-slate-400 bg-white rounded-full px-4 py-1.5 shadow-sm border">
                             Início da conversa
                         </p>
                     </div>
                 )}
+
+                {/* Mensagens da tabela Message */}
                 {messages.map(msg => (
                     <div
                         key={msg.id}
@@ -146,7 +207,7 @@ export function WhatsAppChatWindow({ conversationId, onMessageSent, onConversati
                 ))}
             </div>
 
-            {/* Input Area */}
+            {/* Campo de envio */}
             <form onSubmit={handleSend} className="px-4 py-3 bg-white border-t border-slate-100 flex items-center gap-3">
                 <div className="flex gap-2 text-slate-400">
                     <button type="button" className="p-1.5 rounded-lg hover:text-slate-600 hover:bg-slate-100 transition-colors">
@@ -156,19 +217,17 @@ export function WhatsAppChatWindow({ conversationId, onMessageSent, onConversati
                         <Paperclip className="h-5 w-5" />
                     </button>
                 </div>
-                <div className="flex-1">
-                    <input
-                        value={inputValue}
-                        onChange={e => setInputValue(e.target.value)}
-                        disabled={loading}
-                        placeholder="Escreva uma mensagem..."
-                        className="w-full px-4 py-2.5 bg-slate-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 placeholder:text-slate-400"
-                        onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend() } }}
-                    />
-                </div>
+                <input
+                    value={inputValue}
+                    onChange={e => setInputValue(e.target.value)}
+                    disabled={sending}
+                    placeholder="Escreva uma mensagem..."
+                    className="flex-1 px-4 py-2.5 bg-slate-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 placeholder:text-slate-400"
+                    onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend() } }}
+                />
                 <button
                     type="submit"
-                    disabled={loading || !inputValue.trim()}
+                    disabled={sending || !inputValue.trim()}
                     className="h-10 w-10 bg-[#1a3c6e] rounded-xl flex items-center justify-center shadow-sm hover:bg-blue-800 transition-colors disabled:opacity-40"
                 >
                     <Send className="h-4 w-4 text-white ml-0.5" />

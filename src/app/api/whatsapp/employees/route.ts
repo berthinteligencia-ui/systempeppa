@@ -13,14 +13,21 @@ export async function GET() {
         const supabase = getSupabaseAdmin()
         const { data: employees, error } = await supabase
             .from("Employee")
-            .select("id, name, position")
+            .select("id, name, position, phone, department:Department(name)")
             .eq("companyId", session.user.companyId)
             .eq("status", "ACTIVE")
+            .not("phone", "is", null)
+            .neq("phone", "")
             .order("name", { ascending: true })
 
         if (error) throw error
 
-        return NextResponse.json(employees)
+        const result = (employees as any[]).map(e => ({
+            ...e,
+            department: e.department?.name || "—"
+        }))
+
+        return NextResponse.json(result)
     } catch (error) {
         console.error("[EMPLOYEES_CHAT_GET]", error)
         return new NextResponse("Internal Error", { status: 500 })

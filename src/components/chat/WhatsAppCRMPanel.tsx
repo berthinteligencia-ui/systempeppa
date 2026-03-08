@@ -1,9 +1,10 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef } from "react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { FileText, Calendar, X, Plus, ChevronDown } from "lucide-react"
+import { FileText, Calendar, X, Plus, ChevronDown, Upload } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { supabase } from "@/lib/supabase"
 
 const STATUS_OPTIONS = ["Colaborador Ativo", "Colaborador Inativo", "Aguardando", "Lead"]
 const STATUS_COLORS: Record<string, string> = {
@@ -21,9 +22,9 @@ interface WhatsAppCRMPanelProps {
 
 export function WhatsAppCRMPanel({ conversation }: WhatsAppCRMPanelProps) {
     const [status, setStatus] = useState("Colaborador Ativo")
-    const [tags, setTags] = useState<string[]>(["Financeiro", "Holerites"])
-    const [showTagPicker, setShowTagPicker] = useState(false)
     const [showStatusDropdown, setShowStatusDropdown] = useState(false)
+    const [uploading, setUploading] = useState(false)
+    const fileInputRef = useRef<HTMLInputElement>(null)
 
     if (!conversation) {
         return (
@@ -41,13 +42,54 @@ export function WhatsAppCRMPanel({ conversation }: WhatsAppCRMPanelProps) {
     const position = employee?.position || "—"
     const initial = name.charAt(0).toUpperCase()
 
-    function removeTag(tag: string) {
-        setTags(t => t.filter(x => x !== tag))
-    }
+    async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+        const file = e.target.files?.[0]
+        if (!file || !conversation) return
 
-    function addTag(tag: string) {
-        if (!tags.includes(tag)) setTags(t => [...t, tag])
-        setShowTagPicker(false)
+        if (file.type !== "application/pdf") {
+            alert("Por favor, selecione apenas arquivos PDF.")
+            return
+        }
+
+        setUploading(true)
+        try {
+            const fileExt = file.name.split('.').pop()
+            const fileName = `${conversation.companyId}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`
+            const filePath = `whatsapp/attachments/${fileName}`
+
+            // Upload to 'backups' bucket (using it as general purpose since it exists and is configured)
+            // Or ideally use an 'attachments' bucket if it existed.
+            const { data, error: uploadError } = await supabase.storage
+                .from("backups")
+                .upload(filePath, file, { cacheControl: "3600", upsert: false })
+
+            if (uploadError) throw uploadError
+
+            // Get public URL
+            const { data: { publicUrl } } = supabase.storage
+                .from("backups")
+                .getPublicUrl(filePath)
+
+            // Send message with link
+            const resp = await fetch("/api/whatsapp/messages", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    content: `Arquivo enviado: ${publicUrl}`,
+                    conversationId: conversation.id
+                }),
+            })
+
+            if (!resp.ok) throw new Error("Erro ao enviar mensagem com o arquivo")
+
+            alert("PDF enviado com sucesso!")
+        } catch (err: any) {
+            console.error("[CRM_PANEL] Error uploading PDF:", err)
+            alert("Erro ao enviar PDF: " + err.message)
+        } finally {
+            setUploading(false)
+            if (fileInputRef.current) fileInputRef.current.value = ""
+        }
     }
 
     return (
@@ -61,10 +103,10 @@ export function WhatsAppCRMPanel({ conversation }: WhatsAppCRMPanelProps) {
                 </Avatar>
                 <h3 className="font-bold text-slate-900 text-base text-center">{name}</h3>
                 <p className="text-sm text-slate-500 mt-0.5">{phone}</p>
-                {position && (
-                    <span className="mt-2 rounded-full bg-slate-100 px-3 py-0.5 text-xs font-medium text-slate-600">
-                        {position}
-                    </span>
+                {employee?.department && (
+                    <p className="text-xs font-semibold text-blue-600 mt-1 uppercase tracking-wider">
+                        {employee.department}
+                    </p>
                 )}
             </div>
 
@@ -103,54 +145,32 @@ export function WhatsAppCRMPanel({ conversation }: WhatsAppCRMPanelProps) {
                         )}
                     </div>
                 </div>
-
-                {/* Tags */}
-                <div className="space-y-2">
-                    <p className="text-xs font-semibold text-slate-500">Tags</p>
-                    <div className="flex flex-wrap gap-1.5">
-                        {tags.map(tag => (
-                            <span
-                                key={tag}
-                                className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600"
-                            >
-                                {tag}
-                                <button onClick={() => removeTag(tag)} className="hover:text-red-500 transition-colors">
-                                    <X className="h-2.5 w-2.5" />
-                                </button>
-                            </span>
-                        ))}
-                        <div className="relative">
-                            <button
-                                onClick={() => setShowTagPicker(o => !o)}
-                                className="inline-flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-500 hover:border-blue-400 hover:text-blue-600 transition-colors"
-                            >
-                                <Plus className="h-2.5 w-2.5" /> Adicionar
-                            </button>
-                            {showTagPicker && (
-                                <div className="absolute top-7 left-0 z-20 bg-white border border-slate-200 rounded-xl shadow-lg py-1 min-w-[140px]">
-                                    {PRESET_TAGS.filter(t => !tags.includes(t)).map(tag => (
-                                        <button
-                                            key={tag}
-                                            onClick={() => addTag(tag)}
-                                            className="w-full text-left px-4 py-2 text-xs hover:bg-slate-50 transition-colors text-slate-700"
-                                        >
-                                            {tag}
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </div>
             </div>
 
             {/* Quick Actions */}
             <div className="px-5 pb-6 border-t border-slate-100 pt-5">
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Ações Rápidas</p>
                 <div className="grid grid-cols-2 gap-2">
-                    <button className="flex flex-col items-center gap-1.5 rounded-xl border border-slate-200 p-3 hover:bg-slate-50 hover:border-blue-200 transition-colors group">
-                        <FileText className="h-5 w-5 text-slate-400 group-hover:text-blue-600 transition-colors" />
-                        <span className="text-[11px] font-semibold text-slate-600 group-hover:text-blue-600">Enviar PDF</span>
+                    <input
+                        type="file"
+                        ref={fileInputRef}
+                        onChange={handleFileSelect}
+                        accept="application/pdf"
+                        className="hidden"
+                    />
+                    <button
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={uploading}
+                        className="flex flex-col items-center gap-1.5 rounded-xl border border-slate-200 p-3 hover:bg-slate-50 hover:border-blue-200 transition-colors group disabled:opacity-50"
+                    >
+                        {uploading ? (
+                            <div className="h-5 w-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                            <FileText className="h-5 w-5 text-slate-400 group-hover:text-blue-600 transition-colors" />
+                        )}
+                        <span className="text-[11px] font-semibold text-slate-600 group-hover:text-blue-600">
+                            {uploading ? "Enviando..." : "Enviar PDF"}
+                        </span>
                     </button>
                     <button className="flex flex-col items-center gap-1.5 rounded-xl border border-slate-200 p-3 hover:bg-slate-50 hover:border-blue-200 transition-colors group">
                         <Calendar className="h-5 w-5 text-slate-400 group-hover:text-blue-600 transition-colors" />

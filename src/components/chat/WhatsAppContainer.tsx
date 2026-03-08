@@ -11,21 +11,27 @@ import { cn } from "@/lib/utils"
 type View = "dashboard" | "chat"
 
 export function WhatsAppContainer() {
-    const [view, setView] = useState<View>("dashboard")
-    const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
+    const [view, setView] = useState<View>("chat")
+    const [selectedId, setSelectedId] = useState<string | null>(null)
     const [conversations, setConversations] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
-    const [activeConversation, setActiveConversation] = useState<any>(null)
 
     const fetchConversations = async () => {
         try {
             const resp = await fetch("/api/whatsapp/conversations")
             if (resp.ok) setConversations(await resp.json())
-        } catch (err) { console.error(err) }
+        } catch (err) { console.error("[CONTAINER]", err) }
         finally { setLoading(false) }
     }
 
-    useEffect(() => { fetchConversations() }, [])
+    useEffect(() => {
+        fetchConversations()
+        const timer = setInterval(fetchConversations, 5000)
+        return () => clearInterval(timer)
+    }, [])
+
+    // Conversa selecionada vinda diretamente da lista já carregada
+    const selectedConversation = conversations.find(c => c.id === selectedId) ?? null
 
     const navItems: { id: View; label: string; icon: React.ElementType }[] = [
         { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -37,7 +43,7 @@ export function WhatsAppContainer() {
             className="flex flex-col bg-white rounded-xl shadow-xl overflow-hidden border border-slate-200"
             style={{ height: "calc(100vh - 140px)" }}
         >
-            {/* Top nav tabs */}
+            {/* Tabs */}
             <div className="flex items-center gap-1 border-b border-slate-100 px-5 bg-white shrink-0">
                 {navItems.map(item => (
                     <button
@@ -45,9 +51,7 @@ export function WhatsAppContainer() {
                         onClick={() => setView(item.id)}
                         className={cn(
                             "flex items-center gap-2 px-4 py-3.5 text-sm font-semibold transition-colors relative",
-                            view === item.id
-                                ? "text-blue-600"
-                                : "text-slate-500 hover:text-slate-700"
+                            view === item.id ? "text-blue-600" : "text-slate-500 hover:text-slate-700"
                         )}
                     >
                         <item.icon className="h-4 w-4" />
@@ -62,21 +66,23 @@ export function WhatsAppContainer() {
             {/* Content */}
             <div className="flex flex-1 overflow-hidden">
                 {view === "dashboard" ? (
-                    <WhatsAppDashboard />
+                    <WhatsAppDashboard
+                        onSelect={(id) => { setSelectedId(id); setView("chat"); }}
+                    />
                 ) : (
                     <>
                         <WhatsAppSidebar
                             conversations={conversations}
-                            selectedId={selectedConversationId}
-                            onSelect={setSelectedConversationId}
+                            selectedId={selectedId}
+                            onSelect={setSelectedId}
+                            onRefresh={fetchConversations}
                             loading={loading}
                         />
                         <WhatsAppChatWindow
-                            conversationId={selectedConversationId}
+                            conversation={selectedConversation}
                             onMessageSent={fetchConversations}
-                            onConversationLoaded={setActiveConversation}
                         />
-                        <WhatsAppCRMPanel conversation={activeConversation} />
+                        <WhatsAppCRMPanel conversation={selectedConversation} />
                     </>
                 )}
             </div>

@@ -4,7 +4,9 @@ import { useState, useRef, useCallback } from "react"
 import {
   UserPlus, Pencil, Trash2, CheckCircle2, AlertCircle, Clock, Filter,
   CheckSquare, Square, Download, FileDown, FileUp, Loader2, X, FileSpreadsheet,
+  Receipt,
 } from "lucide-react"
+import { useRouter } from "next/navigation"
 import * as XLSX from "xlsx"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -167,6 +169,7 @@ function parseImportRows(rawRows: Record<string, unknown>[], headers: string[], 
 export function FuncionariosClient({
   employees, departments,
 }: { employees: Employee[]; departments: Department[] }) {
+  const router = useRouter()
   const [open, setOpen] = useState(false)
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [editing, setEditing] = useState<Employee | null>(null)
@@ -542,6 +545,13 @@ ${rows.map((emp, i) => `<tr>
                     </td>
                     <td className="px-5 py-3.5 text-right">
                       <div className="flex justify-end gap-1">
+                        <button
+                          onClick={() => router.push(`/comprovante?cpf=${emp.cpf || ""}`)}
+                          title="Ver Comprovantes"
+                          className="rounded p-1.5 text-blue-500 hover:bg-blue-50"
+                        >
+                          <Receipt className="h-4 w-4" />
+                        </button>
                         <button onClick={() => openEdit(emp)} className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
                           <Pencil className="h-4 w-4" />
                         </button>
