@@ -24,20 +24,21 @@ import { cn } from "@/lib/utils"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 
 const mainNav = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/funcionarios", label: "Funcionários", icon: Users },
-  { href: "/unidades", label: "Unidades", icon: Building2 },
-  { href: "/nfs", label: "NFs", icon: Receipt },
-  { href: "/folha-pagamento", label: "Folha de Pagamento", icon: FileSpreadsheet },
-  { href: "/comprovante", label: "Comprovante", icon: FileText },
-  { href: "/whatsapp-business", label: "WhatsApp Business", icon: MessageSquare },
-  { href: "/relatorios", label: "Relatórios", icon: BarChart3 },
-  { href: "/alertas", label: "Alertas Financeiros", icon: AlertTriangle },
+  { href: "/dashboard",        label: "Dashboard",          icon: LayoutDashboard, feature: null },
+  { href: "/funcionarios",     label: "Funcionários",       icon: Users,           feature: "funcionarios" },
+  { href: "/unidades",         label: "Unidades",           icon: Building2,       feature: "unidades" },
+  { href: "/nfs",              label: "NFs",                icon: Receipt,         feature: "nfs" },
+  { href: "/folha-pagamento",  label: "Folha de Pagamento", icon: FileSpreadsheet, feature: "folha_pagamento" },
+  { href: "/comprovante",      label: "Comprovante",        icon: FileText,        feature: "comprovante" },
+  { href: "/whatsapp-business",label: "WhatsApp Business",  icon: MessageSquare,   feature: "whatsapp" },
+  { href: "/relatorios",       label: "Relatórios",         icon: BarChart3,       feature: "relatorios" },
+  { href: "/bancos",           label: "Bancos",             icon: Landmark,        feature: "bancos" },
+  { href: "/alertas",          label: "Alertas Financeiros",icon: AlertTriangle,   feature: null },
 ]
 
 const adminNav = [
   { href: "/configuracoes", label: "Configurações", icon: Settings },
-  { href: "/usuarios", label: "Usuários", icon: Users },
+  { href: "/usuarios",      label: "Usuários",       icon: Users },
 ]
 
 function initials(name: string) {
@@ -50,6 +51,25 @@ export function Sidebar() {
   const user = session?.user
   const [collapsed, setCollapsed] = useState(false)
   const sidebarRef = useRef<HTMLElement>(null)
+  const [allowedFeatures, setAllowedFeatures] = useState<Record<string, boolean> | null>(null)
+
+  useEffect(() => {
+    if (!session?.user) return
+    if (session.user.role === "ADMIN") { setAllowedFeatures(null); return }
+    fetch("/api/permissions")
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.isAdmin) { setAllowedFeatures(null); return }
+        setAllowedFeatures(data?.permissions ?? {})
+      })
+      .catch(() => setAllowedFeatures(null))
+  }, [session?.user?.role, session?.user?.companyId])
+
+  function isAllowed(feature: string | null): boolean {
+    if (!feature || !allowedFeatures) return true
+    const val = allowedFeatures[feature]
+    return val !== false // undefined = allowed by default
+  }
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -112,19 +132,23 @@ export function Sidebar() {
 
       {/* Main nav */}
       <nav className="flex flex-1 flex-col gap-1 px-3 py-4">
-        {mainNav.map((item) => (
+        {mainNav.filter(item => isAllowed(item.feature)).map((item) => (
           <NavItem key={item.href} {...item} />
         ))}
 
-        {!collapsed && (
-          <p className="mt-4 px-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
-            Administração
-          </p>
+        {user?.role === "ADMIN" && (
+          <>
+            {!collapsed && (
+              <p className="mt-4 px-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                Administração
+              </p>
+            )}
+            {collapsed && <div className="mt-4 mx-1 border-t border-white/10" />}
+            {adminNav.map((item) => (
+              <NavItem key={item.href} {...item} />
+            ))}
+          </>
         )}
-        {collapsed && <div className="mt-4 mx-1 border-t border-white/10" />}
-        {adminNav.map((item) => (
-          <NavItem key={item.href} {...item} />
-        ))}
       </nav>
 
       {/* Collapse toggle */}

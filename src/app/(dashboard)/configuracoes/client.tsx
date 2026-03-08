@@ -10,7 +10,8 @@ import { Separator } from "@/components/ui/separator"
 import { updateCompanySettings } from "@/lib/actions/settings"
 import { runBackup, listBackups, getBackupUrl, deleteBackup } from "@/lib/actions/backup"
 import { updateUser } from "@/lib/actions/users"
-import { Database, Download, History, Loader2, RefreshCw, Trash2 } from "lucide-react"
+import { updateRolePermissions, ALL_FEATURES, CONTROLLABLE_ROLES, type AllPermissions } from "@/lib/actions/permissions"
+import { Database, Download, History, Loader2, RefreshCw, Trash2, Lock } from "lucide-react"
 import { useSession } from "next-auth/react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
@@ -20,6 +21,7 @@ interface SettingsClientProps {
     initialData: any
     initialUsers?: UserItem[]
     currentUserId?: string
+    initialPermissions?: AllPermissions
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -51,7 +53,7 @@ const ACTION_LABELS: Record<string, string> = {
     LOGIN: "Login",
 }
 
-export function SettingsClient({ initialData, initialUsers = [], currentUserId = "" }: SettingsClientProps) {
+export function SettingsClient({ initialData, initialUsers = [], currentUserId = "", initialPermissions = {} }: SettingsClientProps) {
     const { data: session } = useSession()
     const isAdmin = session?.user?.role === "ADMIN"
 
@@ -69,6 +71,10 @@ export function SettingsClient({ initialData, initialUsers = [], currentUserId =
     const [users, setUsers] = useState<UserItem[]>(initialUsers)
     const [userEdits, setUserEdits] = useState<Record<string, { role: string; active: boolean }>>({})
     const [savingUser, setSavingUser] = useState<string | null>(null)
+
+    const [permissions, setPermissions] = useState<AllPermissions>(initialPermissions)
+    const [permEdits, setPermEdits] = useState<AllPermissions>({})
+    const [savingRole, setSavingRole] = useState<string | null>(null)
     const [formData, setFormData] = useState({
         name: initialData?.name || "",
         cnpj: initialData?.cnpj || "",
@@ -151,6 +157,47 @@ export function SettingsClient({ initialData, initialUsers = [], currentUserId =
             alert(err.message || "Erro ao excluir backup")
         } finally {
             setLoadingBackups(false)
+        }
+    }
+
+    function getPermEdit(role: string, feature: string): boolean {
+        const edited = permEdits[role]?.[feature]
+        if (edited !== undefined) return edited
+        const saved = permissions[role]?.[feature]
+        return saved !== undefined ? saved : true
+    }
+
+    function setPermEdit(role: string, feature: string, value: boolean) {
+        setPermEdits(prev => ({
+            ...prev,
+            [role]: { ...(prev[role] ?? permissions[role] ?? {}), [feature]: value }
+        }))
+    }
+
+    function hasPermChanges(role: string): boolean {
+        if (!permEdits[role]) return false
+        const saved = permissions[role] ?? {}
+        for (const [f, v] of Object.entries(permEdits[role])) {
+            const orig = saved[f] !== undefined ? saved[f] : true
+            if (v !== orig) return true
+        }
+        return false
+    }
+
+    async function handleSavePermissions(role: string) {
+        setSavingRole(role)
+        const merged: Record<string, boolean> = {}
+        for (const f of ALL_FEATURES) {
+            merged[f.key] = getPermEdit(role, f.key)
+        }
+        try {
+            await updateRolePermissions(role, merged)
+            setPermissions(prev => ({ ...prev, [role]: merged }))
+            setPermEdits(prev => { const n = { ...prev }; delete n[role]; return n })
+        } catch (err: any) {
+            alert(err.message || "Erro ao salvar permissões")
+        } finally {
+            setSavingRole(null)
         }
     }
 
@@ -605,6 +652,88 @@ export function SettingsClient({ initialData, initialUsers = [], currentUserId =
                                 </div>
                             ))}
                         </div>
+                    </div>
+                </CardContent>
+            </Card>
+        )}
+
+        {isAdmin && (
+            <Card className="border-slate-200 shadow-sm">
+                <CardHeader className="bg-slate-50/50">
+                    <div className="flex items-center gap-3">
+                        <div className="rounded-lg bg-rose-100 p-2 text-rose-600">
+                            <Lock className="h-5 w-5" />
+                        </div>
+                        <div>
+                            <CardTitle>Controle de Acesso por Perfil</CardTitle>
+                            <CardDescription>Defina quais módulos cada perfil pode acessar</CardDescription>
+                        </div>
+                    </div>
+                </CardHeader>
+                <CardContent className="p-0">
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="border-b bg-slate-50 text-[10px] uppercase tracking-wide text-slate-400 font-semibold">
+                                    <th className="text-left px-5 py-3 w-48">Módulo</th>
+                                    <th className="px-5 py-3 text-center w-36">
+                                        <div className="flex flex-col items-center gap-0.5">
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-700">Admin</span>
+                                            <span className="text-[9px] normal-case text-slate-300">Acesso total</span>
+                                        </div>
+                                    </th>
+                                    {CONTROLLABLE_ROLES.map(role => (
+                                        <th key={role} className="px-5 py-3 text-center w-36">
+                                            <div className="flex flex-col items-center gap-1">
+                                                <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${ROLE_COLORS[role]}`}>{ROLE_LABELS[role]}</span>
+                                                <Button
+                                                    size="sm"
+                                                    className={`h-6 text-[10px] px-2 gap-1 ${hasPermChanges(role) ? "bg-blue-600 hover:bg-blue-700 text-white" : "bg-slate-100 text-slate-400 cursor-not-allowed"}`}
+                                                    disabled={!hasPermChanges(role) || savingRole === role}
+                                                    onClick={() => handleSavePermissions(role)}
+                                                >
+                                                    {savingRole === role ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                                                    Salvar
+                                                </Button>
+                                            </div>
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y">
+                                {ALL_FEATURES.map(feature => (
+                                    <tr key={feature.key} className="hover:bg-slate-50 transition-colors">
+                                        <td className="px-5 py-3 font-medium text-slate-700">{feature.label}</td>
+                                        <td className="px-5 py-3 text-center">
+                                            <div className="flex justify-center">
+                                                <Lock className="h-4 w-4 text-purple-300" />
+                                            </div>
+                                        </td>
+                                        {CONTROLLABLE_ROLES.map(role => {
+                                            const enabled = getPermEdit(role, feature.key)
+                                            return (
+                                                <td key={role} className="px-5 py-3 text-center">
+                                                    <div className="flex justify-center">
+                                                        <label className="relative inline-flex items-center cursor-pointer">
+                                                            <input
+                                                                type="checkbox"
+                                                                className="sr-only peer"
+                                                                checked={enabled}
+                                                                onChange={e => setPermEdit(role, feature.key, e.target.checked)}
+                                                            />
+                                                            <div className="w-8 h-4 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-emerald-500"></div>
+                                                        </label>
+                                                    </div>
+                                                </td>
+                                            )
+                                        })}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div className="px-5 py-3 border-t bg-slate-50/50 text-[10px] text-slate-400">
+                        As permissões entram em vigor imediatamente na próxima navegação do usuário. Usuários já logados são afetados na próxima requisição.
                     </div>
                 </CardContent>
             </Card>
