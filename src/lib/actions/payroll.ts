@@ -39,7 +39,7 @@ export async function savePayrollAnalysis(data: {
     } else {
         const id = randomUUID()
         check(await supabase.from("PayrollAnalysis").upsert(
-            { ...payload, id, departmentId: data.departmentId ?? "", createdAt: now },
+            { ...payload, id, departmentId: data.departmentId ?? null, createdAt: now },
             { onConflict: "month,year,departmentId,companyId" }
         ))
     }
