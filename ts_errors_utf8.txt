@@ -1,0 +1,6 @@
+﻿src/app/(dashboard)/folha-pagamento/client.tsx(837,58): error TS2339: Property 'status' does not exist on type 'FoundRow | (MissingRow & { status: string; })'.
+  Property 'status' does not exist on type 'FoundRow'.
+src/app/(dashboard)/folha-pagamento/client.tsx(840,58): error TS2339: Property 'status' does not exist on type 'FoundRow | (MissingRow & { status: string; })'.
+  Property 'status' does not exist on type 'FoundRow'.
+src/lib/actions/payroll.ts(45,21): error TS2322: Type 'string | null' is not assignable to type 'string'.
+  Type 'null' is not assignable to type 'string'.
