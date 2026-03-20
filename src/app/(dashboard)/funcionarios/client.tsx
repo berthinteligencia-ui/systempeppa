@@ -57,7 +57,7 @@ const statusMap = {
 
 const pagamentoMap: Record<string, { label: string; cls: string }> = {
   pendente: { label: "PENDENTE", cls: "bg-slate-100 text-slate-600" },
-  efetuado: { label: "EFETUADO", cls: "bg-blue-600 text-white shadow-sm" },
+  efetuado: { label: "EFETUADO", cls: "bg-emerald-600 text-white shadow-sm" },
   pago: { label: "PAGO", cls: "bg-emerald-100 text-emerald-700" },
   atrasado: { label: "ATRASADO", cls: "bg-red-100 text-red-700" },
 }
@@ -322,6 +322,7 @@ export function FuncionariosClient({
   .INACTIVE{ background:#fee2e2; color:#991b1b; }
   .ON_LEAVE{ background:#fef3c7; color:#92400e; }
   .pendente { background:#f1f5f9; color:#475569; }
+  .efetuado { background:#059669; color:#ffffff; }
   .pago     { background:#d1fae5; color:#065f46; }
   .atrasado { background:#fee2e2; color:#991b1b; }
   @media print { body { margin: 0; } }
@@ -601,32 +602,37 @@ ${rows.map((emp, i) => `<tr>
                     isSelected ? "border-blue-500 ring-1 ring-blue-500" : "border-slate-200"
                   }`}
                 >
-                  {/* Status & Selection Indicator */}
-                  <div className="absolute right-4 top-4 z-10 flex items-center gap-2">
-                    <div className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase shadow-sm ${s.cls} border border-white/20`}>
-                      <div className={`h-1.5 w-1.5 rounded-full ${emp.status === 'ACTIVE' ? 'bg-emerald-500' : emp.status === 'INACTIVE' ? 'bg-red-500' : 'bg-amber-500'}`} />
-                      {s.label}
-                    </div>
-                    
-                    <button
-                      onClick={() => toggleSelect(emp.id)}
-                      className="rounded-full bg-white/80 p-0.5 backdrop-blur-sm transition-opacity group-hover:opacity-100 sm:opacity-0 shadow-sm"
-                      style={{ opacity: isSelected ? 1 : undefined }}
-                    >
-                      {isSelected ? (
-                        <CheckSquare className="h-5 w-5 text-blue-600" />
-                      ) : (
-                        <Square className="h-5 w-5 text-slate-300" />
-                      )}
-                    </button>
-                  </div>
-
                   <div className="flex flex-col h-full">
-                    <div className="mb-4">
-                      <h3 className="font-bold text-slate-900 group-hover:text-blue-600 transition-colors line-clamp-1">
-                        {emp.name}
-                      </h3>
-                      <p className="text-xs font-medium text-slate-500">{fmtCpf(emp.cpf)}</p>
+                    <div className="mb-4 flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <h3 className="font-bold text-slate-900 group-hover:text-blue-600 transition-colors line-clamp-1">
+                          {emp.name}
+                        </h3>
+                        <p className="text-xs font-medium text-slate-500">{fmtCpf(emp.cpf)}</p>
+                      </div>
+                      
+                      {/* Status & Selection Indicator */}
+                      <div className="flex items-center gap-2 pt-0.5 shrink-0">
+                        <button
+                          title={s.label}
+                          className={`h-4 w-4 rounded-full border-2 border-white shadow-md cursor-default ${
+                            emp.status === 'ACTIVE' ? 'bg-emerald-500' : 
+                            emp.status === 'INACTIVE' ? 'bg-red-500' : 
+                            'bg-amber-500'
+                          }`}
+                        />
+                        
+                        <button
+                          onClick={() => toggleSelect(emp.id)}
+                          className={`rounded-full bg-white/80 p-0.5 transition-opacity ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                        >
+                          {isSelected ? (
+                            <CheckSquare className="h-5 w-5 text-blue-600" />
+                          ) : (
+                            <Square className="h-5 w-5 text-slate-300" />
+                          )}
+                        </button>
+                      </div>
                     </div>
 
                     <div className="space-y-3 flex-1 text-sm">
