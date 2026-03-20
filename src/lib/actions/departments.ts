@@ -10,6 +10,14 @@ async function getCompanyId() {
   return session.user.companyId
 }
 
+async function ensureAdmin() {
+  const session = await auth()
+  const role = session?.user?.role?.toUpperCase()
+  if (role !== "ADMIN") {
+    throw new Error("Ação permitida apenas para administradores")
+  }
+}
+
 import { randomUUID } from "crypto"
 
 export async function createDepartment(data: { name: string; cnpj?: string }) {
@@ -35,6 +43,7 @@ export async function updateDepartment(id: string, data: { name: string; cnpj?: 
 }
 
 export async function deleteDepartment(id: string) {
+  await ensureAdmin()
   const companyId = await getCompanyId()
   const supabase = getSupabaseAdmin()
   check(await supabase.from("Department").delete().eq("id", id).eq("companyId", companyId))

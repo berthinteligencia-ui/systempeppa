@@ -19,7 +19,11 @@ export default async function FuncionariosPage() {
 
   return (
     <div className="space-y-6">
-      <FuncionariosClient employees={employees} departments={departments ?? []} />
+      <FuncionariosClient
+        employees={employees}
+        departments={departments ?? []}
+        userRole={session.user.role}
+      />
     </div>
   )
 }

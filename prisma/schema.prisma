@@ -63,6 +63,52 @@ model Company {
   conversations   Conversation[]
   backups         Backup[]
   notasFiscais    NotaFiscal[]
+  subscription    Subscription?
+  invoices        Invoice[]
+  comprovantes    Comprovante[]
+}
+
+model Plan {
+  id               String         @id @default(cuid())
+  name             String
+  description      String?
+  basePrice        Decimal        @db.Decimal(10, 2)
+  pricePerEmployee Decimal        @db.Decimal(10, 2)
+  active           Boolean        @default(true)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  subscriptions    Subscription[]
+}
+
+model Subscription {
+  id                     String   @id @default(cuid())
+  companyId              String   @unique
+  company                Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  planId                 String
+  plan                   Plan     @relation(fields: [planId], references: [id])
+  customBasePrice        Decimal? @db.Decimal(10, 2)
+  customPricePerEmployee Decimal? @db.Decimal(10, 2)
+  active                 Boolean  @default(true)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+}
+
+model Invoice {
+  id                   String   @id @default(cuid())
+  companyId            String
+  company              Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  amount               Decimal  @db.Decimal(10, 2)
+  employeeCount        Int
+  basePriceUsed        Decimal  @db.Decimal(10, 2)
+  pricePerEmployeeUsed Decimal  @db.Decimal(10, 2)
+  month                Int
+  year                 Int
+  status               String   @default("PENDING")
+  dueDate              DateTime
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([companyId, month, year])
 }
 
 model Settings {
@@ -120,6 +166,7 @@ model Employee {
   salary        Decimal        @db.Decimal(10, 2)
   hireDate      DateTime
   status        EmployeeStatus @default(ACTIVE)
+  pagamento     String         @default("pendente")
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   companyId     String
@@ -127,6 +174,7 @@ model Employee {
   departmentId  String?
   department    Department?    @relation(fields: [departmentId], references: [id])
   conversations Conversation[]
+  comprovantes  Comprovante[]
 }
 
 enum EmployeeStatus {
@@ -157,7 +205,28 @@ model PayrollAnalysis {
   status       String      @default("OPEN")
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
+  comprovantes Comprovante[]
   @@unique([month, year, departmentId, companyId], name: "month_year_unit_company")
+}
+
+model Comprovante {
+  id            String          @id @default(cuid())
+  fileName      String
+  employeeName  String
+  cpf           String
+  situacao      String
+  amount        Decimal?        @db.Decimal(10, 2)
+  extractedAt   DateTime        @default(now())
+  
+  // Relations
+  companyId     String
+  company       Company         @relation(fields: [companyId], references: [id])
+  
+  employeeId    String?
+  employee      Employee?       @relation(fields: [employeeId], references: [id])
+  
+  fechamentoId  String?
+  fechamento    PayrollAnalysis? @relation(fields: [fechamentoId], references: [id])
 }
 
 model Conversation {

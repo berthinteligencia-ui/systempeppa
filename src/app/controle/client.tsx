@@ -89,7 +89,7 @@ function Badge({ label, color, className }: { label: string; color: string; clas
 
 // ─── Company Detail Panel ─────────────────────────────────────────────────────
 
-type DetailTab = "overview" | "users" | "employees" | "departments" | "nfs" | "payroll" | "backups" | "logs"
+type DetailTab = "overview" | "finance" | "users" | "employees" | "departments" | "nfs" | "payroll" | "backups" | "logs"
 
 function CompanyDetailPanel({ details, onBack }: { details: CompanyDetails; onBack: () => void }) {
     const [tab, setTab] = useState<DetailTab>("overview")
@@ -97,6 +97,7 @@ function CompanyDetailPanel({ details, onBack }: { details: CompanyDetails; onBa
 
     const tabs: { id: DetailTab; label: string; icon: any; count?: number }[] = [
         { id: "overview", label: "Geral", icon: LayoutGrid },
+        { id: "finance", label: "Financeiro", icon: Banknote },
         { id: "users", label: "Usuários", icon: Users, count: details.users.length },
         { id: "employees", label: "Funcionários", icon: UserCheck, count: details.employees.length },
         { id: "departments", label: "Unidades", icon: Briefcase, count: details.departments.length },
@@ -290,7 +291,88 @@ function CompanyDetailPanel({ details, onBack }: { details: CompanyDetails; onBa
                     </div>
                 )}
 
-                {/* Users */}
+                {/* Finance dashboard */}
+                {tab === "finance" && (
+                    <div className="space-y-4">
+                        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                            <div className="flex items-center gap-2 mb-4">
+                                <CreditCard className="h-4 w-4 text-blue-600" />
+                                <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Plano e Assinatura</p>
+                            </div>
+                            
+                            {!details.subscription ? (
+                                <div className="flex flex-col items-center justify-center py-4 border-2 border-dashed border-slate-100 rounded-xl">
+                                    <p className="text-[13px] text-slate-500 font-medium">Nenhum plano vinculado</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    <div className="flex items-start justify-between">
+                                        <div>
+                                            <p className="text-lg font-black text-slate-900 leading-none">{(details.subscription as any).plan?.name}</p>
+                                            <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-1">Plano Atual</p>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-lg font-black text-blue-600 leading-none">
+                                                {details.invoices && (details.invoices as any[]).length > 0 
+                                                    ? fmtBRL(Number((details.invoices as any[])[0].amount))
+                                                    : fmtBRL(Number((details.subscription as any).plan?.basePrice + ((details.subscription as any).plan?.pricePerEmployee * details.employees.filter(e => e.status === "ACTIVE").length)))
+                                                }
+                                            </p>
+                                            <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-1">Valor do Mês</p>
+                                        </div>
+                                    </div>
+
+                                    {details.invoices && (details.invoices as any[]).some(inv => inv.status === 'PENDING') ? (
+                                        <div className="flex flex-col gap-2">
+                                            <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-100 rounded-xl">
+                                                <Clock className="h-4 w-4 text-amber-600" />
+                                                <p className="text-[12px] font-bold text-amber-700">Fatura pendente aguardando pagamento</p>
+                                            </div>
+                                            <button 
+                                                className="w-full flex items-center justify-center gap-2 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[13px] font-black uppercase tracking-wider transition-all active:scale-95 shadow-lg shadow-blue-200"
+                                                onClick={() => {
+                                                    const pending = (details.invoices as any[]).find(inv => inv.status === 'PENDING');
+                                                    alert(`Emitir fatura: ID ${pending.id} - Valor: ${fmtBRL(Number(pending.amount))}`);
+                                                }}
+                                            >
+                                                Emitir Pagamento
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 border border-emerald-100 rounded-xl">
+                                            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                                            <p className="text-[12px] font-bold text-emerald-700">Assinatura em dia</p>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                            <p className="p-4 text-[11px] font-bold uppercase tracking-widest text-slate-400 border-b">Histórico de Faturas</p>
+                            <div className="divide-y">
+                                {(details.invoices as any[] || []).map(inv => (
+                                    <div key={inv.id} className="p-4 flex items-center justify-between">
+                                        <div>
+                                            <p className="text-[13px] font-bold text-slate-900">{String(inv.month).padStart(2, '0')}/{inv.year}</p>
+                                            <p className="text-[11px] text-slate-500 font-mono">ID: {inv.id.slice(0, 8)}</p>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-[13px] font-black text-slate-900">{fmtBRL(Number(inv.amount))}</p>
+                                            <Badge 
+                                                label={inv.status === 'PAID' ? 'Pago' : 'Pendente'} 
+                                                color={inv.status === 'PAID' ? 'text-emerald-700 bg-emerald-50 border border-emerald-200' : 'text-amber-700 bg-amber-50 border border-amber-200'} 
+                                            />
+                                        </div>
+                                    </div>
+                                ))}
+                                {(!details.invoices || (details.invoices as any[]).length === 0) && (
+                                    <p className="p-8 text-center text-[13px] text-slate-500">Nenhuma fatura encontrada</p>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
                 {tab === "users" && (
                     <div className="space-y-2">
                         {details.users.length === 0 && <p className="text-center text-slate-500 py-8 text-[13px]">Sem usuários</p>}

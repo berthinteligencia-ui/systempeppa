@@ -4,7 +4,7 @@ import { useState, useRef, useCallback } from "react"
 import {
   UserPlus, Pencil, Trash2, CheckCircle2, AlertCircle, Clock, Filter,
   CheckSquare, Square, Download, FileDown, FileUp, Loader2, X, FileSpreadsheet,
-  Receipt,
+  Receipt, ChevronDown,
 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import * as XLSX from "xlsx"
@@ -22,6 +22,12 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
   createEmployee, updateEmployee, deleteEmployee,
   deleteEmployeesBatch, importEmployees,
 } from "@/lib/actions/employees"
@@ -32,7 +38,7 @@ type Department = { id: string; name: string }
 type Employee = {
   id: string; name: string; cpf: string | null; email: string | null
   phone: string | null; position: string; salary: number | string
-  hireDate: Date; status: string; departmentId: string | null
+  hireDate: Date; status: string; pagamento: string; departmentId: string | null
   department: Department | null
 }
 
@@ -49,9 +55,16 @@ const statusMap = {
   ON_LEAVE: { label: "Afastado", icon: Clock, cls: "bg-amber-100 text-amber-700" },
 }
 
+const pagamentoMap: Record<string, { label: string; cls: string }> = {
+  pendente: { label: "PENDENTE", cls: "bg-slate-100 text-slate-600" },
+  efetuado: { label: "EFETUADO", cls: "bg-blue-600 text-white shadow-sm" },
+  pago: { label: "PAGO", cls: "bg-emerald-100 text-emerald-700" },
+  atrasado: { label: "ATRASADO", cls: "bg-red-100 text-red-700" },
+}
+
 const empty = {
   name: "", position: "", salary: "", hireDate: "", departmentId: "",
-  cpf: "", email: "", phone: "", status: "ACTIVE",
+  cpf: "", email: "", phone: "", status: "ACTIVE", pagamento: "pendente",
 }
 
 function fmtBRL(n: number) {
@@ -108,7 +121,7 @@ function parseImportRows(rawRows: Record<string, unknown>[], headers: string[], 
 
   return rawRows
     .map((r) => {
-      const name = String(r[headers[nameIdx]] ?? "").trim()
+      const name = String(r[headers[nameIdx]] ?? "").trim().toUpperCase()
       if (!name) return null
 
       // Improved CPF cleaning: remove non-digits, take 11 digits
@@ -129,7 +142,7 @@ function parseImportRows(rawRows: Record<string, unknown>[], headers: string[], 
         : undefined
 
       const position = positionIdx !== -1
-        ? String(r[headers[positionIdx]] ?? "").trim() || undefined
+        ? String(r[headers[positionIdx]] ?? "").trim().toUpperCase() || undefined
         : undefined
 
       // Improved salary parsing: handles BRL format (1.200,50) and simple dots (1200.50)
@@ -152,7 +165,7 @@ function parseImportRows(rawRows: Record<string, unknown>[], headers: string[], 
       let departmentId: string | undefined
       let _deptName: string | undefined
       if (deptIdx !== -1) {
-        const dName = String(r[headers[deptIdx]] ?? "").trim()
+        const dName = String(r[headers[deptIdx]] ?? "").trim().toUpperCase()
         if (dName) {
           _deptName = dName
           departmentId = deptByName.get(dName.toLowerCase()) ?? undefined
@@ -167,8 +180,8 @@ function parseImportRows(rawRows: Record<string, unknown>[], headers: string[], 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function FuncionariosClient({
-  employees, departments,
-}: { employees: Employee[]; departments: Department[] }) {
+  employees, departments, userRole,
+}: { employees: Employee[]; departments: Department[]; userRole?: string }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [deleteId, setDeleteId] = useState<string | null>(null)
@@ -176,6 +189,9 @@ export function FuncionariosClient({
   const [form, setForm] = useState(empty)
   const [loading, setLoading] = useState(false)
   const [filterDept, setFilterDept] = useState("all")
+  const [filterPagamento, setFilterPagamento] = useState("all")
+  const [filterStatus, setFilterStatus] = useState("ACTIVE")
+  const [filterSearch, setFilterSearch] = useState("")
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
 
@@ -191,8 +207,16 @@ export function FuncionariosClient({
   // ── Filtering ────────────────────────────────────────────────────────────────
 
   const filteredEmployees = employees.filter((emp) => {
-    if (filterDept !== "all" && emp.departmentId !== filterDept) return false
-    return true
+    const s = filterSearch.toLowerCase().trim()
+    const matchesSearch = !s || 
+      emp.name.toLowerCase().includes(s) || 
+      (emp.cpf && emp.cpf.includes(s))
+    
+    const matchesDept = filterDept === "all" || emp.departmentId === filterDept
+    const matchesPagamento = filterPagamento === "all" || (emp.pagamento && emp.pagamento.toLowerCase() === filterPagamento)
+    const matchesStatus = filterStatus === "all" || emp.status === filterStatus
+
+    return matchesSearch && matchesDept && matchesPagamento && matchesStatus
   })
 
   // ── Selection ────────────────────────────────────────────────────────────────
@@ -228,6 +252,7 @@ export function FuncionariosClient({
       email: emp.email ?? "",
       phone: emp.phone ?? "",
       status: emp.status,
+      pagamento: emp.pagamento || "pendente",
     })
     setOpen(true)
   }
@@ -237,8 +262,8 @@ export function FuncionariosClient({
     setLoading(true)
     try {
       const data = {
-        name: form.name,
-        position: form.position.trim() || "A definir",
+        name: form.name.trim().toUpperCase(),
+        position: form.position.trim().toUpperCase() || "A DEFINIR",
         salary: parseFloat(form.salary),
         hireDate: form.hireDate || new Date().toISOString().split("T")[0],
         departmentId: form.departmentId || undefined,
@@ -247,9 +272,9 @@ export function FuncionariosClient({
         phone: form.phone || undefined,
       }
       if (editing) {
-        await updateEmployee(editing.id, { ...data, status: form.status })
+        await updateEmployee(editing.id, { ...data, status: form.status, pagamento: form.pagamento })
       } else {
-        await createEmployee(data)
+        await createEmployee({ ...data, pagamento: form.pagamento })
       }
       setOpen(false)
     } finally {
@@ -296,13 +321,16 @@ export function FuncionariosClient({
   .ACTIVE  { background:#d1fae5; color:#065f46; }
   .INACTIVE{ background:#fee2e2; color:#991b1b; }
   .ON_LEAVE{ background:#fef3c7; color:#92400e; }
+  .pendente { background:#f1f5f9; color:#475569; }
+  .pago     { background:#d1fae5; color:#065f46; }
+  .atrasado { background:#fee2e2; color:#991b1b; }
   @media print { body { margin: 0; } }
 </style></head><body>
 <h1>Relatório de Funcionários</h1>
-<p class="sub">Gerado em ${new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" })} · ${rows.length} funcionário${rows.length !== 1 ? "s" : ""}${filterDept !== "all" ? ` · ${departments.find(d => d.id === filterDept)?.name ?? ""}` : ""}</p>
+<p class="sub">Gerado em ${new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" })} · ${rows.length} funcionário${rows.length !== 1 ? "s" : ""}${filterDept !== "all" ? ` · ${departments.find(d => d.id === filterDept)?.name ?? ""}` : ""}${filterPagamento !== "all" ? ` · Pagamento: ${pagamentoMap[filterPagamento]?.label ?? filterPagamento}` : ""}</p>
 <table>
 <thead><tr>
-  <th>#</th><th>Nome</th><th>CPF</th><th>Cargo</th><th>Unidade</th><th>Telefone</th><th>Salário</th><th>Status</th>
+  <th>#</th><th>Nome</th><th>CPF</th><th>Cargo</th><th>Unidade</th><th>Telefone</th><th>Salário</th><th>Status</th><th>Pagamento</th>
 </tr></thead>
 <tbody>
 ${rows.map((emp, i) => `<tr>
@@ -314,6 +342,7 @@ ${rows.map((emp, i) => `<tr>
   <td>${fmtPhone(emp.phone)}</td>
   <td>${fmtBRL(Number(emp.salary))}</td>
   <td><span class="badge ${emp.status}">${statusMap[emp.status as keyof typeof statusMap]?.label ?? emp.status}</span></td>
+  <td><span class="badge ${emp.pagamento}">${pagamentoMap[emp.pagamento]?.label ?? emp.pagamento}</span></td>
 </tr>`).join("")}
 </tbody></table>
 </body></html>`)
@@ -334,6 +363,7 @@ ${rows.map((emp, i) => `<tr>
       "Salário": Number(emp.salary),
       "Data Admissão": fmtDate(emp.hireDate),
       "Status": statusMap[emp.status as keyof typeof statusMap]?.label ?? emp.status,
+      "Pagamento": pagamentoMap[emp.pagamento]?.label ?? emp.pagamento,
     }))
     const ws = XLSX.utils.json_to_sheet(data)
     ws["!cols"] = [{ wch: 35 }, { wch: 16 }, { wch: 22 }, { wch: 20 }, { wch: 28 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 12 }]
@@ -443,38 +473,72 @@ ${rows.map((emp, i) => `<tr>
           <p className="text-sm text-slate-500">Cadastro e gerenciamento de colaboradores</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {selectedIds.size > 0 && (
+          {selectedIds.size > 0 && userRole?.toUpperCase() === "ADMIN" && (
             <Button variant="destructive" onClick={() => setBulkDeleteOpen(true)} className="gap-2">
               <Trash2 className="h-4 w-4" /> Excluir ({selectedIds.size})
             </Button>
           )}
-          <Button variant="outline" onClick={handleExportPDF} className="gap-2">
-            <FileDown className="h-4 w-4" /> PDF
-          </Button>
-          <Button variant="outline" onClick={handleExportExcel} className="gap-2">
-            <FileSpreadsheet className="h-4 w-4" /> Exportar Excel
-          </Button>
-          <Button variant="outline" onClick={handleDownloadTemplate} className="gap-2">
-            <Download className="h-4 w-4" /> Baixar Modelo
-          </Button>
-          <Button variant="outline" onClick={openImport} className="gap-2">
-            <FileUp className="h-4 w-4" /> Importar
-          </Button>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="gap-2">
+                <ChevronDown className="h-4 w-4" /> Ações
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem onClick={handleExportPDF} className="gap-2 cursor-pointer">
+                <FileDown className="h-4 w-4 text-slate-500" />
+                <span>Exportar PDF</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleExportExcel} className="gap-2 cursor-pointer">
+                <FileSpreadsheet className="h-4 w-4 text-slate-500" />
+                <span>Exportar Excel</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleDownloadTemplate} className="gap-2 cursor-pointer">
+                <Download className="h-4 w-4 text-slate-500" />
+                <span>Baixar Modelo</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={openImport} className="gap-2 cursor-pointer">
+                <FileUp className="h-4 w-4 text-slate-500" />
+                <span>Importar</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           <Button onClick={openCreate} className="gap-2 bg-blue-600 hover:bg-blue-700">
             <UserPlus className="h-4 w-4" /> Novo Funcionário
           </Button>
         </div>
       </div>
 
-      {/* Filter */}
-      <div className="flex items-center gap-4 py-2">
-        <div className="w-full max-w-xs">
+      {/* Filter & Selection */}
+      <div className="flex flex-col lg:flex-row items-stretch lg:items-center gap-4 py-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={toggleSelectAll}
+            className="flex items-center gap-2 rounded-md border bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors h-10 shadow-sm"
+          >
+            {selectedIds.size > 0 && selectedIds.size === filteredEmployees.length
+              ? <CheckSquare className="h-4 w-4 text-blue-600" />
+              : <Square className="h-4 w-4" />}
+            <span className="hidden sm:inline">{selectedIds.size === filteredEmployees.length ? "Desvincular Tudo" : "Selecionar Tudo"}</span>
+          </button>
+        </div>
+
+        <div className="flex-1 flex flex-col sm:flex-row gap-2">
+          <div className="relative flex-1">
+            <Filter className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <Input 
+              placeholder="Buscar por nome ou CPF..." 
+              value={filterSearch}
+              onChange={(e) => setFilterSearch(e.target.value)}
+              className="pl-9 bg-white h-10 border-slate-200"
+            />
+          </div>
+
           <Select value={filterDept} onValueChange={setFilterDept}>
-            <SelectTrigger className="bg-white">
-              <div className="flex items-center gap-2">
-                <Filter className="h-4 w-4 text-slate-400" />
-                <SelectValue placeholder="Filtrar por unidade" />
-              </div>
+            <SelectTrigger className="bg-white min-w-[180px] h-10 border-slate-200">
+              <SelectValue placeholder="Unidade" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todas as unidades</SelectItem>
@@ -483,89 +547,144 @@ ${rows.map((emp, i) => `<tr>
               ))}
             </SelectContent>
           </Select>
+
+          <Select value={filterPagamento} onValueChange={setFilterPagamento}>
+            <SelectTrigger className="bg-white min-w-[150px] h-10 border-slate-200">
+              <SelectValue placeholder="Pagamento" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos os pagamentos</SelectItem>
+              <SelectItem value="pendente">PENDENTE</SelectItem>
+              <SelectItem value="efetuado">EFETUADO</SelectItem>
+              <SelectItem value="pago">PAGO</SelectItem>
+              <SelectItem value="atrasado">ATRASADO</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select value={filterStatus} onValueChange={setFilterStatus}>
+            <SelectTrigger className="bg-white min-w-[150px] h-10 border-slate-200">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos os status</SelectItem>
+              <SelectItem value="ACTIVE">ATIVOS</SelectItem>
+              <SelectItem value="INACTIVE">INATIVOS</SelectItem>
+              <SelectItem value="ON_LEAVE">AFASTADOS</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
-        <p className="text-sm text-slate-400">{filteredEmployees.length} funcionário{filteredEmployees.length !== 1 ? "s" : ""}</p>
+        
+        <p className="text-sm text-slate-400 font-medium shrink-0">{filteredEmployees.length} funcionário{filteredEmployees.length !== 1 ? "s" : ""}</p>
       </div>
 
-      {/* Table */}
-      <div className="rounded-xl border bg-white shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                <th className="px-5 py-3 w-10">
-                  <button onClick={toggleSelectAll} className="flex items-center">
-                    {selectedIds.size > 0 && selectedIds.size === filteredEmployees.length
-                      ? <CheckSquare className="h-4 w-4 text-blue-600" />
-                      : <Square className="h-4 w-4" />}
+      {/* Cards Grid */}
+      <div className="mt-2">
+        {filteredEmployees.length === 0 ? (
+          <div className="rounded-xl border border-dashed bg-white p-12 text-center">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-50 text-slate-400">
+              <UserPlus className="h-6 w-6" />
+            </div>
+            <h3 className="mt-4 text-sm font-semibold text-slate-900">Nenhum funcionário</h3>
+            <p className="mt-1 text-sm text-slate-500">Comece criando um novo funcionário ou importando uma lista.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {filteredEmployees.map((emp) => {
+              const s = statusMap[emp.status as keyof typeof statusMap] ?? statusMap.ACTIVE
+              const Icon = s.icon
+              const isSelected = selectedIds.has(emp.id)
+              
+              return (
+                <div
+                  key={emp.id}
+                  className={`group relative flex flex-col rounded-xl border bg-white p-5 shadow-sm transition-all hover:shadow-md ${
+                    isSelected ? "border-blue-500 ring-1 ring-blue-500" : "border-slate-200"
+                  }`}
+                >
+                  {/* Selection Checkbox */}
+                  <button
+                    onClick={() => toggleSelect(emp.id)}
+                    className="absolute right-4 top-4 z-10 rounded-full bg-white/80 p-0.5 backdrop-blur-sm transition-opacity group-hover:opacity-100 sm:opacity-0"
+                    style={{ opacity: isSelected ? 1 : undefined }}
+                  >
+                    {isSelected ? (
+                      <CheckSquare className="h-5 w-5 text-blue-600" />
+                    ) : (
+                      <Square className="h-5 w-5 text-slate-300" />
+                    )}
                   </button>
-                </th>
-                <th className="px-5 py-3">Nome / CPF</th>
-                <th className="px-5 py-3">Cargo</th>
-                <th className="px-5 py-3">Unidade</th>
-                <th className="px-5 py-3">Status</th>
-                <th className="px-5 py-3 text-right">Salário</th>
-                <th className="px-5 py-3 text-right">Ações</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {filteredEmployees.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="px-5 py-10 text-center text-sm text-slate-400">
-                    Nenhum funcionário encontrado.
-                  </td>
-                </tr>
-              )}
-              {filteredEmployees.map((emp) => {
-                const s = statusMap[emp.status as keyof typeof statusMap] ?? statusMap.ACTIVE
-                const Icon = s.icon
-                const isSelected = selectedIds.has(emp.id)
-                return (
-                  <tr key={emp.id} className={`hover:bg-slate-50 ${isSelected ? "bg-blue-50/30" : ""}`}>
-                    <td className="px-5 py-3.5">
-                      <button onClick={() => toggleSelect(emp.id)} className="flex items-center">
-                        {isSelected
-                          ? <CheckSquare className="h-4 w-4 text-blue-600" />
-                          : <Square className="h-4 w-4" />}
-                      </button>
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <p className="font-medium text-slate-800">{emp.name}</p>
-                      <p className="text-xs text-slate-400">{fmtCpf(emp.cpf)}</p>
-                    </td>
-                    <td className="px-5 py-3.5 text-sm text-slate-600">{emp.position}</td>
-                    <td className="px-5 py-3.5 text-sm text-slate-600">{emp.department?.name ?? "—"}</td>
-                    <td className="px-5 py-3.5">
-                      <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${s.cls}`}>
-                        <Icon className="h-3 w-3" /> {s.label}
-                      </span>
-                    </td>
-                    <td className="px-5 py-3.5 text-right text-sm font-semibold text-slate-800">
-                      {fmtBRL(Number(emp.salary))}
-                    </td>
-                    <td className="px-5 py-3.5 text-right">
-                      <div className="flex justify-end gap-1">
+
+                  <div className="flex flex-col h-full">
+                    <div className="mb-4">
+                      <h3 className="font-bold text-slate-900 group-hover:text-blue-600 transition-colors line-clamp-1">
+                        {emp.name}
+                      </h3>
+                      <p className="text-xs font-medium text-slate-500">{fmtCpf(emp.cpf)}</p>
+                    </div>
+
+                    <div className="space-y-3 flex-1 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500 text-xs uppercase tracking-wider font-bold">Cargo</span>
+                        <span className="font-semibold text-slate-700">{emp.position}</span>
+                      </div>
+                      
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500 text-xs uppercase tracking-wider font-bold">Unidade</span>
+                        <span className="font-semibold text-slate-700">{emp.department?.name || "—"}</span>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500 text-xs uppercase tracking-wider font-bold">Pagamento</span>
+                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-black uppercase ${pagamentoMap[emp.pagamento?.toLowerCase()]?.cls ?? pagamentoMap.pendente.cls}`}>
+                          {pagamentoMap[emp.pagamento?.toLowerCase()]?.label ?? emp.pagamento}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500 text-xs uppercase tracking-wider font-bold">Status</span>
+                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-black uppercase ${s.cls}`}>
+                          <Icon className="h-3 w-3" /> {s.label}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-50">
+                        <span className="text-slate-500 text-xs uppercase tracking-wider font-bold">Salário</span>
+                        <span className="text-lg font-black text-slate-900">{fmtBRL(Number(emp.salary))}</span>
+                      </div>
+                    </div>
+
+                    <div className="mt-5 flex items-center justify-between gap-2 border-t pt-4">
+                      <div className="flex gap-1.5">
                         <button
                           onClick={() => router.push(`/comprovante?cpf=${emp.cpf || ""}`)}
                           title="Ver Comprovantes"
-                          className="rounded p-1.5 text-blue-500 hover:bg-blue-50"
+                          className="flex h-9 w-9 items-center justify-center rounded-lg border border-blue-100 bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
                         >
                           <Receipt className="h-4 w-4" />
                         </button>
-                        <button onClick={() => openEdit(emp)} className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+                        <button
+                          onClick={() => openEdit(emp)}
+                          className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition-colors"
+                        >
                           <Pencil className="h-4 w-4" />
                         </button>
-                        <button onClick={() => setDeleteId(emp.id)} className="rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600">
+                      </div>
+                      
+                      {userRole?.toUpperCase() === "ADMIN" && (
+                        <button
+                          onClick={() => setDeleteId(emp.id)}
+                          className="flex h-9 w-9 items-center justify-center rounded-lg border border-red-100 bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
+                        >
                           <Trash2 className="h-4 w-4" />
                         </button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {/* ── Form Dialog ── */}
@@ -615,19 +734,29 @@ ${rows.map((emp, i) => `<tr>
                   </SelectContent>
                 </Select>
               </div>
-              {editing && (
-                <div className="space-y-1.5">
-                  <Label>Status</Label>
-                  <Select value={form.status} onValueChange={(v) => set("status", v)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="ACTIVE">Ativo</SelectItem>
-                      <SelectItem value="INACTIVE">Inativo</SelectItem>
-                      <SelectItem value="ON_LEAVE">Afastado</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
+              <div className="space-y-1.5">
+                <Label>Status</Label>
+                <Select value={form.status} onValueChange={(v) => set("status", v)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ACTIVE">Ativo</SelectItem>
+                    <SelectItem value="INACTIVE">Inativo</SelectItem>
+                    <SelectItem value="ON_LEAVE">Afastado</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Situação de Pagamento</Label>
+                <Select value={form.pagamento} onValueChange={(v) => set("pagamento", v)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pendente">PENDENTE</SelectItem>
+                    <SelectItem value="efetuado">EFETUADO</SelectItem>
+                    <SelectItem value="pago">PAGO</SelectItem>
+                    <SelectItem value="atrasado">ATRASADO</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
@@ -641,14 +770,19 @@ ${rows.map((emp, i) => `<tr>
 
       {/* ── Import Dialog ── */}
       <Dialog open={importOpen} onOpenChange={setImportOpen}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <FileUp className="h-5 w-5 text-blue-600" /> Importar Funcionários
-            </DialogTitle>
+        <DialogContent className="max-w-3xl p-0 overflow-hidden flex flex-col max-h-[90vh]">
+          <DialogHeader className="px-6 pt-6 shrink-0">
+            <div className="space-y-1 text-left">
+              <DialogTitle className="flex items-center gap-2 text-xl font-black">
+                <FileUp className="h-6 w-6 text-blue-600" /> IMPORTAR FUNCIONÁRIOS
+              </DialogTitle>
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+                VALIDE OS DADOS E SELECIONE AS UNIDADES ANTES DE CONFIRMAR.
+              </p>
+            </div>
           </DialogHeader>
 
-          <div className="space-y-4 py-2">
+          <div className="flex-1 overflow-y-auto px-6 py-4 custom-scrollbar">
             {/* Drop zone */}
             {!importFile ? (
               <div
@@ -667,24 +801,32 @@ ${rows.map((emp, i) => `<tr>
                 <p className="mt-1 text-xs text-slate-400">.xlsx · .xls · .csv</p>
               </div>
             ) : (
-              <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <FileSpreadsheet className="h-5 w-5 text-green-600 shrink-0" />
+              <div className="flex items-center gap-3 rounded-xl border border-blue-100 bg-blue-50/50 px-5 py-4 shadow-sm transition-all animate-in fade-in zoom-in-95 duration-200">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600">
+                  <FileSpreadsheet className="h-6 w-6" />
+                </div>
                 <div className="flex-1 overflow-hidden">
-                  <p className="truncate text-sm font-medium text-slate-800">{importFile.name}</p>
-                  <p className="text-xs text-slate-400">{importRows.length} registro{importRows.length !== 1 ? "s" : ""} detectado{importRows.length !== 1 ? "s" : ""}</p>
+                  <p className="truncate text-sm font-bold text-slate-800">{importFile.name}</p>
+                  <p className="text-xs text-slate-500 font-medium">{importRows.length} registro{importRows.length !== 1 ? "s" : ""} detectado{importRows.length !== 1 ? "s" : ""}</p>
                 </div>
                 <button onClick={() => { setImportFile(null); setImportRows([]); setImportHeaders([]) }}
-                  className="rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700">
-                  <X className="h-4 w-4" />
+                  className="rounded-lg p-2 text-slate-400 hover:bg-white hover:text-red-500 hover:shadow-sm transition-all">
+                  <X className="h-5 w-5" />
                 </button>
               </div>
             )}
 
             {/* Detected columns hint */}
             {importHeaders.length > 0 && (
-              <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-2.5 text-xs text-blue-700">
-                <span className="font-semibold">Colunas detectadas: </span>
-                {importHeaders.join(" · ")}
+              <div className="space-y-2">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Colunas Detectadas</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {importHeaders.map((h, i) => (
+                    <span key={i} className="inline-flex items-center rounded-md bg-white border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 shadow-sm">
+                      {h}
+                    </span>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -694,23 +836,23 @@ ${rows.map((emp, i) => `<tr>
                 <div className="overflow-x-auto max-h-[350px]">
                   <table className="w-full text-sm">
                     <thead className="sticky top-0 bg-slate-50 z-10 shadow-sm">
-                      <tr className="border-b text-[11px] font-semibold uppercase tracking-wide text-slate-400 text-left">
-                        <th className="px-4 py-2.5">Nome</th>
-                        <th className="px-4 py-2.5">CPF</th>
-                        <th className="px-5 py-2.5">Unidade / Departamento</th>
-                        <th className="px-4 py-2.5 text-right">Salário</th>
+                      <tr className="border-b text-[10px] font-black uppercase tracking-widest text-slate-400 text-left">
+                        <th className="px-4 py-3">NOME / CARGO</th>
+                        <th className="px-4 py-3">CPF</th>
+                        <th className="px-5 py-3">UNIDADE / DEPARTAMENTO</th>
+                        <th className="px-4 py-3 text-right">SALÁRIO</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y bg-white">
                       {importRows.map((r, i) => (
-                        <tr key={i} className="hover:bg-slate-50/50">
-                          <td className="px-4 py-2.5">
-                            <p className="font-medium text-slate-800">{r.name}</p>
-                            <p className="text-[10px] text-slate-400 uppercase tracking-tight">{r.position || "Sem cargo"}</p>
+                        <tr key={i} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="px-4 py-4">
+                            <p className="font-bold text-slate-800 text-sm">{r.name}</p>
+                            <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-wide mt-0.5">{r.position || "Sem cargo"}</p>
                           </td>
-                          <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{fmtCpf(r.cpf ?? null)}</td>
-                          <td className="px-4 py-2.5">
-                            <div className="flex flex-col gap-1">
+                          <td className="px-4 py-4 font-mono text-xs text-slate-500">{fmtCpf(r.cpf ?? null)}</td>
+                          <td className="px-4 py-4">
+                            <div className="flex flex-col gap-1.5">
                               <Select
                                 value={r.departmentId ?? "missing"}
                                 onValueChange={(val) => {
@@ -719,24 +861,27 @@ ${rows.map((emp, i) => `<tr>
                                   setImportRows(next)
                                 }}
                               >
-                                <SelectTrigger className={`h-8 text-xs ${!r.departmentId ? "border-amber-200 bg-amber-50 text-amber-700" : "bg-white"}`}>
-                                  <SelectValue placeholder="Selecione a unidade..." />
+                                <SelectTrigger className={`h-9 text-xs font-medium transition-all ${!r.departmentId ? "border-amber-300 bg-amber-50 text-amber-900 focus:ring-amber-200" : "bg-white border-slate-200"}`}>
+                                  <SelectValue placeholder="Mapear unidade..." />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="missing" disabled>Selecione...</SelectItem>
+                                  <SelectItem value="missing" disabled className="text-slate-400 italic">Mapear unidade...</SelectItem>
                                   {departments.map((d) => (
-                                    <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                                    <SelectItem key={d.id} value={d.id} className="text-sm font-medium">{d.name}</SelectItem>
                                   ))}
                                 </SelectContent>
                               </Select>
                               {r._deptName && !r.departmentId && (
-                                <p className="text-[10px] text-amber-600 font-medium">
-                                  Planilha: &quot;{r._deptName}&quot; (não mapeada)
-                                </p>
+                                <div className="flex items-center gap-1.5 text-[10px] text-amber-600 font-bold bg-amber-50/50 border border-amber-100 rounded px-2 py-0.5">
+                                  <AlertCircle className="h-3 w-3 shrink-0" />
+                                  <span>Planilha: &quot;{r._deptName}&quot;</span>
+                                </div>
                               )}
                             </div>
                           </td>
-                          <td className="px-4 py-2.5 text-right font-semibold text-slate-800">{fmtBRL(r.salary ?? 0)}</td>
+                          <td className="px-4 py-4 text-right">
+                            <p className="font-black text-slate-900 text-sm">{fmtBRL(r.salary ?? 0)}</p>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -746,27 +891,27 @@ ${rows.map((emp, i) => `<tr>
             )}
 
             {importRows.length === 0 && importFile && (
-              <div className="flex flex-col items-center justify-center py-8 rounded-xl border border-amber-100 bg-amber-50 text-center">
-                <AlertCircle className="h-8 w-8 text-amber-500 mb-2" />
-                <p className="text-sm font-semibold text-amber-800">Nenhum funcionário detectado</p>
-                <p className="mt-1 text-xs text-amber-600 max-w-xs mx-auto">
-                  Certifique-se de que a planilha tem uma coluna chamada &quot;Nome&quot; ou similar para identificarmos os colaboradores.
+              <div className="flex flex-col items-center justify-center py-10 rounded-xl border border-amber-200 bg-amber-50 text-center mx-1">
+                <AlertCircle className="h-10 w-10 text-amber-500 mb-3" />
+                <p className="text-xs font-black text-amber-900 uppercase tracking-widest">NENHUM FUNCIONÁRIO DETECTADO</p>
+                <p className="mt-2 text-[10px] text-amber-700 font-bold max-w-xs mx-auto uppercase tracking-wider leading-relaxed px-4">
+                  CERTIFIQUE-SE DE QUE A PLANILHA TEM UMA COLUNA CHAMADA &quot;NOME&quot; PARA IDENTIFICARMOS OS COLABORADORES.
                 </p>
               </div>
             )}
           </div>
 
-          <DialogFooter className="bg-slate-50 -mx-6 -mb-6 p-6 rounded-b-xl border-t">
-            <Button variant="ghost" onClick={() => setImportOpen(false)} className="text-slate-500">Cancelar</Button>
+          <DialogFooter className="bg-slate-50 p-6 border-t font-semibold shrink-0">
+            <Button variant="ghost" onClick={() => setImportOpen(false)} className="text-slate-500 font-black uppercase text-xs tracking-widest">CANCELAR</Button>
             <Button
               onClick={handleConfirmImport}
               disabled={importRows.length === 0 || isImporting}
-              className="bg-blue-600 hover:bg-blue-700 gap-2 px-8 shadow-lg shadow-blue-600/20"
+              className="bg-blue-600 hover:bg-blue-700 gap-2 px-10 shadow-lg shadow-blue-600/20 font-black uppercase text-xs tracking-widest"
             >
               {isImporting ? (
-                <><Loader2 className="h-4 w-4 animate-spin" /> Importando...</>
+                <><Loader2 className="h-4 w-4 animate-spin" /> IMPORTANDO...</>
               ) : (
-                <><CheckCircle2 className="h-4 w-4" /> Importar {importRows.length} {importRows.length === 1 ? 'Funcionário' : 'Funcionários'}</>
+                <><CheckCircle2 className="h-4 w-4" /> IMPORTAR {importRows.length} {importRows.length === 1 ? 'FUNCIONÁRIO' : 'FUNCIONÁRIOS'}</>
               )}
             </Button>
           </DialogFooter>

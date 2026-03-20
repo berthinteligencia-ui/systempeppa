@@ -38,7 +38,19 @@ export async function checkControleAuth(): Promise<boolean> {
 export async function getCompanyDetails(companyId: string) {
     const supabase = getSupabaseAdmin()
 
-    const [company, users, employees, departments, nfs, payrolls, backups, settings, logs] = await Promise.all([
+    const [
+        company, 
+        users, 
+        employees, 
+        departments, 
+        nfs, 
+        payrolls, 
+        backups, 
+        settings, 
+        logs,
+        subscription,
+        invoices
+    ] = await Promise.all([
         supabase.from("Company").select("*").eq("id", companyId).single(),
         supabase.from("User").select("id, name, email, role, active, createdAt").eq("companyId", companyId).order("name"),
         supabase.from("Employee").select("id, name, cpf, email, phone, position, salary, hireDate, status, createdAt, departmentId").eq("companyId", companyId).order("name"),
@@ -48,6 +60,8 @@ export async function getCompanyDetails(companyId: string) {
         supabase.from("Backup").select("id, fileName, fileSize, status, createdAt").eq("companyId", companyId).order("createdAt", { ascending: false }).limit(20),
         supabase.from("Settings").select("*").eq("companyId", companyId).maybeSingle(),
         supabase.from("activity_logs").select("id, user_name, action, target, created_at").eq("company_id", companyId).order("created_at", { ascending: false }).limit(30),
+        supabase.from("Subscription").select("*, plan:Plan(*)").eq("companyId", companyId).maybeSingle(),
+        supabase.from("Invoice").select("*").eq("companyId", companyId).order("year", { ascending: false }).order("month", { ascending: false }).limit(5),
     ])
 
     // Build department map for enriching employees
@@ -73,6 +87,8 @@ export async function getCompanyDetails(companyId: string) {
         backups: backups.data ?? [],
         settings: settings.data,
         logs: logs.data ?? [],
+        subscription: subscription.data,
+        invoices: invoices.data ?? [],
         totalSalary,
     }
 }

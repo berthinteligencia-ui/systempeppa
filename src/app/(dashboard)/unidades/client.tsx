@@ -17,7 +17,7 @@ import { createDepartment, updateDepartment, deleteDepartment } from "@/lib/acti
 
 type Department = { id: string; name: string; cnpj?: string | null; _count: { employees: number } }
 
-export function UnidadesClient({ departments }: { departments: Department[] }) {
+export function UnidadesClient({ departments, userRole }: { departments: Department[]; userRole?: string }) {
   const [open, setOpen] = useState(false)
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [editing, setEditing] = useState<Department | null>(null)
@@ -143,13 +143,15 @@ export function UnidadesClient({ departments }: { departments: Department[] }) {
                       >
                         <Pencil className="h-4 w-4" />
                       </button>
-                      <button
-                        onClick={() => setDeleteId(dept.id)}
-                        className="rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                        title="Excluir"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      {userRole?.toUpperCase() === "ADMIN" && (
+                        <button
+                          onClick={() => setDeleteId(dept.id)}
+                          className="rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                          title="Excluir"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

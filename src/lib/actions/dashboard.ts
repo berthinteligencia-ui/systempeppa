@@ -24,12 +24,14 @@ export async function getDashboardData(month?: number, year?: number) {
         { data: currentAnalyses },
         { data: prevAnalyses },
         { count: totalEmployees },
+        { count: pendingPaymentsCount },
     ] = await Promise.all([
         supabase.from("Department").select("*").eq("companyId", companyId),
         supabase.from("Employee").select("departmentId").eq("companyId", companyId).eq("status", "ACTIVE"),
         supabase.from("PayrollAnalysis").select("*").eq("companyId", companyId).eq("month", currentMonth).eq("year", currentYear),
         supabase.from("PayrollAnalysis").select("*").eq("companyId", companyId).eq("month", prevMonth).eq("year", prevYear),
         supabase.from("Employee").select("*", { count: "exact", head: true }).eq("companyId", companyId).eq("status", "ACTIVE"),
+        supabase.from("Employee").select("*", { count: "exact", head: true }).eq("companyId", companyId).eq("status", "ACTIVE").eq("pagamento", "pendente"),
     ])
 
     const depts = (departments ?? []).map(d => ({
@@ -92,7 +94,8 @@ export async function getDashboardData(month?: number, year?: number) {
             unitClosings,
             totalUnits,
             closingProgress,
-            variation
+            variation,
+            pendingPaymentsCount: pendingPaymentsCount ?? 0,
         },
         unitList,
         alerts,

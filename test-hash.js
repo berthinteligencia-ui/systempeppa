@@ -1,20 +1,11 @@
-const bcrypt = require("bcryptjs")
+const bcrypt = require('bcryptjs');
+const hash = '$2b$10$CtlYEf9heB.zGKJP1SnxreLN61zO0bOt7b3zTA5rPYlbjbOH2Xg4W';
+const password = 'admin123';
 
-const hashInDb = "$2b$12$JU87wz0sqMMiw69NvBMikO9VjaEnxLHrHCmR1pEuqNSWAqTaCtYvW"
-const password = "admin123"
-
-async function test() {
-    try {
-        const result = await bcrypt.compare(password, hashInDb)
-        console.log(`Password matches hash: ${result}`)
-
-        const newHash = await bcrypt.hash(password, 12)
-        console.log(`New hash for '${password}': ${newHash}`)
-        const result2 = await bcrypt.compare(password, newHash)
-        console.log(`Password matches new hash: ${result2}`)
-    } catch (err) {
-        console.error(err)
-    }
-}
-
-test()
+bcrypt.compare(password, hash).then(result => {
+    console.log('Match:', result);
+    process.exit(0);
+}).catch(err => {
+    console.error(err);
+    process.exit(1);
+});

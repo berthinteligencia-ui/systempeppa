@@ -23,7 +23,18 @@ export default function LoginPage() {
     })
 
     if (result?.error) {
-      setError("Credenciais inválidas. Verifique seu e-mail e senha.")
+      const code = (result as any).code ?? result.error
+      if (code === "DB_ERROR") {
+        setError("Erro de conexão com o banco de dados. Tente novamente em instantes.")
+      } else if (code === "USER_NOT_FOUND") {
+        setError("E-mail não encontrado. Verifique e tente novamente.")
+      } else if (code === "USER_INACTIVE") {
+        setError("Conta desativada. Entre em contato com o administrador.")
+      } else if (code === "WRONG_PASSWORD") {
+        setError("Senha incorreta. Verifique e tente novamente.")
+      } else {
+        setError("Credenciais inválidas. Verifique seu e-mail e senha.")
+      }
       setLoading(false)
       return
     }

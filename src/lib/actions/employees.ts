@@ -12,6 +12,14 @@ async function getCompanyId() {
   return session.user.companyId
 }
 
+async function ensureAdmin() {
+  const session = await auth()
+  const role = session?.user?.role?.toUpperCase()
+  if (role !== "ADMIN") {
+    throw new Error("Ação permitida apenas para administradores")
+  }
+}
+
 export async function createEmployee(data: {
   name: string
   position: string
@@ -21,6 +29,7 @@ export async function createEmployee(data: {
   cpf?: string
   email?: string
   phone?: string
+  pagamento?: string
 }) {
   const companyId = await getCompanyId()
   const supabase = getSupabaseAdmin()
@@ -29,6 +38,7 @@ export async function createEmployee(data: {
   check(await supabase.from("Employee").insert({
     id: randomUUID(),
     ...data,
+    pagamento: data.pagamento || "pendente",
     hireDate: new Date(data.hireDate).toISOString(),
     departmentId: data.departmentId || null,
     companyId,
@@ -50,12 +60,14 @@ export async function updateEmployee(
     email?: string
     phone?: string
     status: string
+    pagamento?: string
   }
 ) {
   const companyId = await getCompanyId()
   const supabase = getSupabaseAdmin()
   check(await supabase.from("Employee").update({
     ...data,
+    pagamento: data.pagamento,
     hireDate: new Date(data.hireDate).toISOString(),
     departmentId: data.departmentId || null,
     updatedAt: new Date().toISOString(),
@@ -64,6 +76,7 @@ export async function updateEmployee(
 }
 
 export async function deleteEmployee(id: string) {
+  await ensureAdmin()
   const companyId = await getCompanyId()
   const supabase = getSupabaseAdmin()
   check(await supabase.from("Employee").delete().eq("id", id).eq("companyId", companyId))
@@ -85,13 +98,14 @@ export async function registerBatchFromPayroll(
       phone: e.telefone || null,
       position: e.cargo || "A definir",
       salary: e.valor,
+      status: "ACTIVE", // Re-activate if already exists
       hireDate: now,
       companyId,
       departmentId,
       createdAt: now,
       updatedAt: now,
     })),
-    { onConflict: "cpf", ignoreDuplicates: true }
+    { onConflict: "cpf", ignoreDuplicates: false }
   ))
   revalidatePath("/funcionarios")
   revalidatePath("/folha-pagamento")
@@ -128,8 +142,16 @@ export async function importEmployees(
   const withoutCpf = employees.filter((e) => !e.cpf)
 
   if (withCpf.length > 0) {
+    // De-duplicate by CPF to avoid "ON CONFLICT DO UPDATE command cannot affect row a second time"
+    const uniqueByCpf = Array.from(
+      withCpf.reduce((map, emp) => {
+        map.set(emp.cpf!, emp)
+        return map
+      }, new Map<string, typeof withCpf[0]>()).values()
+    )
+
     check(await supabase.from("Employee").upsert(
-      withCpf.map((e) => ({
+      uniqueByCpf.map((e) => ({
         id: randomUUID(),
         name: e.name,
         cpf: e.cpf,
@@ -140,7 +162,7 @@ export async function importEmployees(
         hireDate: now,
         companyId,
         departmentId: e.departmentId || null,
-        status: "ACTIVE",
+        status: "ACTIVE", // Re-activate or set as active
         createdAt: now,
         updatedAt: now,
       })),
@@ -173,6 +195,7 @@ export async function importEmployees(
 }
 
 export async function deleteEmployeesBatch(ids: string[]) {
+  await ensureAdmin()
   const companyId = await getCompanyId()
   const supabase = getSupabaseAdmin()
   check(await supabase.from("Employee").delete().in("id", ids).eq("companyId", companyId))

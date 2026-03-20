@@ -26,23 +26,46 @@ export const { handlers, signIn, signOut, auth } = NextAuth(() => ({
 
         const supabase = getSupabaseAdmin()
 
+        // Step 1: fetch user without join first (more reliable)
         const { data: user, error } = await supabase
           .from("User")
-          .select("id, name, email, password, role, active, companyId, mustChangePassword, Company(id, name, cnpj)")
+          .select("id, name, email, password, role, active, companyId")
           .eq("email", credentials.email as string)
           .single()
 
-        if (error || !user) {
-          console.error("[AUTH] user not found:", error?.message)
-          return null
+        if (error) {
+          console.error("[AUTH] DB error fetching user:", error.message, error.code)
+          throw new Error("DB_ERROR")
         }
 
-        if (!user.active) return null
+        if (!user) {
+          console.error("[AUTH] user not found for email:", credentials.email)
+          throw new Error("USER_NOT_FOUND")
+        }
+
+        if (!user.active) {
+          console.error("[AUTH] user inactive:", credentials.email)
+          throw new Error("USER_INACTIVE")
+        }
 
         const valid = await bcrypt.compare(credentials.password as string, user.password)
-        if (!valid) return null
+        if (!valid) {
+          console.error("[AUTH] wrong password for:", credentials.email)
+          throw new Error("WRONG_PASSWORD")
+        }
 
-        const company = Array.isArray(user.Company) ? user.Company[0] : user.Company
+        // Step 2: fetch company name separately
+        let companyName = ""
+        let companyCnpj = ""
+        if (user.companyId) {
+          const { data: company } = await supabase
+            .from("Company")
+            .select("name, cnpj")
+            .eq("id", user.companyId)
+            .single()
+          companyName = company?.name ?? ""
+          companyCnpj = company?.cnpj ?? ""
+        }
 
         return {
           id: user.id,
@@ -50,9 +73,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth(() => ({
           email: user.email,
           role: user.role,
           companyId: user.companyId,
-          companyName: company?.name ?? "",
-          companyCnpj: company?.cnpj ?? "",
-          mustChangePassword: user.mustChangePassword ?? false,
+          companyName,
+          companyCnpj,
+          mustChangePassword: false,
         }
       },
     }),

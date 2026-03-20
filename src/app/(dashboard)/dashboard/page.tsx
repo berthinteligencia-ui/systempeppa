@@ -75,10 +75,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       iconColor: "text-indigo-600"
     },
     {
-      title: "FECHAMENTO DE UNIDADES",
-      value: `${metrics.unitClosings}`,
-      subtitle: `${metrics.totalUnits - metrics.unitClosings} pendentes`,
-      progress: metrics.closingProgress,
+      title: "PAGAMENTOS PENDENTES",
+      value: `${metrics.pendingPaymentsCount}`,
+      subtitle: "Colaboradores com pagamento em aberto",
       icon: ClipboardCheck,
       iconBg: "bg-orange-100",
       iconColor: "text-orange-600"

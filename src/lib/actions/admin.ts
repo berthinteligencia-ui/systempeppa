@@ -128,7 +128,7 @@ export async function createCompany(data: CompanyInput, adminUser: { name: strin
 
 export async function updateCompany(id: string, data: CompanyInput) {
     const supabase = getSupabaseAdmin()
-    const { error } = await supabase.from("Company").update({
+    const { data: updated, error } = await supabase.from("Company").update({
         name: data.name,
         cnpj: data.cnpj || null,
         email: data.email || null,
@@ -137,8 +137,39 @@ export async function updateCompany(id: string, data: CompanyInput) {
         city: data.city || null,
         state: data.state || null,
         updatedAt: new Date().toISOString(),
-    }).eq("id", id)
+    }).eq("id", id).select().single()
 
+    if (error) throw new Error(error.message)
+    return updated
+}
+
+export async function getCompanyAdmin(companyId: string) {
+    const supabase = getSupabaseAdmin()
+    const { data, error } = await supabase
+        .from("User")
+        .select("id, name, email")
+        .eq("companyId", companyId)
+        .eq("role", "ADMIN")
+        .limit(1)
+
+    if (error) throw new Error(error.message)
+    return data && data.length > 0 ? data[0] : null
+}
+
+export async function updateCompanyAdmin(userId: string, data: { name: string; email: string; password?: string }) {
+    const supabase = getSupabaseAdmin()
+    const updateData: any = {
+        name: data.name,
+        email: data.email,
+        updatedAt: new Date().toISOString()
+    }
+
+    if (data.password && data.password.trim().length > 0) {
+        updateData.password = await bcrypt.hash(data.password, 10)
+        updateData.mustChangePassword = true
+    }
+
+    const { error } = await supabase.from("User").update(updateData).eq("id", userId)
     if (error) throw new Error(error.message)
 }
 
@@ -150,4 +181,60 @@ export async function toggleCompanyActive(id: string, active: boolean) {
 export async function deleteCompany(id: string) {
     const supabase = getSupabaseAdmin()
     await supabase.from("Company").delete().eq("id", id)
+}
+
+export async function extractCompanyData(formData: FormData) {
+    const file = formData.get("file") as File
+    if (!file) throw new Error("Arquivo não enviado")
+
+    const apiKey = process.env.OPENAI_API_KEY
+    if (!apiKey) throw new Error("Chave de API da OpenAI (OPENAI_API_KEY) não configurada no .env")
+
+    const { OpenAI } = await import("openai")
+    const openai = new OpenAI({ apiKey })
+
+    const buffer = await file.arrayBuffer()
+    const { extractText } = await import("unpdf")
+    const { text: textContent } = await extractText(new Uint8Array(buffer))
+
+    const prompt = `Analise o texto abaixo extraído de um Comprovante de Inscrição e de Situação Cadastral (Cartão CNPJ) e extraia os seguintes dados em formato JSON puro, sem markdown:
+    - name: Nome empresarial ou Razão Social (string)
+    - cnpj: CNPJ formatado (string)
+    - email: E-mail de contato, se houver (string)
+    - whatsapp: Telefone/WhatsApp, se houver (string)
+    - address: Logradouro, número, complemento e bairro (string)
+    - city: Cidade/Município (string)
+    - state: Estado/UF (string)
+
+    Texto do comprovante:
+    ${textContent}`
+
+    try {
+        const response = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: "Você é um assistente especializado em extração de dados de documentos empresariais brasileiros. Responda apenas com o JSON puro." },
+                { role: "user", content: prompt }
+            ],
+            response_format: { type: "json_object" }
+        })
+
+        const resultText = response.choices[0].message.content
+        if (!resultText) throw new Error("OpenAI retornou uma resposta vazia")
+
+        const parsed = JSON.parse(resultText)
+
+        return {
+            name: String(parsed.name || ""),
+            cnpj: String(parsed.cnpj || ""),
+            email: String(parsed.email || ""),
+            whatsapp: String(parsed.whatsapp || ""),
+            address: String(parsed.address || ""),
+            city: String(parsed.city || ""),
+            state: String(parsed.state || "")
+        } as CompanyInput
+    } catch (err: any) {
+        console.error("[EXTRACT_COMPANY] OpenAI error:", err)
+        throw new Error("Falha ao analisar o documento com OpenAI: " + err.message)
+    }
 }

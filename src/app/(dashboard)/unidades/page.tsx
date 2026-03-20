@@ -22,7 +22,10 @@ export default async function UnidadesPage() {
 
   return (
     <div className="space-y-6">
-      <UnidadesClient departments={departments} />
+      <UnidadesClient
+        departments={departments}
+        userRole={session.user.role}
+      />
     </div>
   )
 }
