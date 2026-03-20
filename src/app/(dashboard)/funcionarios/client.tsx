@@ -601,18 +601,25 @@ ${rows.map((emp, i) => `<tr>
                     isSelected ? "border-blue-500 ring-1 ring-blue-500" : "border-slate-200"
                   }`}
                 >
-                  {/* Selection Checkbox */}
-                  <button
-                    onClick={() => toggleSelect(emp.id)}
-                    className="absolute right-4 top-4 z-10 rounded-full bg-white/80 p-0.5 backdrop-blur-sm transition-opacity group-hover:opacity-100 sm:opacity-0"
-                    style={{ opacity: isSelected ? 1 : undefined }}
-                  >
-                    {isSelected ? (
-                      <CheckSquare className="h-5 w-5 text-blue-600" />
-                    ) : (
-                      <Square className="h-5 w-5 text-slate-300" />
-                    )}
-                  </button>
+                  {/* Status & Selection Indicator */}
+                  <div className="absolute right-4 top-4 z-10 flex items-center gap-2">
+                    <div className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase shadow-sm ${s.cls} border border-white/20`}>
+                      <div className={`h-1.5 w-1.5 rounded-full ${emp.status === 'ACTIVE' ? 'bg-emerald-500' : emp.status === 'INACTIVE' ? 'bg-red-500' : 'bg-amber-500'}`} />
+                      {s.label}
+                    </div>
+                    
+                    <button
+                      onClick={() => toggleSelect(emp.id)}
+                      className="rounded-full bg-white/80 p-0.5 backdrop-blur-sm transition-opacity group-hover:opacity-100 sm:opacity-0 shadow-sm"
+                      style={{ opacity: isSelected ? 1 : undefined }}
+                    >
+                      {isSelected ? (
+                        <CheckSquare className="h-5 w-5 text-blue-600" />
+                      ) : (
+                        <Square className="h-5 w-5 text-slate-300" />
+                      )}
+                    </button>
+                  </div>
 
                   <div className="flex flex-col h-full">
                     <div className="mb-4">
@@ -640,12 +647,6 @@ ${rows.map((emp, i) => `<tr>
                         </span>
                       </div>
 
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-500 text-xs uppercase tracking-wider font-bold">Status</span>
-                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-black uppercase ${s.cls}`}>
-                          <Icon className="h-3 w-3" /> {s.label}
-                        </span>
-                      </div>
 
                       <div className="flex items-center justify-between pt-2 border-t border-slate-50">
                         <span className="text-slate-500 text-xs uppercase tracking-wider font-bold">Salário</span>
