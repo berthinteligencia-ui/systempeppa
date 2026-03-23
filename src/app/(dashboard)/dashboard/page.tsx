@@ -55,7 +55,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   const { kpis: metrics, unitList, alerts, period } = data
 
-  const kpis = [
+  const kpis: { title: string; value: string; trend?: string; trendLabel?: string; up?: boolean; icon: any; iconBg: string; iconColor: string; subtitle?: string; progress?: number }[] = [
     {
       title: "CUSTO TOTAL EMPRESA",
       value: fmtBRL(metrics.totalCost),
