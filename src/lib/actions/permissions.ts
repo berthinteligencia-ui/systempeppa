@@ -7,7 +7,7 @@ import { CONTROLLABLE_ROLES, DEFAULT_PERMISSIONS, type AllPermissions, type Perm
 
 export async function getRolePermissions(companyId: string): Promise<AllPermissions> {
     const rows = await query<{ role: string; permissions: PermissionMap }>(
-        `SELECT role, permissions FROM role_permissions WHERE company_id = $1`,
+        `SELECT role, permissions FROM public.role_permissions WHERE company_id = $1`,
         [companyId]
     )
     const result: AllPermissions = {}
@@ -27,7 +27,7 @@ export async function updateRolePermissions(role: string, permissions: Permissio
     const companyId = session.user.companyId
 
     await query(
-        `INSERT INTO role_permissions (company_id, role, permissions, updated_at)
+        `INSERT INTO public.role_permissions (company_id, role, permissions, updated_at)
          VALUES ($1, $2, $3::jsonb, NOW())
          ON CONFLICT (company_id, role) DO UPDATE
          SET permissions = $3::jsonb, updated_at = NOW()`,
