@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { getDashboardData } from "@/lib/actions/dashboard"
 import { listNotasFiscais } from "@/lib/actions/nfs"
+import { cn } from "@/lib/utils"
 
 const MESES = [
   "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -115,37 +116,68 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
       {/* KPI Cards */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {kpis.map((kpi) => (
-          <div key={kpi.title} className="rounded-xl border bg-white p-5 shadow-sm transition-shadow hover:shadow-md">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{kpi.title}</p>
-                <p className="mt-2 text-2xl font-bold text-slate-800">{kpi.value}</p>
-                {kpi.subtitle && <p className="mt-0.5 text-sm text-slate-500">{kpi.subtitle}</p>}
+        {kpis.map((kpi) => {
+          const isMainKpi = kpi.title === "Custo Total"
+          return (
+            <div 
+              key={kpi.title} 
+              className={cn(
+                "rounded-2xl border bg-white p-6 shadow-sm transition-all hover:shadow-lg relative overflow-hidden group",
+                isMainKpi ? "xl:col-span-2 border-blue-100 bg-gradient-to-br from-white to-blue-50/30" : "border-slate-100"
+              )}
+            >
+              {isMainKpi && (
+                <div className="absolute -right-6 -top-6 size-24 bg-blue-600/5 rounded-full blur-2xl group-hover:bg-blue-600/10 transition-colors" />
+              )}
+              
+              <div className="flex items-start justify-between relative z-10">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 mb-1">{kpi.title}</p>
+                  <p className={cn(
+                    "font-black text-slate-900 tracking-tight",
+                    isMainKpi ? "text-4xl" : "text-2xl"
+                  )}>{kpi.value}</p>
+                  {kpi.subtitle && <p className="mt-1 text-xs font-bold text-slate-500 uppercase tracking-wide">{kpi.subtitle}</p>}
+                </div>
+                <div className={cn(
+                  "rounded-2xl p-3 shrink-0 shadow-sm transition-transform group-hover:scale-110",
+                  kpi.iconBg,
+                  isMainKpi && "size-14 flex items-center justify-center p-0"
+                )}>
+                  <kpi.icon className={cn(
+                    kpi.iconColor,
+                    isMainKpi ? "h-7 w-7" : "h-5 w-5"
+                  )} />
+                </div>
               </div>
-              <div className={`rounded-lg p-2.5 ${kpi.iconBg}`}>
-                <kpi.icon className={`h-5 w-5 ${kpi.iconColor}`} />
-              </div>
+
+              {kpi.progress !== undefined ? (
+                <div className="mt-6 space-y-2 relative z-10">
+                  <Progress value={kpi.progress} className="h-2 bg-slate-100" />
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{kpi.progress}% concluído</p>
+                </div>
+              ) : kpi.trend ? (
+                <div className="mt-6 flex items-center gap-2 relative z-10">
+                  <div className={cn(
+                    "flex items-center gap-1 rounded-full px-2 py-0.5",
+                    kpi.up ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"
+                  )}>
+                    {kpi.up ? <ArrowUpRight className="h-3 w-3 stroke-[3]" /> : <ArrowDownRight className="h-3 w-3 stroke-[3]" />}
+                    <span className="text-xs font-black uppercase">{kpi.trend}</span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{kpi.trendLabel}</span>
+                </div>
+              ) : (
+                <div className="mt-6 flex items-center gap-2 relative z-10">
+                  <div className="size-5 rounded-full bg-emerald-50 flex items-center justify-center">
+                    <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{kpi.trendLabel}</span>
+                </div>
+              )}
             </div>
-            {kpi.progress !== undefined ? (
-              <div className="mt-4 space-y-1.5">
-                <Progress value={kpi.progress} className="h-1.5 bg-slate-100" />
-                <p className="text-xs font-medium text-slate-500">{kpi.progress}% concluído</p>
-              </div>
-            ) : kpi.trend ? (
-              <div className="mt-4 flex items-center gap-1">
-                {kpi.up ? <ArrowUpRight className="h-4 w-4 text-emerald-500" /> : <ArrowDownRight className="h-4 w-4 text-red-500" />}
-                <span className={`text-sm font-bold ${kpi.up ? "text-emerald-600" : "text-red-600"}`}>{kpi.trend}</span>
-                <span className="text-xs text-slate-400 font-medium ml-1">{kpi.trendLabel}</span>
-              </div>
-            ) : (
-              <div className="mt-4 flex items-center gap-1">
-                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                <span className="text-xs text-slate-400 font-medium">{kpi.trendLabel}</span>
-              </div>
-            )}
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       {/* Table + Alerts */}

@@ -10,12 +10,27 @@ export default async function FuncionariosPage() {
   const supabase = getSupabaseAdmin()
   const companyId = session.user.companyId
 
-  const [{ data: rawEmployees }, { data: departments }] = await Promise.all([
+  const [{ data: rawEmployees }, { data: departments }, { data: allComprovantes }] = await Promise.all([
     supabase.from("Employee").select("*, department:Department(*)").eq("companyId", companyId).order("name"),
     supabase.from("Department").select("*").eq("companyId", companyId).order("name"),
+    supabase.from("Comprovante").select("cpf, fileUrl, extractedAt").eq("companyId", companyId).order("extractedAt", { ascending: false })
   ])
 
-  const employees = (rawEmployees ?? []).map((e) => ({ ...e, salary: Number(e.salary) }))
+  // Map CPF to latest fileUrl
+  const lastComprovanteMap: Record<string, string> = {}
+  if (allComprovantes) {
+    for (const c of allComprovantes) {
+      if (!lastComprovanteMap[c.cpf]) {
+        lastComprovanteMap[c.cpf] = c.fileUrl
+      }
+    }
+  }
+
+  const employees = (rawEmployees ?? []).map((e) => ({ 
+    ...e, 
+    salary: Number(e.salary),
+    lastReceiptUrl: lastComprovanteMap[e.cpf.replace(/\D/g, "")] || null
+  }))
 
   return (
     <div className="space-y-6">

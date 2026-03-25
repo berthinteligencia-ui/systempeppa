@@ -4,7 +4,7 @@ import { useState, useRef, useCallback } from "react"
 import {
   UserPlus, Pencil, Trash2, CheckCircle2, AlertCircle, Clock, Filter,
   CheckSquare, Square, Download, FileDown, FileUp, Loader2, X, FileSpreadsheet,
-  Receipt, ChevronDown,
+  FileText, ChevronDown, ExternalLink, Receipt,
 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import * as XLSX from "xlsx"
@@ -31,6 +31,7 @@ import {
   createEmployee, updateEmployee, deleteEmployee,
   deleteEmployeesBatch, importEmployees,
 } from "@/lib/actions/employees"
+import { getEmployeeComprovantes, deleteComprovante } from "@/lib/actions/comprovante"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -182,6 +183,9 @@ function parseImportRows(rawRows: Record<string, unknown>[], headers: string[], 
 export function FuncionariosClient({
   employees, departments, userRole,
 }: { employees: Employee[]; departments: Department[]; userRole?: string }) {
+  console.log("[DEBUG] FuncionariosClient userRole:", userRole)
+  const isAllowedToDelete = userRole?.toUpperCase() === "ADMIN" || userRole?.toUpperCase() === "RH"
+
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [deleteId, setDeleteId] = useState<string | null>(null)
@@ -194,6 +198,35 @@ export function FuncionariosClient({
   const [filterSearch, setFilterSearch] = useState("")
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+
+  // Extrato state
+  const [extratoEmployee, setExtratoEmployee] = useState<Employee | null>(null)
+  const [extratoData, setExtratoData] = useState<Awaited<ReturnType<typeof getEmployeeComprovantes>>>([])
+  const [extratoLoading, setExtratoLoading] = useState(false)
+
+  async function openExtrato(emp: Employee) {
+    setExtratoEmployee(emp)
+    setExtratoData([])
+    setExtratoLoading(true)
+    try {
+      const data = await getEmployeeComprovantes(emp.cpf ?? "", emp.id)
+      setExtratoData(data)
+    } finally {
+      setExtratoLoading(false)
+    }
+  }
+
+  async function handleDeleteComprovante(id: string) {
+    if (!confirm("Tem certeza que deseja excluir este registro?")) return
+    try {
+      const res = await deleteComprovante(id)
+      if (res.success) {
+        setExtratoData(prev => prev.filter(r => r.id !== id))
+      }
+    } catch (err: any) {
+      alert("Erro ao excluir: " + err.message)
+    }
+  }
 
   // Import state
   const [importOpen, setImportOpen] = useState(false)
@@ -638,7 +671,7 @@ ${rows.map((emp, i) => `<tr>
                     <div className="space-y-3 flex-1 text-sm">
                       <div className="flex items-center justify-between">
                         <span className="text-slate-500 text-xs uppercase tracking-wider font-bold">Cargo</span>
-                        <span className="font-semibold text-slate-700">{emp.position}</span>
+                        <span className="font-semibold text-slate-700">{emp.position?.split(' ').slice(0, 3).join(' ')}</span>
                       </div>
                       
                       <div className="flex items-center justify-between">
@@ -663,12 +696,23 @@ ${rows.map((emp, i) => `<tr>
                     <div className="mt-5 flex items-center justify-between gap-2 border-t pt-4">
                       <div className="flex gap-1.5">
                         <button
-                          onClick={() => router.push(`/comprovante?cpf=${emp.cpf || ""}`)}
-                          title="Ver Comprovantes"
-                          className="flex h-9 w-9 items-center justify-center rounded-lg border border-blue-100 bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
+                          onClick={() => openExtrato(emp)}
+                          title="Ver Extrato"
+                          className="flex h-9 items-center gap-1.5 px-2.5 justify-center rounded-lg border border-blue-100 bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors text-[11px] font-bold uppercase tracking-wide"
                         >
-                          <Receipt className="h-4 w-4" />
+                          <FileText className="h-3.5 w-3.5" />
+                          Extrato
                         </button>
+                        {emp.lastReceiptUrl && (
+                          <button
+                            onClick={() => window.open(emp.lastReceiptUrl, '_blank')}
+                            title="Baixar Último Comprovante"
+                            className="flex h-9 items-center gap-1.5 px-2.5 justify-center rounded-lg border border-emerald-100 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors text-[11px] font-bold uppercase tracking-wide"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            Baixar
+                          </button>
+                        )}
                         <button
                           onClick={() => openEdit(emp)}
                           className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition-colors"
@@ -693,6 +737,156 @@ ${rows.map((emp, i) => `<tr>
           </div>
         )}
       </div>
+
+      {/* ── Extrato Dialog ── */}
+      <Dialog open={!!extratoEmployee} onOpenChange={(v) => { if (!v) { setExtratoEmployee(null); setExtratoData([]) } }}>
+        <DialogContent size="lg" className="max-h-[85vh] flex flex-col">
+          <DialogHeader className="shrink-0">
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5 text-blue-600" />
+              Extrato de Pagamentos
+            </DialogTitle>
+            {extratoEmployee && (
+              <p className="text-sm text-slate-500 mt-1">
+                {extratoEmployee.name} · CPF {fmtCpf(extratoEmployee.cpf)}
+              </p>
+            )}
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto mt-2">
+            {extratoLoading ? (
+              <div className="flex items-center justify-center py-12 text-slate-400">
+                <Loader2 className="h-5 w-5 animate-spin mr-2" /> Carregando...
+              </div>
+            ) : extratoData.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-slate-400 gap-2">
+                <Receipt className="h-10 w-10 opacity-30" />
+                <p className="text-sm font-medium">Nenhum comprovante encontrado</p>
+                <p className="text-xs">Analise comprovantes na página de Comprovantes.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {/* Summary */}
+                <div className="grid grid-cols-3 gap-4 mb-6">
+                  <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-4 border border-blue-100/50 shadow-sm relative overflow-hidden group">
+                    <div className="absolute -right-2 -top-2 opacity-10 transition-transform group-hover:scale-110">
+                      <FileText className="h-12 w-12 text-blue-600" />
+                    </div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-blue-500/70">Registros</p>
+                    <p className="text-2xl font-black text-blue-700 mt-1">{extratoData.length}</p>
+                  </div>
+                  <div className="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-2xl p-4 border border-emerald-100/50 shadow-sm relative overflow-hidden group">
+                    <div className="absolute -right-2 -top-2 opacity-10 transition-transform group-hover:scale-110">
+                      <Receipt className="h-12 w-12 text-emerald-600" />
+                    </div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-emerald-500/70">Total Pago</p>
+                    <p className="text-2xl font-black text-emerald-700 mt-1">
+                      {fmtBRL(extratoData.reduce((s, r) => s + (r.amount ?? 0), 0))}
+                    </p>
+                  </div>
+                  <div className="bg-gradient-to-br from-slate-50 to-gray-50 rounded-2xl p-4 border border-slate-200/50 shadow-sm relative overflow-hidden group">
+                    <div className="absolute -right-2 -top-2 opacity-10 transition-transform group-hover:scale-110">
+                      <Clock className="h-12 w-12 text-slate-400" />
+                    </div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Último</p>
+                    <p className="text-sm font-black text-slate-700 mt-1 uppercase">
+                      {extratoData[0] ? new Date(extratoData[0].extractedAt).toLocaleDateString("pt-BR") : "—"}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Table */}
+                <div className="rounded-2xl border border-slate-200/60 overflow-hidden bg-white shadow-sm">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-[10px] font-black uppercase tracking-widest text-slate-400 text-left bg-slate-50/50">
+                        <th className="px-4 py-3.5">Data</th>
+                        <th className="px-4 py-3.5">Mês</th>
+                        <th className="px-4 py-3.5 text-right">Valor</th>
+                        <th className="px-4 py-3.5 text-center">Situação</th>
+                        <th className="px-4 py-3.5 text-center">PDF</th>
+                        {isAllowedToDelete && <th className="px-4 py-3.5 text-center">Ação</th>}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {extratoData.map((r) => {
+                        // Lógica: mês anterior à data corrente (ou extração)
+                        const prevMonthDate = new Date()
+                        prevMonthDate.setMonth(prevMonthDate.getMonth() - 1)
+                        const mesAnterior = prevMonthDate.toLocaleDateString('pt-BR', { month: 'long' })
+
+                        return (
+                          <tr key={r.id} className="hover:bg-blue-50/30 transition-colors group">
+                            <td className="px-4 py-4">
+                              <div className="flex flex-col">
+                                <span className="text-xs font-bold text-slate-900 leading-none">
+                                  {new Date(r.extractedAt).toLocaleDateString("pt-BR")}
+                                </span>
+                                {r.generatedAt && (
+                                  <span className="text-[9px] text-slate-400 font-medium mt-1 uppercase tracking-tight">
+                                    {r.generatedAt}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-4 py-4">
+                              <span className="text-xs font-black text-blue-600 uppercase tracking-tight">
+                                {mesAnterior}
+                              </span>
+                            </td>
+                            <td className="px-4 py-4 text-xs font-black text-slate-900 text-right whitespace-nowrap">
+                              {r.amount != null ? fmtBRL(r.amount) : "—"}
+                            </td>
+                            <td className="px-4 py-4 text-center">
+                              <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-black uppercase border-2 ${
+                                r.situacao.includes("LIBERAD") || r.situacao === "PAGO"
+                                  ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+                                  : r.situacao === "PENDENTE"
+                                  ? "bg-amber-50 text-amber-600 border-amber-100"
+                                  : "bg-slate-50 text-slate-500 border-slate-100"
+                              }`}>
+                                {r.situacao}
+                              </span>
+                            </td>
+                            <td className="px-4 py-4 text-center">
+                              <div className="flex items-center justify-center gap-1">
+                                {r.fileUrl ? (
+                                  <a
+                                    href={r.fileUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white transition-all border border-blue-100 shadow-sm"
+                                    title="Baixar Comprovante"
+                                  >
+                                    <Download className="h-4 w-4" />
+                                  </a>
+                                ) : (
+                                  <span className="text-[10px] text-slate-300 font-medium">—</span>
+                                )}
+                              </div>
+                            </td>
+                            {isAllowedToDelete && (
+                              <td className="px-4 py-4 text-center">
+                                <button
+                                  onClick={() => handleDeleteComprovante(r.id)}
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-red-50 text-red-500 hover:bg-red-500 hover:text-white transition-all border border-red-100 shadow-sm"
+                                  title="Excluir Registro"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </td>
+                            )}
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Form Dialog ── */}
       <Dialog open={open} onOpenChange={setOpen}>
@@ -855,7 +1049,7 @@ ${rows.map((emp, i) => `<tr>
                         <tr key={i} className="hover:bg-slate-50/50 transition-colors">
                           <td className="px-4 py-4">
                             <p className="font-bold text-slate-800 text-sm">{r.name}</p>
-                            <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-wide mt-0.5">{r.position || "Sem cargo"}</p>
+                            <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-wide mt-0.5">{r.position?.split(' ').slice(0, 3).join(' ') || "Sem cargo"}</p>
                           </td>
                           <td className="px-4 py-4 font-mono text-xs text-slate-500">{fmtCpf(r.cpf ?? null)}</td>
                           <td className="px-4 py-4">

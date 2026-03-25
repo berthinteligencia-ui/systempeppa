@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Plus, Pencil, Trash2, Building2, FileSpreadsheet, Search } from "lucide-react"
+import { Plus, Pencil, Trash2, Building2, FileSpreadsheet, Search, Power } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -13,9 +13,9 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { createDepartment, updateDepartment, deleteDepartment } from "@/lib/actions/departments"
+import { createDepartment, updateDepartment, deleteDepartment, toggleDepartmentStatus } from "@/lib/actions/departments"
 
-type Department = { id: string; name: string; cnpj?: string | null; _count: { employees: number } }
+type Department = { id: string; name: string; cnpj?: string | null; active: boolean; _count: { employees: number } }
 
 export function UnidadesClient({ departments, userRole }: { departments: Department[]; userRole?: string }) {
   const [open, setOpen] = useState(false)
@@ -68,6 +68,15 @@ export function UnidadesClient({ departments, userRole }: { departments: Departm
     }
   }
 
+  async function handleToggle(dept: Department) {
+    setLoading(true)
+    try {
+      await toggleDepartmentStatus(dept.id, !dept.active)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
     <>
       <div className="flex items-center justify-between">
@@ -105,6 +114,7 @@ export function UnidadesClient({ departments, userRole }: { departments: Departm
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                 <th className="px-5 py-3">Unidade</th>
+                <th className="px-5 py-3">Status</th>
                 <th className="px-5 py-3">CNPJ</th>
                 <th className="px-5 py-3 text-center">Colaboradores</th>
                 <th className="px-5 py-3 text-right">Ações</th>
@@ -112,14 +122,21 @@ export function UnidadesClient({ departments, userRole }: { departments: Departm
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filtered.map(dept => (
-                <tr key={dept.id} className="hover:bg-slate-50 transition-colors">
+                <tr key={dept.id} className={`hover:bg-slate-50 transition-colors ${!dept.active ? "opacity-60" : ""}`}>
                   <td className="px-5 py-3.5">
                     <div className="flex items-center gap-3">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-100">
-                        <Building2 className="h-4 w-4 text-blue-600" />
+                      <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${dept.active ? "bg-blue-100" : "bg-slate-100"}`}>
+                        <Building2 className={`h-4 w-4 ${dept.active ? "text-blue-600" : "text-slate-400"}`} />
                       </div>
-                      <span className="font-medium text-slate-800">{dept.name}</span>
+                      <span className={`font-medium ${dept.active ? "text-slate-800" : "text-slate-500 line-through"}`}>{dept.name}</span>
                     </div>
+                  </td>
+                  <td className="px-5 py-3.5">
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                      dept.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"
+                    }`}>
+                      {dept.active ? "Ativo" : "Inativo"}
+                    </span>
                   </td>
                   <td className="px-5 py-3.5 text-slate-500">
                     {dept.cnpj || <span className="text-slate-300">—</span>}
@@ -136,6 +153,16 @@ export function UnidadesClient({ departments, userRole }: { departments: Departm
                       >
                         <FileSpreadsheet className="h-3.5 w-3.5" /> FECHAMENTOS
                       </Link>
+                      <button
+                        onClick={() => handleToggle(dept)}
+                        disabled={loading}
+                        className={`rounded p-1.5 transition-colors ${
+                          dept.active ? "text-emerald-500 hover:bg-emerald-50" : "text-slate-400 hover:bg-slate-100"
+                        }`}
+                        title={dept.active ? "Desativar" : "Ativar"}
+                      >
+                        <Power className="h-4 w-4" />
+                      </button>
                       <button
                         onClick={() => openEdit(dept)}
                         className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"

@@ -716,7 +716,7 @@ export function FolhaPagamentoClient({
                                             <tr key={i} className="hover:bg-slate-50 transition-colors">
                                                 <td className="px-5 py-3">
                                                     <p className="font-semibold text-slate-800">{row.nome}</p>
-                                                    {row.cargo && <p className="text-xs text-slate-400 mt-0.5">{row.cargo}</p>}
+                                                    {row.cargo && <p className="text-xs text-slate-400 mt-0.5">{row.cargo.split(' ').slice(0, 3).join(' ')}</p>}
                                                 </td>
                                                 <td className="px-5 py-3 font-mono text-xs text-slate-500">{maskCpf(row.cpf)}</td>
                                                 <td className="px-5 py-3 text-right font-bold text-slate-800">{fmtBRL(row.valor)}</td>

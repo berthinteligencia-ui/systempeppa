@@ -49,3 +49,22 @@ export async function deleteDepartment(id: string) {
   check(await supabase.from("Department").delete().eq("id", id).eq("companyId", companyId))
   revalidatePath("/unidades")
 }
+
+export async function toggleDepartmentStatus(id: string, active: boolean) {
+  const companyId = await getCompanyId()
+  const supabase = getSupabaseAdmin()
+  
+  // Atualiza o status do departamento
+  check(await supabase.from("Department").update({ active, updatedAt: new Date().toISOString() }).eq("id", id).eq("companyId", companyId))
+  
+  // Se desativar a unidade, coloca todos os funcionários dela como AFASTADOS (ON_LEAVE)
+  if (!active) {
+    check(await supabase.from("Employee")
+      .update({ status: "ON_LEAVE", updatedAt: new Date().toISOString() })
+      .eq("departmentId", id)
+      .eq("companyId", companyId))
+  }
+  
+  revalidatePath("/unidades")
+  revalidatePath("/funcionarios")
+}

@@ -422,7 +422,7 @@ function CompanyDetailPanel({ details, onBack }: { details: CompanyDetails; onBa
                                         <div className="flex items-start justify-between gap-2">
                                             <div className="min-w-0">
                                                 <p className="text-[13px] font-bold text-slate-900">{e.name}</p>
-                                                <p className="text-[11px] text-slate-500">{e.position} · {e.departmentName}</p>
+                                                <p className="text-[11px] text-slate-500">{e.position?.split(' ').slice(0, 3).join(' ')} · {e.departmentName}</p>
                                             </div>
                                             <Badge label={st.label} color={st.color} />
                                         </div>

@@ -95,48 +95,48 @@ export function WhatsAppCRMPanel({ conversation }: WhatsAppCRMPanelProps) {
     return (
         <div className="w-72 shrink-0 border-l border-slate-100 bg-white flex flex-col overflow-y-auto">
             {/* Profile */}
-            <div className="flex flex-col items-center pt-8 pb-6 px-5 border-b border-slate-100">
-                <Avatar className="h-20 w-20 mb-3">
-                    <AvatarFallback className="bg-gradient-to-br from-blue-500 to-indigo-600 text-white text-2xl font-bold">
+            <div className="flex flex-col items-start pt-10 pb-8 px-6 border-b border-slate-50">
+                <Avatar className="h-20 w-20 mb-4 shadow-xl shadow-blue-900/10">
+                    <AvatarFallback className="bg-gradient-to-br from-[#1e3b8a] to-indigo-600 text-white text-2xl font-black">
                         {initial}
                     </AvatarFallback>
                 </Avatar>
-                <h3 className="font-bold text-slate-900 text-base text-center">{name}</h3>
-                <p className="text-sm text-slate-500 mt-0.5">{phone}</p>
+                <h3 className="font-black text-slate-900 text-lg leading-tight">{name}</h3>
+                <p className="text-sm font-bold text-slate-400 mt-1">{phone}</p>
                 {employee?.department && (
-                    <p className="text-xs font-semibold text-blue-600 mt-1 uppercase tracking-wider">
+                    <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest text-[#1e3b8a]">
                         {employee.department}
-                    </p>
+                    </div>
                 )}
             </div>
 
             {/* CRM Info */}
-            <div className="px-5 py-5 space-y-5 flex-1">
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Informações de CRM</p>
+            <div className="px-6 py-8 space-y-6 flex-1">
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-300">Inteligência CRM</p>
 
                 {/* Status */}
-                <div className="space-y-1.5">
-                    <p className="text-xs font-semibold text-slate-500">Status do Lead</p>
+                <div className="space-y-3">
+                    <p className="text-xs font-black uppercase tracking-wider text-slate-400">Status do Lead</p>
                     <div className="relative">
                         <button
                             onClick={() => setShowStatusDropdown(o => !o)}
                             className={cn(
-                                "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold cursor-pointer transition-all hover:opacity-80",
-                                STATUS_COLORS[status] || "bg-slate-100 text-slate-600"
+                                "w-full flex items-center justify-between gap-1.5 rounded-2xl px-4 py-3 text-xs font-black transition-all hover:scale-[1.02] active:scale-[0.98] shadow-sm",
+                                STATUS_COLORS[status] || "bg-slate-50 text-slate-600"
                             )}
                         >
                             {status}
-                            <ChevronDown className="h-3 w-3" />
+                            <ChevronDown className="h-4 w-4 opacity-50" />
                         </button>
                         {showStatusDropdown && (
-                            <div className="absolute top-8 left-0 z-20 bg-white border border-slate-200 rounded-xl shadow-lg py-1 min-w-[180px]">
+                            <div className="absolute top-12 left-0 z-20 w-full bg-white border border-slate-100 rounded-2xl shadow-2xl py-2 animate-in fade-in zoom-in-95 duration-200">
                                 {STATUS_OPTIONS.map(opt => (
                                     <button
                                         key={opt}
                                         onClick={() => { setStatus(opt); setShowStatusDropdown(false) }}
                                         className="w-full text-left px-4 py-2 text-sm hover:bg-slate-50 transition-colors"
                                     >
-                                        <span className={cn("inline-flex rounded-full px-2 py-0.5 text-xs font-bold", STATUS_COLORS[opt] || "bg-slate-100 text-slate-600")}>
+                                        <span className={cn("inline-flex rounded-full px-2.5 py-1 text-[10px] font-black uppercase", STATUS_COLORS[opt] || "bg-slate-50 text-slate-600")}>
                                             {opt}
                                         </span>
                                     </button>
@@ -148,9 +148,9 @@ export function WhatsAppCRMPanel({ conversation }: WhatsAppCRMPanelProps) {
             </div>
 
             {/* Quick Actions */}
-            <div className="px-5 pb-6 border-t border-slate-100 pt-5">
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Ações Rápidas</p>
-                <div className="grid grid-cols-2 gap-2">
+            <div className="px-6 pb-10 border-t border-slate-50 pt-8">
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-300 mb-4">Ações Estratégicas</p>
+                <div className="grid grid-cols-2 gap-3">
                     <input
                         type="file"
                         ref={fileInputRef}
@@ -161,20 +161,20 @@ export function WhatsAppCRMPanel({ conversation }: WhatsAppCRMPanelProps) {
                     <button
                         onClick={() => fileInputRef.current?.click()}
                         disabled={uploading}
-                        className="flex flex-col items-center gap-1.5 rounded-xl border border-slate-200 p-3 hover:bg-slate-50 hover:border-blue-200 transition-colors group disabled:opacity-50"
+                        className="flex flex-col items-center gap-2 rounded-2xl border border-slate-100 p-4 hover:bg-white hover:border-blue-200 hover:shadow-lg hover:shadow-blue-900/5 transition-all group disabled:opacity-50 active:scale-[0.95]"
                     >
                         {uploading ? (
-                            <div className="h-5 w-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                            <div className="h-5 w-5 border-2 border-[#1e3b8a] border-t-transparent rounded-full animate-spin" />
                         ) : (
-                            <FileText className="h-5 w-5 text-slate-400 group-hover:text-blue-600 transition-colors" />
+                            <FileText className="h-5 w-5 text-slate-400 group-hover:text-[#1e3b8a] transition-colors" />
                         )}
-                        <span className="text-[11px] font-semibold text-slate-600 group-hover:text-blue-600">
-                            {uploading ? "Enviando..." : "Enviar PDF"}
+                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 group-hover:text-[#1e3b8a]">
+                            {uploading ? "Sinc..." : "Enviar PDF"}
                         </span>
                     </button>
-                    <button className="flex flex-col items-center gap-1.5 rounded-xl border border-slate-200 p-3 hover:bg-slate-50 hover:border-blue-200 transition-colors group">
-                        <Calendar className="h-5 w-5 text-slate-400 group-hover:text-blue-600 transition-colors" />
-                        <span className="text-[11px] font-semibold text-slate-600 group-hover:text-blue-600">Agendar</span>
+                    <button className="flex flex-col items-center gap-2 rounded-2xl border border-slate-100 p-4 hover:bg-white hover:border-blue-200 hover:shadow-lg hover:shadow-blue-900/5 transition-all group active:scale-[0.95]">
+                        <Calendar className="h-5 w-5 text-slate-400 group-hover:text-[#1e3b8a] transition-colors" />
+                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 group-hover:text-[#1e3b8a]">Agendar</span>
                     </button>
                 </div>
             </div>

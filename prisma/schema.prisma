@@ -148,6 +148,7 @@ model Department {
   id              String            @id @default(cuid())
   name            String
   cnpj            String?
+  active          Boolean           @default(true)
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
   companyId       String
@@ -217,14 +218,17 @@ model Comprovante {
   situacao      String
   amount        Decimal?        @db.Decimal(10, 2)
   extractedAt   DateTime        @default(now())
-  
+  generatedAt   String?
+  fileUrl       String?
+  originCnpj    String?
+
   // Relations
   companyId     String
   company       Company         @relation(fields: [companyId], references: [id])
-  
+
   employeeId    String?
   employee      Employee?       @relation(fields: [employeeId], references: [id])
-  
+
   fechamentoId  String?
   fechamento    PayrollAnalysis? @relation(fields: [fechamentoId], references: [id])
 }

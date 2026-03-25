@@ -11,12 +11,19 @@ export default async function ComprovantePage() {
     const companyId = session.user.companyId
     const supabase = getSupabaseAdmin()
 
-    const [{ data: depts }, fechamentos] = await Promise.all([
+    const [{ data: depts }, fechamentos, { data: comprovantes }] = await Promise.all([
         supabase.from("Department").select("id, name").eq("companyId", companyId).order("name"),
-        listPayrollAnalyses()
+        listPayrollAnalyses(),
+        supabase.from("Comprovante").select("*, employee:Employee(name, departmentId)").eq("companyId", companyId).order("extractedAt", { ascending: false })
     ])
 
     return (
-        <ComprovanteClient departments={depts ?? []} fechamentos={fechamentos} />
+        <ComprovanteClient 
+            departments={depts ?? []} 
+            fechamentos={fechamentos} 
+            comprovantes={comprovantes ?? []}
+            companyId={companyId}
+            userRole={session.user.role}
+        />
     )
 }
