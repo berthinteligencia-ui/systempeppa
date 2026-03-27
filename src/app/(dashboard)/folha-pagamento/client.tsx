@@ -7,6 +7,7 @@ import {
     FileSpreadsheet, CheckCircle2, X, Calendar, Building2, FileUp,
     AlertTriangle, UserPlus, Users, ChevronRight, ChevronDown, RotateCcw, Loader2, ShieldCheck,
     Trash2, Edit, Phone, Receipt, Maximize2, CirclePlus, Plus, Sparkles, Info, BellRing, Lightbulb,
+    AlertCircle,
 } from "lucide-react"
 import * as XLSX from "xlsx"
 import { Button } from "@/components/ui/button"
@@ -18,6 +19,9 @@ import {
 import {
     Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
+import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
 import { registerBatchFromPayroll, getEmployeeByCpf, updateEmployeesPhone } from "@/lib/actions/employees"
 import {
     savePayrollAnalysis, listPayrollAnalyses, getPayrollAnalysis, deletePayrollAnalysis
@@ -29,12 +33,12 @@ import { updateNotaFiscalStatus } from "@/lib/actions/nfs"
 type Department = { id: string; name: string }
 type NfRow = { id: string; numero: string; emitente: string; valor: number | string; dataEmissao: Date | string; status: string }
 
-type FoundRow = { id: string; nome: string; cpf: string; valor: number; sheet: string; telefone?: string; cargo?: string }
-type MissingRow = { cpf: string; nome: string; valor: number; sheet: string; telefone?: string; cargo?: string }
-type ExtraRow = { nome: string; cpfCnpj: string; valor: number; sheet: string; telefone?: string; cargo?: string }
+type FoundRow = { id: string; nome: string; cpf: string; valor: number; sheet: string; telefone?: string; cargo?: string; bankName?: string; bankAgency?: string; bankAccount?: string; isInvalidCpf?: boolean; nameMismatch?: boolean; dbName?: string }
+type MissingRow = { cpf: string; nome: string; valor: number; sheet: string; telefone?: string; cargo?: string; bankName?: string; bankAgency?: string; bankAccount?: string; isInvalidCpf?: boolean }
+type ExtraRow = { nome: string; cpfCnpj: string; valor: number; sheet: string; telefone?: string; cargo?: string; bankName?: string; bankAgency?: string; bankAccount?: string }
 type SheetSummary = { sheet: string; count: number; total: number }
 type PhoneUpdateRow = { id: string; nome: string; cpf: string; phoneInSheet: string }
-type AnalysisResult = { found: FoundRow[]; missing: MissingRow[]; extras: ExtraRow[]; total: number; sheetSummary: SheetSummary[]; duplicates?: string[]; phoneUpdates?: PhoneUpdateRow[] }
+type AnalysisResult = { found: FoundRow[]; missing: MissingRow[]; extras: ExtraRow[]; total: number; sheetSummary: SheetSummary[]; duplicates?: string[]; crossAbaDuplicates?: string[]; phoneUpdates?: PhoneUpdateRow[] }
 type SheetDebug = { sheet: string; headers: string[]; totalRows: number; detected: { cpf: string | null; nome: string | null; valor: string | null; telefone: string | null; cargo: string | null } }
 
 type AnalyzedRow =
@@ -112,14 +116,19 @@ export function FolhaPagamentoClient({
     const [isAddingExtra, setIsAddingExtra] = useState(false)
     const [isAddingSheet, setIsAddingSheet] = useState(false)
     const [newSheetName, setNewSheetName] = useState("")
-    const [manualForm, setManualForm] = useState({ nome: "", cpf: "", valor: "", sheet: "", id: "", telefone: "", cargo: "" })
+    const [manualForm, setManualForm] = useState({ nome: "", cpf: "", valor: "", sheet: "", id: "", telefone: "", cargo: "", bankName: "", bankAgency: "", bankAccount: "" })
     const [extraForm, setExtraForm] = useState({ nome: "", cpfCnpj: "", valor: "", sheet: "", cargo: "" })
     const [isSearchingCpf, setIsSearchingCpf] = useState(false)
 
-    // AI Analysis
-    const [aiResult, setAiResult] = useState<{ resumo: string; insights: string[]; alertas: string[]; recomendacoes: string[] } | null>(null)
+    // AI chat
+    const [aiMessages, setAiMessages] = useState<{ role: "user" | "assistant"; text: string; actionsCount?: number }[]>([])
     const [isAiAnalyzing, setIsAiAnalyzing] = useState(false)
     const [isAiOpen, setIsAiOpen] = useState(false)
+    const [aiInput, setAiInput] = useState("")
+    const aiChatEndRef = useRef<HTMLDivElement>(null)
+
+    // Sheet filter
+    const [selectedSheet, setSelectedSheet] = useState<string | null>(null)
 
     // History & Closing
     const [analysisId, setAnalysisId] = useState<string | null>(null)
@@ -128,6 +137,8 @@ export function FolhaPagamentoClient({
     const [isHistoryOpen, setIsHistoryOpen] = useState(false)
     const [isLoadingHistory, setIsLoadingHistory] = useState(false)
     const [historyFilterUnit, setHistoryFilterUnit] = useState<string | null>(null)
+    const [viewFilter, setViewFilter] = useState("GERAL")
+    const [excludedRows, setExcludedRows] = useState<AnalyzedRow[]>([])
 
     const searchParams = useSearchParams()
     const router = useRouter()
@@ -201,6 +212,8 @@ export function FolhaPagamentoClient({
             }
             setResult(data)
             setMissing(data.missing)
+            setExcludedRows([])
+            setViewFilter("GERAL")
             setPhoneUpdates(data.phoneUpdates ?? [])
             setDebugInfo(data.debug as SheetDebug[])
             setPhase(data.missing.length > 0 ? "pending" : "result")
@@ -211,9 +224,27 @@ export function FolhaPagamentoClient({
     }
 
     async function handleRegisterAll() {
+        // Bloqueia se houver qualquer divergência que não seja apenas o fato de não estar cadastrado
+        const otherDiversions = (invalidCpfCount || 0) + (nameMismatchCount || 0) + (duplicateCpfCount || 0) + (crossAbaDuplicateCount || 0) + (result?.extras?.length || 0);
+
+        if (otherDiversions > 0) {
+            alert(`Não é possível cadastrar novos funcionários enquanto houverem ${otherDiversions} outras pendências (CPFs inválidos, duplicados, divergências de nome ou registros sem CPF) na planilha. Resolva ou exclua os registros problemáticos primeiro.`);
+            return;
+        }
+
+        // Filtra apenas quem tem nome e CPF preenchidos (garantia extra)
+        const toRegister = missing.filter(m => m.nome && m.cpf)
+        
+        if (toRegister.length === 0) {
+            alert("Não existem novos funcionários válidos para cadastrar automaticamente.");
+            return
+        }
+
         setRegistering(true)
         try {
-            await registerBatchFromPayroll(missing.map(({ cpf, nome, valor, telefone, cargo }) => ({ cpf, nome, valor, telefone, cargo })), unidade)
+            await registerBatchFromPayroll(toRegister.map(({ cpf, nome, valor, telefone, cargo, bankName, bankAgency, bankAccount }) => ({
+                cpf, nome, valor, telefone, cargo, bankName, bankAgency, bankAccount
+            })), unidade)
             const fd = new FormData()
             fd.append("file", file!); fd.append("mes", mes); fd.append("ano", ano); fd.append("unidade", unidade)
             const res = await fetch("/api/folha/analyze", { method: "POST", body: fd })
@@ -224,7 +255,28 @@ export function FolhaPagamentoClient({
         } finally { setRegistering(false) }
     }
 
-    function handleIgnoreAndContinue() { setMissing([]); setPhase("result") }
+    function handleIgnoreAndContinue() { setPhase("result") }
+
+    function handleRestoreRow(row: AnalyzedRow) {
+        if (!result) return
+        setExcludedRows(prev => prev.filter(r => !(r.cpf === row.cpf && r.sheet === row.sheet)))
+        
+        const newResult = { ...result }
+        const originalStatus = (row as any).originalStatus || (row.status === "excluded" ? "found" : (row.status === "missing" ? "missing" : "found"))
+        const restoredRow = { ...row, status: originalStatus }
+        
+        if (originalStatus === "found") newResult.found.push(restoredRow as FoundRow)
+        else if (originalStatus === "missing") {
+            newResult.missing.push(restoredRow as MissingRow)
+            setMissing(prev => [...prev, restoredRow as MissingRow])
+        } else if (originalStatus === "extra") {
+            if (!newResult.extras) newResult.extras = []
+            newResult.extras.push(restoredRow as any)
+        }
+        
+        newResult.total += row.valor
+        setResult(newResult)
+    }
 
     async function handleUpdatePhones() {
         setIsUpdatingPhones(true)
@@ -239,13 +291,171 @@ export function FolhaPagamentoClient({
     function reset() {
         setMes(""); setAno(String(CURRENT_YEAR)); setUnidade(""); setFile(null)
         setResult(null); setMissing([]); setPhase("form"); setError(null); setDebugInfo(null); setPhoneUpdates([])
-        setManualForm({ nome: "", cpf: "", valor: "", sheet: "", id: "", telefone: "", cargo: "" })
+        setManualForm({ nome: "", cpf: "", valor: "", sheet: "", id: "", telefone: "", cargo: "", bankName: "", bankAgency: "", bankAccount: "" })
         setExtraForm({ nome: "", cpfCnpj: "", valor: "", sheet: "", cargo: "" })
         setNewSheetName(""); setAnalysisId(null)
     }
 
+    function handleDeleteRow(row: AnalyzedRow) {
+        if (!result) return
+        if (!confirm(`Deseja realmente excluir a linha de "${row.nome}"?`)) return
+
+        const newResult = { ...result }
+        let newMissing = [...missing]
+
+        if (row.status === "found") {
+            const idx = newResult.found.findIndex(r => r.cpf === row.cpf && r.sheet === row.sheet)
+            if (idx !== -1) newResult.found.splice(idx, 1)
+        } else if (row.status === "missing") {
+            const idx = newResult.missing.findIndex(r => r.cpf === row.cpf && r.sheet === row.sheet)
+            if (idx !== -1) newResult.missing.splice(idx, 1)
+            const midx = newMissing.findIndex(r => r.cpf === row.cpf && r.sheet === row.sheet)
+            if (midx !== -1) newMissing.splice(midx, 1)
+        } else if (row.status === "extra") {
+            const idx = (newResult.extras || []).findIndex(r => r.cpfCnpj === row.cpf && r.sheet === row.sheet)
+            if (idx !== -1) newResult.extras.splice(idx, 1)
+        }
+
+        // Add to excluded list
+        setExcludedRows(prev => [...prev, { ...row, status: "excluded" as any }])
+
+        // Update total
+        newResult.total -= row.valor
+
+        // Recalculate sheetSummary to be sure
+        const sheetMap = new Map<string, { count: number; total: number }>()
+        const all = [
+            ...newResult.found,
+            ...newMissing,
+            ...(newResult.extras || []).map(r => ({ ...r, cpf: r.cpfCnpj }))
+        ]
+        all.forEach(r => {
+            const entry = sheetMap.get(r.sheet) || { count: 0, total: 0 }
+            entry.count++; entry.total += r.valor
+            sheetMap.set(r.sheet, entry)
+        })
+        newResult.sheetSummary = Array.from(sheetMap.entries()).map(([sheet, data]) => ({ sheet, ...data }))
+        
+        // If the selected sheet is now empty, reset filter
+        if (selectedSheet && !newResult.sheetSummary.some(s => s.sheet === selectedSheet)) {
+            setSelectedSheet(null)
+        }
+
+        setResult(newResult)
+        setMissing(newMissing)
+    }
+
+    function handleMergeDuplicates(cpf: string) {
+        if (!result) return
+        const rowsToMerge = resultRows.filter(r => r.cpf === cpf)
+        if (rowsToMerge.length <= 1) return
+
+        if (!confirm(`Deseja mesclar ${rowsToMerge.length} entradas do CPF ${fmtCpf(cpf)}? Os valores serão somados em uma única entrada.`)) return
+
+        const totalValue = rowsToMerge.reduce((sum, r) => sum + r.valor, 0)
+        
+        const newResult = { ...result }
+        let newMissing = [...missing]
+
+        // Find a principal row from original arrays
+        const fPrincipal = newResult.found.find(r => r.cpf === cpf)
+        const mPrincipal = newResult.missing.find(r => r.cpf === cpf)
+        
+        if (fPrincipal) {
+            fPrincipal.valor = totalValue
+            newResult.found = newResult.found.filter(r => r.cpf !== cpf || r === fPrincipal)
+            newResult.missing = newResult.missing.filter(r => r.cpf !== cpf)
+            newMissing = newMissing.filter(r => r.cpf !== cpf)
+        } else if (mPrincipal) {
+            mPrincipal.valor = totalValue
+            newResult.missing = newResult.missing.filter(r => r.cpf !== cpf || r === mPrincipal)
+            newMissing = newMissing.filter(r => r.cpf !== cpf || (r.cpf === cpf && r.sheet === mPrincipal.sheet)) // heuristic for matching in missing array
+            newResult.found = newResult.found.filter(r => r.cpf !== cpf)
+        }
+
+        // Recalculate sheetSummary
+        const sheetMap = new Map<string, { count: number; total: number }>()
+        const all = [
+            ...newResult.found,
+            ...newMissing,
+            ...(newResult.extras || []).map(r => ({ ...r, cpf: r.cpfCnpj }))
+        ]
+        all.forEach(r => {
+            const entry = sheetMap.get(r.sheet) || { count: 0, total: 0 }
+            entry.count++; entry.total += r.valor
+            sheetMap.set(r.sheet, entry)
+        })
+        newResult.sheetSummary = Array.from(sheetMap.entries()).map(([sheet, data]) => ({ sheet, ...data }))
+
+        setResult(newResult)
+        setMissing(newMissing)
+    }
+
+    function handleMergeDuplicatesByName(nome: string) {
+        if (!result) return
+        const nKey = nome.toLowerCase().trim()
+        const rowsToMerge = resultRows.filter(r => r.nome.toLowerCase().trim() === nKey)
+        if (rowsToMerge.length <= 1) return
+
+        if (!confirm(`Deseja mesclar ${rowsToMerge.length} entradas com o nome "${nome}"? Os valores serão somados em uma única entrada.`)) return
+
+        const totalValue = rowsToMerge.reduce((sum, r) => sum + r.valor, 0)
+        
+        const newResult = { ...result }
+        let newMissing = [...missing]
+
+        // Find a principal row
+        const fPrincipal = newResult.found.find(r => r.nome.toLowerCase().trim() === nKey)
+        const mPrincipal = newResult.missing.find(r => r.nome.toLowerCase().trim() === nKey)
+        const ePrincipal = (newResult.extras || []).find(r => r.nome.toLowerCase().trim() === nKey)
+        
+        if (fPrincipal) {
+            fPrincipal.valor = totalValue
+            newResult.found = newResult.found.filter(r => r.nome.toLowerCase().trim() !== nKey || r === fPrincipal)
+            newResult.missing = newResult.missing.filter(r => r.nome.toLowerCase().trim() !== nKey)
+            newMissing = newMissing.filter(r => r.nome.toLowerCase().trim() !== nKey)
+            newResult.extras = (newResult.extras || []).filter(r => r.nome.toLowerCase().trim() !== nKey)
+        } else if (mPrincipal) {
+            mPrincipal.valor = totalValue
+            newResult.missing = newResult.missing.filter(r => r.nome.toLowerCase().trim() !== nKey || r === mPrincipal)
+            newMissing = newMissing.filter(r => r.nome.toLowerCase().trim() !== nKey || (r.nome.toLowerCase().trim() === nKey && r.sheet === mPrincipal.sheet))
+            newResult.found = newResult.found.filter(r => r.nome.toLowerCase().trim() !== nKey)
+            newResult.extras = (newResult.extras || []).filter(r => r.nome.toLowerCase().trim() !== nKey)
+        } else if (ePrincipal) {
+            ePrincipal.valor = totalValue
+            newResult.extras = (newResult.extras || []).filter(r => r.nome.toLowerCase().trim() !== nKey || r === ePrincipal)
+            newResult.found = newResult.found.filter(r => r.nome.toLowerCase().trim() !== nKey)
+            newResult.missing = newResult.missing.filter(r => r.nome.toLowerCase().trim() !== nKey)
+            newMissing = newMissing.filter(r => r.nome.toLowerCase().trim() !== nKey)
+        }
+
+        // Recalculate sheetSummary
+        const sheetMap = new Map<string, { count: number; total: number }>()
+        const all = [
+            ...newResult.found,
+            ...newMissing,
+            ...(newResult.extras || []).map(r => ({ ...r, cpf: r.cpfCnpj }))
+        ]
+        all.forEach(r => {
+            const entry = sheetMap.get(r.sheet) || { count: 0, total: 0 }
+            entry.count++; entry.total += r.valor
+            sheetMap.set(r.sheet, entry)
+        })
+        newResult.sheetSummary = Array.from(sheetMap.entries()).map(([sheet, data]) => ({ sheet, ...data }))
+
+        setResult(newResult)
+        setMissing(newMissing)
+    }
+
     async function handleSaveClosing() {
         if (!result) return
+        
+        // Bloqueia se houver qualquer divergência pendente (incluindo extras sem CPF)
+        if (totalDiversions > 0) {
+            alert(`Não é possível fechar a unidade. Existem ${totalDiversions} pendências (funcionários não encontrados, sem CPF, CPFs inválidos ou duplicados) que precisam ser resolvidas ou excluídas antes de finalizar.`)
+            return
+        }
+
         setIsSaving(true)
         try {
             await savePayrollAnalysis({
@@ -253,7 +463,13 @@ export function FolhaPagamentoClient({
                 month: parseInt(mes), year: parseInt(ano),
                 departmentId: unidade || null,
                 total: result.total,
-                analysisData: { found: result.found, missing, extras: result.extras || [], sheetSummary: result.sheetSummary }
+                analysisData: { 
+                    found: result.found, 
+                    missing, 
+                    extras: result.extras || [], 
+                    excluded: excludedRows,
+                    sheetSummary: result.sheetSummary 
+                }
             })
             // Avança o fluxo da NF vinculada para ANALISADA
             if (selectedNfId) {
@@ -265,10 +481,68 @@ export function FolhaPagamentoClient({
         } finally { setIsSaving(false) }
     }
 
-    async function handleAiAnalyze() {
-        if (!result) return
+    function applyAiActions(actions: any[]): number {
+        if (!result) return 0
+        let count = 0
+        let newFound = result.found.map(r => ({ ...r }))
+        let newMissing = missing.map(r => ({ ...r }))
+        let newExtras = (result.extras || []).map(r => ({ ...r }))
+
+        for (const action of actions) {
+            if (action.type === "update_valor") {
+                const fi = newFound.findIndex(r => r.cpf === action.cpf && r.sheet === action.sheet)
+                if (fi !== -1) { newFound[fi].valor = action.newValor; count++ }
+                const mi = newMissing.findIndex(r => r.cpf === action.cpf && r.sheet === action.sheet)
+                if (mi !== -1) { newMissing[mi].valor = action.newValor; count++ }
+            } else if (action.type === "remove_row") {
+                const beforeFound = newFound.length
+                const beforeMissing = newMissing.length
+                const beforeExtras = newExtras.length
+                
+                // Track removed
+                const removedFound = newFound.filter(r => r.cpf === action.cpf && r.sheet === action.sheet)
+                const removedMissing = newMissing.filter(r => r.cpf === action.cpf && r.sheet === action.sheet)
+                const removedExtras = newExtras.filter((r: any) => r.cpfCnpj === action.cpf && r.sheet === action.sheet)
+                
+                newFound = newFound.filter(r => !(r.cpf === action.cpf && r.sheet === action.sheet))
+                newMissing = newMissing.filter(r => !(r.cpf === action.cpf && r.sheet === action.sheet))
+                newExtras = newExtras.filter((r: any) => !(r.cpfCnpj === action.cpf && r.sheet === action.sheet))
+                
+                if (newFound.length < beforeFound || newMissing.length < beforeMissing || newExtras.length < beforeExtras) {
+                    count++
+                    setExcludedRows(prev => [...prev, ...[...removedFound, ...removedMissing, ...removedExtras].map(r => ({ ...r, status: "excluded" as any }))])
+                }
+            } else if (action.type === "update_field") {
+                const val = action.field === "valor" ? parseFloat(action.newValue) : action.newValue
+                const fi = newFound.findIndex(r => r.cpf === action.cpf && r.sheet === action.sheet)
+                if (fi !== -1) { (newFound[fi] as any)[action.field] = val; count++ }
+                const mi = newMissing.findIndex(r => r.cpf === action.cpf && r.sheet === action.sheet)
+                if (mi !== -1) { (newMissing[mi] as any)[action.field] = val; count++ }
+            }
+        }
+
+        // Recalculate sheetSummary
+        const sheetMap = new Map<string, { count: number; total: number }>()
+        const all = [...newFound, ...newMissing, ...newExtras.map(r => ({ ...r, cpf: r.cpfCnpj }))]
+        all.forEach(r => {
+            const entry = sheetMap.get(r.sheet) || { count: 0, total: 0 }
+            entry.count++; entry.total += (r as any).valor || 0
+            sheetMap.set(r.sheet, entry)
+        })
+        const newSheetSummary = Array.from(sheetMap.entries()).map(([sheet, data]) => ({ sheet, ...data }))
+
+        const newTotal = all.reduce((s: number, r: any) => s + (r.valor || 0), 0)
+        setResult({ ...result, found: newFound, extras: newExtras, total: newTotal, sheetSummary: newSheetSummary })
+        setMissing(newMissing)
+        return count
+    }
+
+    async function handleAiSend() {
+        const command = aiInput.trim()
+        if (!command || !result) return
+        setAiInput("")
+        setAiMessages(prev => [...prev, { role: "user", text: command }])
         setIsAiAnalyzing(true)
-        setIsAiOpen(true)
         try {
             const res = await fetch("/api/folha/ai-analyze", {
                 method: "POST",
@@ -277,19 +551,21 @@ export function FolhaPagamentoClient({
                     found: result.found,
                     missing,
                     extras: result.extras || [],
-                    total: result.total,
                     sheetSummary: result.sheetSummary,
                     mes,
                     ano,
                     unidade: unidadeLabel,
+                    command,
+                    history: aiMessages.slice(-6),
                 }),
             })
             const data = await res.json()
-            if (!res.ok) throw new Error(data.error ?? "Erro na análise")
-            setAiResult(data)
+            if (!res.ok) throw new Error(data.error ?? "Erro no comando")
+            const actionsCount = applyAiActions(data.actions || [])
+            setAiMessages(prev => [...prev, { role: "assistant", text: data.message || "Pronto.", actionsCount }])
+            setTimeout(() => aiChatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50)
         } catch (err: any) {
-            alert("Erro ao analisar com IA: " + err.message)
-            setIsAiOpen(false)
+            setAiMessages(prev => [...prev, { role: "assistant", text: `Erro: ${err.message}` }])
         } finally {
             setIsAiAnalyzing(false)
         }
@@ -315,8 +591,16 @@ export function FolhaPagamentoClient({
             if (data) {
                 const ad = data.data as any
                 setAnalysisId(data.id); setMes(String(data.month)); setAno(String(data.year)); setUnidade(data.departmentId ?? "")
-                setResult({ found: ad.found || [], missing: ad.missing || [], extras: ad.extras || [], total: Number(data.total), sheetSummary: ad.sheetSummary || [] })
-                setMissing(ad.missing || []); setPhase("result"); setIsHistoryOpen(false)
+                setResult({ 
+                    found: ad.found || [], 
+                    missing: ad.missing || [], 
+                    extras: ad.extras || [], 
+                    total: Number(data.total), 
+                    sheetSummary: ad.sheetSummary || [] 
+                })
+                setMissing(ad.missing || [])
+                setExcludedRows(ad.excluded || [])
+                setPhase("result"); setIsHistoryOpen(false)
             }
         } catch (err: any) { alert("Erro ao carregar: " + err.message) }
         finally { setIsLoadingHistory(false) }
@@ -335,7 +619,7 @@ export function FolhaPagamentoClient({
         setIsSearchingCpf(true)
         try {
             const emp = await getEmployeeByCpf(manualForm.cpf)
-            if (emp) setManualForm(f => ({ ...f, nome: emp.name, id: emp.id, telefone: emp.phone || "", cargo: emp.position || "" }))
+            if (emp) setManualForm(f => ({ ...f, nome: emp.name, id: emp.id, telefone: emp.phone || "", cargo: emp.position || "", bankName: emp.bankName || "", bankAgency: emp.bankAgency || "", bankAccount: emp.bankAccount || "" }))
             else { setManualForm(f => ({ ...f, id: "" })); alert("Funcionário não encontrado.") }
         } finally { setIsSearchingCpf(false) }
     }
@@ -344,14 +628,14 @@ export function FolhaPagamentoClient({
         if (!manualForm.nome || !manualForm.cpf || !manualForm.valor || !manualForm.sheet) { alert("Preencha todos os campos"); return }
         const val = parseFloat(manualForm.valor.replace(",", ".")) || 0
         if (manualForm.id) {
-            const newRow: FoundRow = { id: manualForm.id, nome: manualForm.nome, cpf: manualForm.cpf.replace(/\D/g, ""), valor: val, sheet: manualForm.sheet, telefone: manualForm.telefone || undefined, cargo: manualForm.cargo || undefined }
+            const newRow: FoundRow = { id: manualForm.id, nome: manualForm.nome, cpf: manualForm.cpf.replace(/\D/g, ""), valor: val, sheet: manualForm.sheet, telefone: manualForm.telefone || undefined, cargo: manualForm.cargo || undefined, bankName: manualForm.bankName || undefined, bankAgency: manualForm.bankAgency || undefined, bankAccount: manualForm.bankAccount || undefined }
             if (result) { const r = { ...result }; r.found = [...r.found, newRow]; r.total += val; updateSheetSummary(r, manualForm.sheet, val); setResult(r) }
         } else {
-            const newRow: MissingRow = { nome: manualForm.nome, cpf: manualForm.cpf.replace(/\D/g, ""), valor: val, sheet: manualForm.sheet, telefone: manualForm.telefone || undefined }
+            const newRow: MissingRow = { nome: manualForm.nome, cpf: manualForm.cpf.replace(/\D/g, ""), valor: val, sheet: manualForm.sheet, telefone: manualForm.telefone || undefined, bankName: manualForm.bankName || undefined, bankAgency: manualForm.bankAgency || undefined, bankAccount: manualForm.bankAccount || undefined }
             setMissing(prev => [...prev, newRow])
             if (result) { const r = { ...result }; r.missing = [...r.missing, newRow]; r.total += val; updateSheetSummary(r, manualForm.sheet, val); setResult(r) }
         }
-        setManualForm({ nome: "", cpf: "", valor: "", sheet: manualForm.sheet, id: "", telefone: "", cargo: "" }); setIsAddingEmp(false)
+        setManualForm({ nome: "", cpf: "", valor: "", sheet: manualForm.sheet, id: "", telefone: "", cargo: "", bankName: "", bankAgency: "", bankAccount: "" }); setIsAddingEmp(false)
     }
 
     function addManualExtra() {
@@ -377,10 +661,77 @@ export function FolhaPagamentoClient({
 
     function handleExportExcel() {
         if (!result) return
-        const ws = XLSX.utils.json_to_sheet(resultRows.map(r => ({ "Nome": r.nome, "CPF": r.cpf, "Valor": r.valor })))
         const wb = XLSX.utils.book_new()
-        XLSX.utils.book_append_sheet(wb, ws, "Folha Analisada")
-        ws["!cols"] = [{ wch: 40 }, { wch: 15 }, { wch: 15 }]
+        const rowsToExport = filteredRows
+
+        if (viewFilter === "BANCO DO BRASIL") {
+            const aoa = [
+                ["CPF", "Agência com DV", "Conta com DV", "Valor"],
+                ["(Exemplo: 012345678-90)", "(Exemplo: 1234-5)", "(Exemplo: 12345-6)", "(Exemplo: 50150,00)"]
+            ]
+            rowsToExport.forEach(r => {
+                const cpfBB = r.cpf.length === 11 ? r.cpf.substring(0, 9) + "-" + r.cpf.substring(9) : r.cpf
+                aoa.push([
+                    cpfBB,
+                    r.bankAgency || "",
+                    r.bankAccount || "",
+                    r.valor.toFixed(2).replace(".", ",")
+                ])
+            })
+            const ws = XLSX.utils.aoa_to_sheet(aoa)
+            ws["!cols"] = [{ wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 15 }]
+            XLSX.utils.book_append_sheet(wb, ws, "Banco do Brasil")
+            XLSX.writeFile(wb, `folha-bb-${mes}-${ano}.xlsx`)
+            return
+        }
+        
+        // Agrupa por nome da aba original baseado na visão atual
+        const sheetNames = Array.from(new Set(rowsToExport.map(r => r.sheet))).sort()
+        
+        const usedNames = new Set<string>()
+        sheetNames.forEach(sheetName => {
+            const rowsInSheet = rowsToExport.filter(r => r.sheet === sheetName)
+            if (rowsInSheet.length === 0) return
+
+            const totalInSheet = rowsInSheet.reduce((acc, r) => acc + r.valor, 0)
+            
+            const data = rowsInSheet.map(r => ({
+                "Nome": r.nome,
+                "CPF": r.cpf,
+                "ABA": unidadeLabel || r.sheet,
+                "Banco": r.bankName || "—",
+                "Agência": r.bankAgency || "—",
+                "Conta": r.bankAccount || "—",
+                "Salário Líquido": r.valor
+            }))
+
+            // Adiciona linha de total no final de cada aba
+            data.push({
+                "Nome": "TOTAL DA ABA",
+                "CPF": "",
+                "ABA": "",
+                "Banco": "",
+                "Agência": "",
+                "Conta": "",
+                "Salário Líquido": totalInSheet
+            } as any)
+
+            const ws = XLSX.utils.json_to_sheet(data)
+            ws["!cols"] = [{ wch: 40 }, { wch: 15 }, { wch: 20 }, { wch: 15 }, { wch: 10 }, { wch: 15 }, { wch: 15 }]
+            
+            // Excel limita nomes de abas a 31 caracteres e proíbe certos caracteres
+            let baseName = (sheetName || "Geral").substring(0, 31).replace(/[\[\]\?\*\/\\\:]/g, "")
+            let finalName = baseName
+            let counter = 1
+            while (usedNames.has(finalName)) {
+                const suffix = ` (${counter})`
+                finalName = baseName.substring(0, 31 - suffix.length) + suffix
+                counter++
+            }
+            usedNames.add(finalName)
+            XLSX.utils.book_append_sheet(wb, ws, finalName)
+        })
+
         XLSX.writeFile(wb, `folha-analisada-${mes}-${ano}.xlsx`)
     }
 
@@ -391,7 +742,100 @@ export function FolhaPagamentoClient({
             ...(result.extras || []).map(r => ({ ...r, cpf: r.cpfCnpj, status: "extra" as const })),
         ] : []
 
+    const { duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet } = useMemo(() => {
+        const counts = new Map<string, number>()
+        const sheetsMap = new Map<string, Set<string>>()
+        const nomeCounts = new Map<string, number>()
+        
+        resultRows.forEach(r => {
+            const nKey = r.nome.toLowerCase().trim()
+            nomeCounts.set(nKey, (nomeCounts.get(nKey) ?? 0) + 1)
+
+            if (!r.cpf || r.cpf === "—") return
+            const key = `${r.sheet}::${r.cpf}`
+            counts.set(key, (counts.get(key) ?? 0) + 1)
+            if (!sheetsMap.has(r.cpf)) sheetsMap.set(r.cpf, new Set())
+            sheetsMap.get(r.cpf)!.add(r.sheet)
+        })
+
+        const dupCpf = new Set<string>()
+        const crossDup = new Set<string>()
+        const dupNome = new Set<string>()
+
+        counts.forEach((count, key) => { if (count > 1) dupCpf.add(key) })
+        sheetsMap.forEach((sheets, cpf) => { if (sheets.size > 1) crossDup.add(cpf) })
+        nomeCounts.forEach((count, name) => { if (count > 1) dupNome.add(name) })
+
+        return { duplicateCpfSet: dupCpf, crossAbaDuplicateSet: crossDup, duplicateNomeSet: dupNome }
+    }, [resultRows])
+
+    const sortedResultRows = useMemo(() => {
+        const sortFn = (a: AnalyzedRow, b: AnalyzedRow) => {
+            const isNameDupA = duplicateNomeSet.has(a.nome.toLowerCase().trim())
+            const isNameDupB = duplicateNomeSet.has(b.nome.toLowerCase().trim())
+            
+            const hasDivA = a.status !== "found" || !!(a as any).isInvalidCpf || (a.status === "found" && (a as any).nameMismatch) || duplicateCpfSet.has(`${a.sheet}::${a.cpf}`) || crossAbaDuplicateSet.has(a.cpf) || isNameDupA;
+            const hasDivB = b.status !== "found" || !!(b as any).isInvalidCpf || (b.status === "found" && (b as any).nameMismatch) || duplicateCpfSet.has(`${b.sheet}::${b.cpf}`) || crossAbaDuplicateSet.has(b.cpf) || isNameDupB;
+
+            if (hasDivA && !hasDivB) return -1;
+            if (!hasDivA && hasDivB) return 1;
+            return a.nome.localeCompare(b.nome);
+        }
+        return [...resultRows].sort(sortFn);
+    }, [resultRows, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet])
+
+    const filteredRows = useMemo(() => {
+        const sortFn = (a: AnalyzedRow, b: AnalyzedRow) => {
+            const isNameDupA = duplicateNomeSet.has(a.nome.toLowerCase().trim())
+            const isNameDupB = duplicateNomeSet.has(b.nome.toLowerCase().trim())
+            const hasDivA = a.status !== "found" || !!(a as any).isInvalidCpf || (a.status === "found" && (a as any).nameMismatch) || duplicateCpfSet.has(`${a.sheet}::${a.cpf}`) || crossAbaDuplicateSet.has(a.cpf) || isNameDupA;
+            const hasDivB = b.status !== "found" || !!(b as any).isInvalidCpf || (b.status === "found" && (b as any).nameMismatch) || duplicateCpfSet.has(`${b.sheet}::${b.cpf}`) || crossAbaDuplicateSet.has(b.cpf) || isNameDupB;
+            if (hasDivA && !hasDivB) return -1;
+            if (!hasDivA && hasDivB) return 1;
+            return a.nome.localeCompare(b.nome);
+        }
+
+        let base = viewFilter === "EXCLUIDOS" ? [...excludedRows].sort(sortFn) : sortedResultRows
+        
+        if (viewFilter === "BANCO") {
+            base = sortedResultRows.filter(r => r.bankName && r.bankName !== "—")
+        } else if (viewFilter === "CAIXA") {
+            base = sortedResultRows.filter(r => (r.bankName || "").toUpperCase().startsWith("CAIXA"))
+        } else if (viewFilter !== "GERAL" && viewFilter !== "EXCLUIDOS") {
+            base = sortedResultRows.filter(r => (r.bankName || "").toUpperCase() === viewFilter)
+        }
+
+        return selectedSheet ? base.filter(r => r.sheet === selectedSheet) : base
+    }, [viewFilter, sortedResultRows, excludedRows, selectedSheet, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet])
+
+    const invalidCpfCount = resultRows.filter(r => (r as any).isInvalidCpf).length
+    const nameMismatchCount = resultRows.filter(r => r.status === "found" && (r as FoundRow).nameMismatch).length
+    const duplicateCpfCount = duplicateCpfSet.size
+    const crossAbaDuplicateCount = crossAbaDuplicateSet.size
+
+    const totalDiversions = useMemo(() => {
+        if (!result) return 0
+        return missing.length + 
+               invalidCpfCount + 
+               nameMismatchCount + 
+               duplicateCpfCount + 
+               crossAbaDuplicateCount + 
+               (result?.extras?.length || 0)
+    }, [result, missing, invalidCpfCount, nameMismatchCount, duplicateCpfCount, crossAbaDuplicateCount])
+
     const showResults = phase === "result" || phase === "pending"
+
+    const bankSummary = useMemo(() => {
+        if (!result) return []
+        const counts: Record<string, { count: number; total: number }> = {}
+        resultRows.forEach(r => {
+            const bank = r.bankName || "Não informado"
+            if (!counts[bank]) counts[bank] = { count: 0, total: 0 }
+            counts[bank].count++
+            counts[bank].total += r.valor
+        })
+        return Object.entries(counts).map(([bank, data]) => ({ bank, ...data })).sort((a, b) => b.total - a.total)
+    }, [result, resultRows])
 
     // ─────────────────────────────────────────────────────────────────────────
     // RENDER
@@ -630,6 +1074,12 @@ export function FolhaPagamentoClient({
                                     <span className="text-sm font-bold text-blue-600">{fmtBRL(result.total)}</span>
                                 </div>
 
+                                {/* Cashback Mentore (5%) */}
+                                <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 shadow-sm shadow-emerald-500/5">
+                                    <span className="text-xs font-semibold text-emerald-600 uppercase tracking-wide whitespace-nowrap">Cashback Mentore (5%)</span>
+                                    <span className="text-sm font-bold text-emerald-700 tabular-nums">{fmtBRL(result.total * 0.05)}</span>
+                                </div>
+
                                 {/* Fechar Unidade */}
                                 <button
                                     onClick={handleSaveClosing}
@@ -642,29 +1092,135 @@ export function FolhaPagamentoClient({
 
                                 <div className="w-px h-5 bg-slate-200" />
 
+                                <SelectField
+                                    label="Visão"
+                                    value={viewFilter}
+                                    onChange={setViewFilter}
+                                    options={[
+                                        { value: "GERAL", label: "Geral" },
+                                        { value: "EXCLUIDOS", label: "Excluídos" },
+                                        { value: "BANCO", label: "Banco (Todos)" },
+                                        { value: "MENTORE", label: "Mentore" },
+                                        { value: "BANCO DO BRASIL", label: "Banco do Brasil" },
+                                        { value: "CAIXA", label: "Caixa" },
+                                        { value: "BRADESCO", label: "Bradesco" },
+                                    ]}
+                                />
+
                                 <button onClick={handleExportExcel} className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors">
                                     <Download className="h-3.5 w-3.5" /> Exportar
                                 </button>
-                                {result.sheetSummary.length > 0 && (
-                                    <>
-                                        <button onClick={() => setIsAddingEmp(true)} className="flex items-center gap-1 rounded-lg border border-blue-200 px-2.5 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 transition-colors">
-                                            <Plus className="h-3 w-3" /> Funcionário
-                                        </button>
-                                        <button onClick={() => setIsAddingExtra(true)} className="flex items-center gap-1 rounded-lg border border-blue-200 px-2.5 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 transition-colors">
-                                            <Plus className="h-3 w-3" /> Extra
-                                        </button>
-                                    </>
-                                )}
+                                <button
+                                    onClick={() => setIsAiOpen(true)}
+                                    className="flex items-center gap-1.5 rounded-lg border border-purple-200 bg-purple-50 px-3 py-1.5 text-xs font-semibold text-purple-700 hover:bg-purple-100 transition-colors"
+                                >
+                                    <Sparkles className="h-3.5 w-3.5" /> IA
+                                </button>
                             </div>
                         )}
                     </div>
 
-                    {/* Loading */}
+                    {/* Resumo por Banco */}
+                    {showResults && bankSummary.length > 0 && (
+                        <div className="px-5 py-3 border-b bg-white flex flex-wrap items-center gap-6 animate-in slide-in-from-top-1 duration-300">
+                            <div className="flex items-center gap-2">
+                                <Users className="h-4 w-4 text-slate-400" />
+                                <span className="text-xs font-black text-slate-700 uppercase tracking-tighter">
+                                    {selectedSheet ? filteredRows.length : resultRows.length} Colaboradores
+                                </span>
+                            </div>
+                            <div className="flex flex-wrap gap-5">
+                                {bankSummary.map((s, i) => (
+                                    <div key={i} className="flex items-center gap-2 border-l border-slate-200 pl-5 first:border-0 first:pl-0">
+                                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{s.bank}</span>
+                                        <span className="text-xs font-black text-blue-600 tabular-nums">{s.count}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Resumo por Aba */}
+                    {showResults && result && result.sheetSummary.length > 0 && (
+                        <div className="px-5 py-4 border-b bg-white animate-in fade-in slide-in-from-top-1 duration-300">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Resumo por Aba</p>
+                            <div className="flex flex-wrap gap-2">
+                                {/* Card Todas */}
+                                <button
+                                    onClick={() => setSelectedSheet(null)}
+                                    className={cn(
+                                        "flex flex-col items-start rounded-xl border px-4 py-3 text-left transition-all min-w-[130px]",
+                                        selectedSheet === null
+                                            ? "border-blue-300 bg-blue-50 shadow-sm"
+                                            : "border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-slate-100"
+                                    )}
+                                >
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Todas as abas</span>
+                                    <span className="text-xl font-black text-slate-800 mt-1">{resultRows.length}</span>
+                                    <span className="text-[10px] text-slate-500 font-semibold">colaboradores</span>
+                                    <span className="text-xs font-black text-blue-600 mt-1">{fmtBRL(result.total)}</span>
+                                </button>
+                                {/* Um card por aba */}
+                                {result.sheetSummary.map((s) => (
+                                    <button
+                                        key={s.sheet}
+                                        onClick={() => setSelectedSheet(prev => prev === s.sheet ? null : s.sheet)}
+                                        className={cn(
+                                            "flex flex-col items-start rounded-xl border px-4 py-3 text-left transition-all min-w-[130px]",
+                                            selectedSheet === s.sheet
+                                                ? "border-blue-300 bg-blue-50 shadow-sm"
+                                                : "border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/40"
+                                        )}
+                                    >
+                                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 truncate max-w-[160px]" title={s.sheet}>{s.sheet}</span>
+                                        <span className="text-xl font-black text-slate-800 mt-1">{s.count}</span>
+                                        <span className="text-[10px] text-slate-500 font-semibold">colaboradores</span>
+                                        <span className="text-xs font-black text-emerald-600 mt-1">{fmtBRL(s.total)}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Loading/Analyzing Phase */}
                     {phase === "loading" && (
-                        <div className="flex flex-1 flex-col items-center justify-center gap-3 py-20">
-                            <Loader2 className="h-10 w-10 animate-spin text-blue-500" />
-                            <p className="text-sm text-slate-500">Analisando planilha...</p>
-                            <p className="text-xs text-slate-400">Verificando CPFs no sistema</p>
+                        <div className="flex flex-1 flex-col items-center justify-center py-20 animate-in fade-in zoom-in duration-700">
+                            <div className="relative h-40 w-40">
+                                {/* Outer glowing ring */}
+                                <div className="absolute inset-0 rounded-full border-8 border-blue-50/50" />
+                                <div className="absolute inset-0 rounded-full border-8 border-t-blue-600 animate-spin shadow-[0_0_20px_rgba(37,99,235,0.2)]" />
+                                
+                                {/* Inner counter-rotating ring */}
+                                <div className="absolute inset-4 rounded-full border-4 border-slate-50" />
+                                <div className="absolute inset-4 rounded-full border-4 border-b-indigo-500 animate-spin-reverse opacity-70" style={{ animationDuration: '3s' }} />
+                                
+                                {/* Central content */}
+                                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                    <Sparkles className="h-10 w-10 text-blue-600 animate-pulse mb-1" />
+                                    <div className="h-1 w-12 bg-blue-100 rounded-full overflow-hidden">
+                                        <div className="h-full bg-blue-600 animate-shimmer" style={{ width: '50%' }} />
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div className="mt-12 text-center max-w-sm px-6">
+                                <h3 className="text-2xl font-black bg-clip-text text-transparent bg-gradient-to-r from-blue-700 to-indigo-600 tracking-tight">IA ANALISANDO FOLHA</h3>
+                                
+                                <div className="flex items-center justify-center gap-1.5 mt-4">
+                                    <span className="h-2 w-2 rounded-full bg-blue-600 animate-bounce [animation-delay:-0.3s]" />
+                                    <span className="h-2 w-2 rounded-full bg-blue-600 animate-bounce [animation-delay:-0.15s]" />
+                                    <span className="h-2 w-2 rounded-full bg-blue-600 animate-bounce" />
+                                </div>
+                                
+                                <p className="text-slate-500 mt-6 text-sm font-medium leading-relaxed">
+                                    Estamos processando cada linha, validando CPFs e organizando os dados bancários para o seu fechamento.
+                                </p>
+                                
+                                <div className="mt-8 flex items-center justify-center gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-slate-50 px-4 py-2 rounded-full border border-slate-100">
+                                    <FileSpreadsheet className="h-3 w-3" />
+                                    Verificando Consistência
+                                </div>
+                            </div>
                         </div>
                     )}
 
@@ -677,12 +1233,21 @@ export function FolhaPagamentoClient({
                         </div>
                     )}
 
-                    {/* Missing CPFs banner */}
-                    {phase === "pending" && missing.length > 0 && (
+                    {/* Missing CPFs and Inconsistencies banner */}
+                    {phase === "pending" && (missing.length > 0 || invalidCpfCount > 0 || nameMismatchCount > 0 || duplicateCpfCount > 0 || crossAbaDuplicateCount > 0) && (
                         <div className="mx-5 mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
                             <div className="flex items-center gap-2 mb-3">
                                 <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
-                                <p className="text-sm font-semibold text-amber-800">{missing.length} funcionário(s) não cadastrado(s)</p>
+                                <div>
+                                    <h3 className="text-sm font-bold text-amber-900">Atenção Necessária ({missing.length + invalidCpfCount + nameMismatchCount + duplicateCpfCount + crossAbaDuplicateCount})</h3>
+                                    <p className="text-[11px] text-amber-700">
+                                        {missing.length > 0 && `${missing.length} não cadastrados. `}
+                                        {invalidCpfCount > 0 && `${invalidCpfCount} CPF(s) inválidos. `}
+                                        {nameMismatchCount > 0 && `${nameMismatchCount} divergências de nome. `}
+                                        {duplicateCpfCount > 0 && `${duplicateCpfCount} CPF(s) dup. mesma aba. `}
+                                        {crossAbaDuplicateCount > 0 && `${crossAbaDuplicateCount} CPF(s) dup. entre abas.`}
+                                    </p>
+                                </div>
                             </div>
                             <div className="flex gap-2">
                                 <button onClick={handleRegisterAll} disabled={registering}
@@ -698,6 +1263,7 @@ export function FolhaPagamentoClient({
                         </div>
                     )}
 
+
                     {/* Results table */}
                     {showResults && result && (
                         <>
@@ -706,19 +1272,81 @@ export function FolhaPagamentoClient({
                                     <thead>
                                         <tr className="border-b bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                                             <th className="px-5 py-3">Colaborador</th>
-                                            <th className="px-5 py-3">CPF</th>
+                                            <th className="px-5 py-3">ABA</th>
+                                            <th className="px-5 py-3">Dados Bancários</th>
                                             <th className="px-5 py-3 text-right">Valor Líquido</th>
                                             <th className="px-5 py-3">Status</th>
+                                            <th className="px-5 py-3 text-right">Ações</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
-                                        {resultRows.map((row, i) => (
-                                            <tr key={i} className="hover:bg-slate-50 transition-colors">
+                                        {filteredRows.map((row, i) => {
+                                            const isDupSameAba = duplicateCpfSet.has(`${row.sheet}::${row.cpf}`);
+                                            const isDupCrossAba = !isDupSameAba && crossAbaDuplicateSet.has(row.cpf);
+                                            const hasNameIssue = !!(row as any).isInvalidCpf || (row.status === "found" && (row as FoundRow).nameMismatch);
+                                            const rowBg = isDupSameAba
+                                                ? "bg-purple-50/70 hover:bg-purple-100/70"
+                                                : isDupCrossAba
+                                                    ? "bg-indigo-50/70 hover:bg-indigo-100/70"
+                                                    : hasNameIssue
+                                                        ? "bg-amber-50/70 hover:bg-amber-100/70"
+                                                        : "hover:bg-slate-50";
+                                            return (
+                                                <tr key={i} className={`transition-colors ${rowBg}`}>
                                                 <td className="px-5 py-3">
-                                                    <p className="font-semibold text-slate-800">{row.nome}</p>
-                                                    {row.cargo && <p className="text-xs text-slate-400 mt-0.5">{row.cargo.split(' ').slice(0, 3).join(' ')}</p>}
+                                                    <div className="flex items-center gap-2">
+                                                        <p className="font-semibold text-slate-800">{row.nome}</p>
+                                                        {row.status === "found" && (row as FoundRow).nameMismatch && (
+                                                            <Badge variant="outline" className="h-5 px-1.5 border-amber-200 bg-amber-50 text-amber-700 text-[9px] gap-1 animate-pulse">
+                                                                <AlertCircle className="h-3 w-3" /> Divergência
+                                                            </Badge>
+                                                        )}
+                                                        {isDupSameAba && (
+                                                            <Badge variant="outline" className="h-5 px-1.5 border-purple-200 bg-purple-50 text-purple-700 text-[9px] gap-1">
+                                                                <AlertCircle className="h-3 w-3" /> Dup. mesma aba
+                                                            </Badge>
+                                                        )}
+                                                        {isDupCrossAba && (
+                                                            <Badge variant="outline" className="h-5 px-1.5 border-indigo-200 bg-indigo-50 text-indigo-700 text-[9px] gap-1">
+                                                                <AlertCircle className="h-3 w-3" /> Dup. outra aba
+                                                            </Badge>
+                                                        )}
+                                                        {duplicateNomeSet.has(row.nome.toLowerCase().trim()) && (
+                                                            <Badge variant="outline" className="h-5 px-1.5 border-teal-200 bg-teal-50 text-teal-700 text-[9px] gap-1">
+                                                                <AlertCircle className="h-3 w-3" /> Divergência (Nome)
+                                                            </Badge>
+                                                        )}
+                                                        {row.status === "extra" && (
+                                                            <Badge variant="outline" className="h-5 px-1.5 border-orange-200 bg-orange-50 text-orange-700 text-[9px] gap-1 animate-pulse">
+                                                                <AlertCircle className="h-3 w-3" /> Divergência (Sem CPF)
+                                                            </Badge>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <p className={`text-[10px] font-mono ${isDupSameAba ? "text-purple-500" : isDupCrossAba ? "text-indigo-500" : "text-slate-400"}`}>{fmtCpf(row.cpf)}</p>
+                                                        {(row as any).isInvalidCpf && (
+                                                            <span className="text-[9px] font-bold text-red-500 uppercase tracking-tighter">CPF Inválido</span>
+                                                        )}
+                                                    </div>
+                                                    {row.status === "found" && (row as FoundRow).nameMismatch && (
+                                                        <p className="text-[9px] text-slate-400 italic mt-0.5">Sist: {(row as FoundRow).dbName}</p>
+                                                    )}
                                                 </td>
-                                                <td className="px-5 py-3 font-mono text-xs text-slate-500">{maskCpf(row.cpf)}</td>
+                                                <td className="px-5 py-3">
+                                                    <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-600">
+                                                        {row.sheet}
+                                                    </span>
+                                                </td>
+                                                <td className="px-5 py-3 text-xs text-slate-500">
+                                                    {(row.bankName || row.bankAgency || row.bankAccount) ? (
+                                                        <div className="flex flex-col">
+                                                            <span className="font-medium text-slate-700">{row.bankName || "—"}</span>
+                                                            <span className="text-[10px]">Ag: {row.bankAgency || "—"} | Cc: {row.bankAccount || "—"}</span>
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-slate-300 italic text-[11px]">Não informado</span>
+                                                    )}
+                                                </td>
                                                 <td className="px-5 py-3 text-right font-bold text-slate-800">{fmtBRL(row.valor)}</td>
                                                 <td className="px-5 py-3">
                                                     {row.status === "found"
@@ -726,8 +1354,50 @@ export function FolhaPagamentoClient({
                                                         : <AlertTriangle className="h-5 w-5 text-amber-400" />
                                                     }
                                                 </td>
+                                                <td className="px-5 py-3 text-right">
+                                                    <div className="flex items-center justify-end gap-1">
+                                                        {viewFilter === "EXCLUIDOS" ? (
+                                                            <button
+                                                                onClick={() => handleRestoreRow(row)}
+                                                                className="rounded-lg p-1.5 text-blue-600 hover:bg-blue-50 transition-colors"
+                                                                title="Restaurar Linha"
+                                                            >
+                                                                <RotateCcw className="h-3.5 w-3.5" />
+                                                            </button>
+                                                        ) : (
+                                                            <>
+                                                                {(isDupSameAba || isDupCrossAba) && (
+                                                                    <button
+                                                                        onClick={() => handleMergeDuplicates(row.cpf)}
+                                                                        className="rounded-lg p-1.5 text-blue-600 hover:bg-blue-50 transition-colors"
+                                                                        title="Mesclar por CPF"
+                                                                    >
+                                                                        <RotateCcw className="h-3.5 w-3.5" />
+                                                                    </button>
+                                                                )}
+                                                                {duplicateNomeSet.has(row.nome.toLowerCase().trim()) && (
+                                                                    <button
+                                                                        onClick={() => handleMergeDuplicatesByName(row.nome)}
+                                                                        className="rounded-lg p-1.5 text-teal-600 hover:bg-teal-50 transition-colors"
+                                                                        title="Mesclar por Nome"
+                                                                    >
+                                                                        <Users className="h-3.5 w-3.5" />
+                                                                    </button>
+                                                                )}
+                                                                <button
+                                                                    onClick={() => handleDeleteRow(row)}
+                                                                    className="rounded-lg p-1.5 text-red-500 hover:bg-red-50 transition-colors"
+                                                                    title="Excluir Linha"
+                                                                >
+                                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                                </button>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                </td>
                                             </tr>
-                                        ))}
+                                        );
+                                    })}
                                     </tbody>
                                 </table>
                             </div>
@@ -800,6 +1470,18 @@ export function FolhaPagamentoClient({
                                 <Label>Cargo (Opcional)</Label>
                                 <Input placeholder="Ex: Vendedor" value={manualForm.cargo} onChange={e => setManualForm(f => ({ ...f, cargo: e.target.value }))} />
                             </div>
+                            <div className="space-y-2">
+                                <Label>Banco (Opcional)</Label>
+                                <Input placeholder="Ex: Itaú" value={manualForm.bankName} onChange={e => setManualForm(f => ({ ...f, bankName: e.target.value }))} />
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Agência (Opcional)</Label>
+                                <Input placeholder="0000" value={manualForm.bankAgency} onChange={e => setManualForm(f => ({ ...f, bankAgency: e.target.value }))} />
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Conta (Opcional)</Label>
+                                <Input placeholder="00000-0" value={manualForm.bankAccount} onChange={e => setManualForm(f => ({ ...f, bankAccount: e.target.value }))} />
+                            </div>
                         </div>
                         <div className="space-y-2">
                             <Label>Aba</Label>
@@ -869,97 +1551,86 @@ export function FolhaPagamentoClient({
                 </DialogContent>
             </Dialog>
 
-            {/* ─── AI Analysis dialog ─── */}
-            <Dialog open={isAiOpen} onOpenChange={setIsAiOpen}>
-                <DialogContent className="max-w-2xl">
-                    <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2">
-                            <Sparkles className="h-5 w-5 text-blue-500" /> Análise Inteligente da Folha
-                        </DialogTitle>
-                    </DialogHeader>
-                    <div className="py-2 space-y-4 max-h-[60vh] overflow-y-auto">
-                        {isAiAnalyzing ? (
-                            <div className="flex flex-col items-center justify-center py-12 gap-3">
-                                <Loader2 className="h-10 w-10 animate-spin text-blue-500" />
-                                <p className="text-sm text-slate-500">IA analisando a folha de pagamento...</p>
+            {/* ─── AI Chat Widget ─── */}
+            {isAiOpen && (
+                <div className="fixed bottom-6 right-6 w-[440px] bg-white rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-slate-200 flex flex-col overflow-hidden z-[100] animate-in slide-in-from-bottom-5 duration-300">
+                    <div className="px-5 py-4 border-b flex items-center justify-between bg-white">
+                        <div className="flex items-center gap-3">
+                            <div className="h-10 w-10 rounded-xl bg-purple-50 flex items-center justify-center">
+                                <Sparkles className="h-5 w-5 text-purple-600" />
                             </div>
-                        ) : aiResult ? (
-                            <>
-                                {/* Resumo */}
-                                <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
-                                    <div className="flex items-center gap-2 mb-2">
-                                        <Info className="h-4 w-4 text-blue-500 shrink-0" />
-                                        <p className="text-xs font-bold uppercase tracking-wide text-blue-600">Resumo</p>
-                                    </div>
-                                    <p className="text-sm text-slate-700 leading-relaxed">{aiResult.resumo}</p>
-                                </div>
-
-                                {/* Insights */}
-                                {aiResult.insights?.length > 0 && (
-                                    <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
-                                        <div className="flex items-center gap-2 mb-3">
-                                            <Lightbulb className="h-4 w-4 text-blue-500 shrink-0" />
-                                            <p className="text-xs font-bold uppercase tracking-wide text-blue-600">Insights</p>
-                                        </div>
-                                        <ul className="space-y-1.5">
-                                            {aiResult.insights.map((item, i) => (
-                                                <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                                                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-400" />
-                                                    {item}
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    </div>
-                                )}
-
-                                {/* Alertas */}
-                                {aiResult.alertas?.length > 0 && (
-                                    <div className="rounded-xl border border-amber-100 bg-amber-50 p-4">
-                                        <div className="flex items-center gap-2 mb-3">
-                                            <BellRing className="h-4 w-4 text-amber-500 shrink-0" />
-                                            <p className="text-xs font-bold uppercase tracking-wide text-amber-600">Alertas</p>
-                                        </div>
-                                        <ul className="space-y-1.5">
-                                            {aiResult.alertas.map((item, i) => (
-                                                <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                                                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
-                                                    {item}
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    </div>
-                                )}
-
-                                {/* Recomendações */}
-                                {aiResult.recomendacoes?.length > 0 && (
-                                    <div className="rounded-xl border border-green-100 bg-green-50 p-4">
-                                        <div className="flex items-center gap-2 mb-3">
-                                            <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
-                                            <p className="text-xs font-bold uppercase tracking-wide text-green-600">Recomendações</p>
-                                        </div>
-                                        <ul className="space-y-1.5">
-                                            {aiResult.recomendacoes.map((item, i) => (
-                                                <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                                                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-green-400" />
-                                                    {item}
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    </div>
-                                )}
-                            </>
-                        ) : null}
+                            <div>
+                                <h3 className="text-sm font-bold text-slate-800">Assistente de Folha (IA)</h3>
+                                <p className="text-[10px] text-slate-400 mt-0.5 font-medium uppercase tracking-wider">Correções e Análise</p>
+                            </div>
+                        </div>
+                        <button onClick={() => { setIsAiOpen(false); setAiMessages([]) }} className="h-8 w-8 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
+                            <X className="h-5 w-5" />
+                        </button>
                     </div>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsAiOpen(false)}>Fechar</Button>
-                        {aiResult && (
-                            <Button onClick={handleAiAnalyze} disabled={isAiAnalyzing} className="gap-1.5 bg-blue-600 hover:bg-blue-700">
-                                <Sparkles className="h-4 w-4" /> Reanalisar
-                            </Button>
+
+                    {/* Chat messages */}
+                    <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4 min-h-[350px] max-h-[480px] bg-slate-50/50">
+                        {aiMessages.length === 0 && (
+                            <div className="flex flex-col items-center justify-center h-full py-12 gap-3 text-slate-400">
+                                <div className="h-16 w-16 rounded-3xl bg-white shadow-sm flex items-center justify-center border border-slate-100">
+                                    <Sparkles className="h-8 w-8 text-purple-300" />
+                                </div>
+                                <div className="text-center">
+                                    <p className="text-sm font-bold text-slate-600">Pronto para corrigir sua planilha</p>
+                                    <p className="text-xs text-slate-400 max-w-[240px] mx-auto mt-1 leading-relaxed">
+                                        Digite comandos como "Remova duplicados" ou "Mude o valor de João para 2500".
+                                    </p>
+                                </div>
+                            </div>
                         )}
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+                        {aiMessages.map((msg, i) => (
+                            <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                                <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm ${
+                                    msg.role === "user"
+                                        ? "bg-purple-600 text-white rounded-br-sm"
+                                        : "bg-white border border-slate-200 text-slate-700 rounded-bl-sm"
+                                }`}>
+                                    <p>{msg.text}</p>
+                                    {msg.role === "assistant" && msg.actionsCount !== undefined && msg.actionsCount > 0 && (
+                                        <div className="mt-2 pt-2 border-t border-slate-100 flex items-center gap-1.5 text-[10px] text-emerald-600 font-black uppercase tracking-wider">
+                                            <ShieldCheck className="h-3 w-3" /> {msg.actionsCount} Alteração(ões) Aplicada(s)
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                        {isAiAnalyzing && (
+                            <div className="flex justify-start">
+                                <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-sm px-4 py-3 shadow-sm flex items-center gap-2">
+                                    <Loader2 className="h-4 w-4 animate-spin text-purple-500" />
+                                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Processando...</span>
+                                </div>
+                            </div>
+                        )}
+                        <div ref={aiChatEndRef} />
+                    </div>
+
+                    {/* Input */}
+                    <div className="px-5 py-4 border-t bg-white flex gap-2">
+                        <textarea
+                            placeholder="Descreva o que deseja corrigir..."
+                            value={aiInput}
+                            onChange={e => setAiInput(e.target.value)}
+                            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleAiSend() } }}
+                            className="flex-1 min-h-[50px] max-h-[120px] resize-none text-sm border-slate-200 focus:border-purple-300 focus:ring-0 focus:outline-none rounded-xl p-3 bg-slate-50/50"
+                            disabled={isAiAnalyzing}
+                        />
+                        <button
+                            onClick={handleAiSend}
+                            disabled={isAiAnalyzing || !aiInput.trim()}
+                            className="self-end bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed shrink-0 h-12 w-12 rounded-xl flex items-center justify-center text-white shadow-lg shadow-purple-200 transition-all active:scale-95"
+                        >
+                            <Sparkles className="h-5 w-5" />
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {/* ─── History dialog ─── */}
             <Dialog open={isHistoryOpen} onOpenChange={setIsHistoryOpen}>

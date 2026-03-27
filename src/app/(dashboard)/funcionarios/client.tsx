@@ -4,9 +4,8 @@ import { useState, useRef, useCallback } from "react"
 import {
   UserPlus, Pencil, Trash2, CheckCircle2, AlertCircle, Clock, Filter,
   CheckSquare, Square, Download, FileDown, FileUp, Loader2, X, FileSpreadsheet,
-  FileText, ChevronDown, ExternalLink, Receipt,
+  FileText, ChevronDown, Receipt,
 } from "lucide-react"
-import { useRouter } from "next/navigation"
 import * as XLSX from "xlsx"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -40,7 +39,7 @@ type Employee = {
   id: string; name: string; cpf: string | null; email: string | null
   phone: string | null; position: string; salary: number | string
   hireDate: Date; status: string; pagamento: string; departmentId: string | null
-  department: Department | null
+  department: Department | null; lastReceiptUrl?: string | null
 }
 
 type ImportRow = {
@@ -186,7 +185,6 @@ export function FuncionariosClient({
   console.log("[DEBUG] FuncionariosClient userRole:", userRole)
   const isAllowedToDelete = userRole?.toUpperCase() === "ADMIN" || userRole?.toUpperCase() === "RH"
 
-  const router = useRouter()
   const [open, setOpen] = useState(false)
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [editing, setEditing] = useState<Employee | null>(null)
@@ -705,7 +703,7 @@ ${rows.map((emp, i) => `<tr>
                         </button>
                         {emp.lastReceiptUrl && (
                           <button
-                            onClick={() => window.open(emp.lastReceiptUrl, '_blank')}
+                            onClick={() => window.open(emp.lastReceiptUrl ?? '', '_blank')}
                             title="Baixar Último Comprovante"
                             className="flex h-9 items-center gap-1.5 px-2.5 justify-center rounded-lg border border-emerald-100 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors text-[11px] font-bold uppercase tracking-wide"
                           >

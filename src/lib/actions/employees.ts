@@ -30,6 +30,9 @@ export async function createEmployee(data: {
   email?: string
   phone?: string
   pagamento?: string
+  bankName?: string
+  bankAgency?: string
+  bankAccount?: string
 }) {
   const companyId = await getCompanyId()
   const supabase = getSupabaseAdmin()
@@ -61,6 +64,9 @@ export async function updateEmployee(
     phone?: string
     status: string
     pagamento?: string
+    bankName?: string
+    bankAgency?: string
+    bankAccount?: string
   }
 ) {
   const companyId = await getCompanyId()
@@ -84,7 +90,7 @@ export async function deleteEmployee(id: string) {
 }
 
 export async function registerBatchFromPayroll(
-  employees: { cpf: string; nome: string; valor: number; telefone?: string; cargo?: string }[],
+  employees: { cpf: string; nome: string; valor: number; telefone?: string; cargo?: string; bankName?: string; bankAgency?: string; bankAccount?: string }[],
   departmentId: string
 ) {
   const companyId = await getCompanyId()
@@ -98,6 +104,9 @@ export async function registerBatchFromPayroll(
       phone: e.telefone || null,
       position: e.cargo || "A definir",
       salary: e.valor,
+      bankName: e.bankName || null,
+      bankAgency: e.bankAgency || null,
+      bankAccount: e.bankAccount || null,
       status: "ACTIVE", // Re-activate if already exists
       hireDate: now,
       companyId,
@@ -132,6 +141,9 @@ export async function importEmployees(
     position?: string
     salary?: number
     departmentId?: string
+    bankName?: string
+    bankAgency?: string
+    bankAccount?: string
   }[]
 ) {
   const companyId = await getCompanyId()
@@ -162,6 +174,9 @@ export async function importEmployees(
         hireDate: now,
         companyId,
         departmentId: e.departmentId || null,
+        bankName: e.bankName || null,
+        bankAgency: e.bankAgency || null,
+        bankAccount: e.bankAccount || null,
         status: "ACTIVE", // Re-activate or set as active
         createdAt: now,
         updatedAt: now,
@@ -183,6 +198,9 @@ export async function importEmployees(
         hireDate: now,
         companyId,
         departmentId: e.departmentId || null,
+        bankName: e.bankName || null,
+        bankAgency: e.bankAgency || null,
+        bankAccount: e.bankAccount || null,
         status: "ACTIVE",
         createdAt: now,
         updatedAt: now,
@@ -208,7 +226,7 @@ export async function getEmployeeByCpf(cpf: string) {
   const supabase = getSupabaseAdmin()
   const { data } = await supabase
     .from("Employee")
-    .select("id, name, cpf, phone, position")
+    .select("id, name, cpf, phone, position, bankName, bankAgency, bankAccount")
     .eq("cpf", cleanCpf)
     .eq("companyId", companyId)
     .maybeSingle()

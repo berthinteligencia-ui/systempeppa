@@ -165,6 +165,9 @@ model Employee {
   phone         String?
   position      String
   salary        Decimal        @db.Decimal(10, 2)
+  bankName      String?
+  bankAgency    String?
+  bankAccount   String?
   hireDate      DateTime
   status        EmployeeStatus @default(ACTIVE)
   pagamento     String         @default("pendente")
