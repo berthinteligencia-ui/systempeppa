@@ -74,10 +74,7 @@ export function AdminClient({ initialCompanies }: { initialCompanies: CompanyWit
     }>({ planId: "", customBasePrice: "", customPricePerEmployee: "" })
 
     useEffect(() => {
-        loadPlans()
-    }, [])
-
-    useEffect(() => {
+        if (activeTab === "plans") loadPlans()
         if (activeTab === "finance") loadInvoices()
     }, [activeTab])
 
@@ -765,46 +762,6 @@ export function AdminClient({ initialCompanies }: { initialCompanies: CompanyWit
                                         type="password" 
                                         placeholder={editingId ? "Deixe vazio para manter" : "Senha de acesso"} 
                                     />
-                                </div>
-                            </div>
-
-                            {/* Plan Configuration */}
-                            <div className="border-t pt-4">
-                                <p className="text-xs font-bold uppercase tracking-widest text-blue-600 mb-3">Plano e Assinatura</p>
-                                <div className="space-y-3">
-                                    <div>
-                                        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Selecionar Plano</label>
-                                        <select 
-                                            value={subForm.planId} 
-                                            onChange={e => setSubForm(f => ({ ...f, planId: e.target.value }))}
-                                            className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
-                                        >
-                                            <option value="">Selecione um plano...</option>
-                                            {plans.map(p => (
-                                                <option key={p.id} value={p.id}>{p.name} (R$ {Number(p.basePrice).toFixed(2)} + R$ {Number(p.pricePerEmployee).toFixed(2)}/func)</option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                    
-                                    {subForm.planId && (
-                                        <div className="grid grid-cols-2 gap-3 p-3 rounded-xl bg-slate-50 border border-slate-100">
-                                            <div className="col-span-2">
-                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 italic">Personalização de Valores (Opcional)</p>
-                                            </div>
-                                            <Field 
-                                                label="Valor Base (R$)" 
-                                                value={subForm.customBasePrice} 
-                                                onChange={v => setSubForm(f => ({ ... f, customBasePrice: v }))} 
-                                                placeholder="Padrão" 
-                                            />
-                                            <Field 
-                                                label="Valor p/ Func. (R$)" 
-                                                value={subForm.customPricePerEmployee} 
-                                                onChange={v => setSubForm(f => ({ ... f, customPricePerEmployee: v }))} 
-                                                placeholder="Padrão" 
-                                            />
-                                        </div>
-                                    )}
                                 </div>
                             </div>
 
