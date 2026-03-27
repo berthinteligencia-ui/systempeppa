@@ -262,7 +262,7 @@ export function FolhaPagamentoClient({
         setExcludedRows(prev => prev.filter(r => !(r.cpf === row.cpf && r.sheet === row.sheet)))
         
         const newResult = { ...result }
-        const originalStatus = (row as any).originalStatus || (row.status === "excluded" ? "found" : (row.status === "missing" ? "missing" : "found"))
+        const originalStatus = (row as any).originalStatus || ((row as any).status === "excluded" ? "found" : (row.status === "missing" ? "missing" : "found"))
         const restoredRow = { ...row, status: originalStatus }
         
         if (originalStatus === "found") newResult.found.push(restoredRow as FoundRow)
@@ -510,7 +510,7 @@ export function FolhaPagamentoClient({
                 
                 if (newFound.length < beforeFound || newMissing.length < beforeMissing || newExtras.length < beforeExtras) {
                     count++
-                    setExcludedRows(prev => [...prev, ...[...removedFound, ...removedMissing, ...removedExtras].map(r => ({ ...r, status: "excluded" as any }))])
+                    setExcludedRows(prev => [...prev, ...[...removedFound, ...removedMissing].map(r => ({ ...r, status: "excluded" as any })), ...removedExtras.map((r: any) => ({ ...r, cpf: r.cpfCnpj ?? "", status: "excluded" as any }))])
                 }
             } else if (action.type === "update_field") {
                 const val = action.field === "valor" ? parseFloat(action.newValue) : action.newValue
@@ -1579,7 +1579,7 @@ export function FolhaPagamentoClient({
                                 <div className="text-center">
                                     <p className="text-sm font-bold text-slate-600">Pronto para corrigir sua planilha</p>
                                     <p className="text-xs text-slate-400 max-w-[240px] mx-auto mt-1 leading-relaxed">
-                                        Digite comandos como "Remova duplicados" ou "Mude o valor de João para 2500".
+                                        Digite comandos como: Remova duplicados ou Mude o valor de João para 2500.
                                     </p>
                                 </div>
                             </div>

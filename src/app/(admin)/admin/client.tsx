@@ -74,7 +74,10 @@ export function AdminClient({ initialCompanies }: { initialCompanies: CompanyWit
     }>({ planId: "", customBasePrice: "", customPricePerEmployee: "" })
 
     useEffect(() => {
-        if (activeTab === "plans") loadPlans()
+        loadPlans()
+    }, [])
+
+    useEffect(() => {
         if (activeTab === "finance") loadInvoices()
     }, [activeTab])
 
@@ -83,6 +86,8 @@ export function AdminClient({ initialCompanies }: { initialCompanies: CompanyWit
         try {
             const data = await getPlans()
             setPlans(data)
+        } catch (e: any) {
+            console.error("Erro ao carregar planos:", e)
         } finally {
             setLoadingPlans(false)
         }
