@@ -213,12 +213,12 @@ export function AdminClient({ initialCompanies }: { initialCompanies: CompanyWit
                     email: userForm.email.trim().toLowerCase(),
                     password: userForm.password
                 }) as any
-                company = result.company
+                company = result
                 setCompanies(cs => [{ ...company, _count: { users: 1, employees: 0 } }, ...cs])
                 setCreatedCreds({
                     name: userForm.name.trim().toUpperCase(),
                     email: userForm.email.trim().toLowerCase(),
-                    password: result.password
+                    password: result.credentials.password
                 })
             }
 

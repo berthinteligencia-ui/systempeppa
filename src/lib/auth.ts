@@ -29,7 +29,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth(() => ({
         // Step 1: fetch user without join first (more reliable)
         const { data: user, error } = await supabase
           .from("User")
-          .select("id, name, email, password, role, active, companyId")
+          .select("id, name, email, password, role, active, companyId, mustChangePassword")
           .eq("email", credentials.email as string)
           .single()
 
@@ -75,7 +75,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth(() => ({
           companyId: user.companyId,
           companyName,
           companyCnpj,
-          mustChangePassword: false,
+          mustChangePassword: user.mustChangePassword,
         }
       },
     }),
