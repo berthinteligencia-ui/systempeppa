@@ -239,7 +239,7 @@ export async function POST(req: NextRequest) {
 
                 const bankName = bancoIdx !== -1 ? String(row[headers[bancoIdx]] ?? "").trim() : undefined
                 const bankAgency = agenciaIdx !== -1 ? String(row[headers[agenciaIdx]] ?? "").trim() : undefined
-                const bankAccount = contaIdx !== -1 ? String(row[headers[contaIdx]] ?? "").trim() : undefined
+                const bankAccount = contaIdx !== -1 ? String(row[headers[contaIdx]] ?? "").trim().replace(/\./g, "") : undefined
 
                 const isInvalidCpf = !isValidCpf(cpf)
 

@@ -666,15 +666,14 @@ export function FolhaPagamentoClient({
 
         if (viewFilter === "BANCO DO BRASIL") {
             const aoa = [
-                ["CPF", "Agência com DV", "Conta com DV", "Valor"],
-                ["(Exemplo: 012345678-90)", "(Exemplo: 1234-5)", "(Exemplo: 12345-6)", "(Exemplo: 50150,00)"]
+                ["CPF", "Agência com DV", "Conta com DV", "Valor"]
             ]
             rowsToExport.forEach(r => {
                 const cpfBB = r.cpf.length === 11 ? r.cpf.substring(0, 9) + "-" + r.cpf.substring(9) : r.cpf
                 aoa.push([
                     cpfBB,
                     r.bankAgency || "",
-                    r.bankAccount || "",
+                    (r.bankAccount || "").replace(/\./g, ""),
                     r.valor.toFixed(2).replace(".", ",")
                 ])
             })
