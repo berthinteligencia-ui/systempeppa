@@ -1073,11 +1073,6 @@ export function FolhaPagamentoClient({
                                     <span className="text-sm font-bold text-blue-600">{fmtBRL(result.total)}</span>
                                 </div>
 
-                                {/* Cashback Mentore (5%) */}
-                                <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 shadow-sm shadow-emerald-500/5">
-                                    <span className="text-xs font-semibold text-emerald-600 uppercase tracking-wide whitespace-nowrap">Cashback Mentore (5%)</span>
-                                    <span className="text-sm font-bold text-emerald-700 tabular-nums">{fmtBRL(result.total * 0.05)}</span>
-                                </div>
 
                                 {/* Fechar Unidade */}
                                 <button
