@@ -104,7 +104,11 @@ export function ComprovanteClient({ departments, fechamentos, comprovantes, comp
 
         setAnalyzingCard(card)
         const filesToProcess = [...pending]
-        card === 'lote' ? setPendingLote([]) : setPendingComp([])
+        if (card === 'lote') {
+            setPendingLote([])
+        } else {
+            setPendingComp([])
+        }
 
         for (const rawFile of filesToProcess) {
             try {
