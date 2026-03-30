@@ -4,7 +4,7 @@ import { useState, useRef, useCallback } from "react"
 import {
   UserPlus, Pencil, Trash2, CheckCircle2, AlertCircle, Clock, Filter,
   CheckSquare, Square, Download, FileDown, FileUp, Loader2, X, FileSpreadsheet,
-  FileText, ChevronDown, Receipt,
+  FileText, ChevronDown, Receipt, User, Briefcase, Landmark,
 } from "lucide-react"
 import * as XLSX from "xlsx"
 import { Button } from "@/components/ui/button"
@@ -40,11 +40,13 @@ type Employee = {
   phone: string | null; position: string; salary: number | string
   hireDate: Date; status: string; pagamento: string; departmentId: string | null
   department: Department | null; lastReceiptUrl?: string | null
+  bankName?: string; bankAgency?: string; bankAccount?: string; pixKey?: string
 }
 
 type ImportRow = {
   name: string; cpf?: string; phone?: string; email?: string
   position?: string; salary?: number; departmentId?: string; _deptName?: string
+  bankName?: string; bankAgency?: string; bankAccount?: string; pixKey?: string
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -65,6 +67,7 @@ const pagamentoMap: Record<string, { label: string; cls: string }> = {
 const empty = {
   name: "", position: "", salary: "", hireDate: "", departmentId: "",
   cpf: "", email: "", phone: "", status: "ACTIVE", pagamento: "pendente",
+  bankName: "", bankAgency: "", bankAccount: "", pixKey: "",
 }
 
 function fmtBRL(n: number) {
@@ -94,6 +97,10 @@ const EMAIL_COLS = ["email", "e-mail", "mail", "correio", "endereço eletrônico
 const POSITION_COLS = ["cargo", "position", "funcao", "função", "ocupacao", "ocupação", "atividade", "setor/função"]
 const SALARY_COLS = ["salario", "salário", "salary", "remuneracao", "remuneração", "vencimento", "pagamento", "valor", "base", "líquido", "bruto"]
 const DEPT_COLS = ["unidade", "departamento", "setor", "department", "dept", "lotacao", "lotação", "filial", "estabelecimento"]
+const BANK_COLS = ["banco", "bank", "instituicao", "instituição"]
+const AGENCY_COLS = ["agencia", "agência", "agency", "ag"]
+const ACCOUNT_COLS = ["conta", "account", "ct"]
+const PIX_COLS = ["pix", "chave pix", "pix key", "chave"]
 
 function matchCol(header: string, candidates: string[]) {
   const h = header.toLowerCase().trim().replace(/\s+/g, " ")
@@ -110,11 +117,18 @@ function detectImportCols(headers: string[]) {
     positionIdx: find(POSITION_COLS),
     salaryIdx: find(SALARY_COLS),
     deptIdx: find(DEPT_COLS),
+    bankIdx: find(BANK_COLS),
+    agencyIdx: find(AGENCY_COLS),
+    accountIdx: find(ACCOUNT_COLS),
+    pixIdx: find(PIX_COLS),
   }
 }
 
 function parseImportRows(rawRows: Record<string, unknown>[], headers: string[], departments: Department[]): ImportRow[] {
-  const { nameIdx, cpfIdx, phoneIdx, emailIdx, positionIdx, salaryIdx, deptIdx } = detectImportCols(headers)
+  const { 
+    nameIdx, cpfIdx, phoneIdx, emailIdx, positionIdx, salaryIdx, deptIdx,
+    bankIdx, agencyIdx, accountIdx, pixIdx
+  } = detectImportCols(headers)
   if (nameIdx === -1) return []
 
   const deptByName = new Map(departments.map((d) => [d.name.toLowerCase().trim(), d.id]))
@@ -172,7 +186,15 @@ function parseImportRows(rawRows: Record<string, unknown>[], headers: string[], 
         }
       }
 
-      return { name, cpf, phone, email, position, salary, departmentId, _deptName }
+      const bankName = bankIdx !== -1 ? String(r[headers[bankIdx]] ?? "").trim().toUpperCase() || undefined : undefined
+      const bankAgency = agencyIdx !== -1 ? String(r[headers[agencyIdx]] ?? "").trim() || undefined : undefined
+      const bankAccount = accountIdx !== -1 ? String(r[headers[accountIdx]] ?? "").trim() || undefined : undefined
+      const pixKey = pixIdx !== -1 ? String(r[headers[pixIdx]] ?? "").trim().toUpperCase() || undefined : undefined
+
+      return { 
+        name, cpf, phone, email, position, salary, departmentId, _deptName,
+        bankName, bankAgency, bankAccount, pixKey
+      }
     })
     .filter(Boolean) as ImportRow[]
 }
@@ -284,6 +306,10 @@ export function FuncionariosClient({
       phone: emp.phone ?? "",
       status: emp.status,
       pagamento: emp.pagamento || "pendente",
+      bankName: emp.bankName ?? "",
+      bankAgency: emp.bankAgency ?? "",
+      bankAccount: emp.bankAccount ?? "",
+      pixKey: emp.pixKey ?? "",
     })
     setOpen(true)
   }
@@ -302,10 +328,16 @@ export function FuncionariosClient({
         email: form.email || undefined,
         phone: form.phone || undefined,
       }
+      const bankData = {
+        bankName: form.bankName.trim().toUpperCase(),
+        bankAgency: form.bankAgency.trim(),
+        bankAccount: form.bankAccount.trim(),
+        pixKey: form.pixKey.trim().toUpperCase(),
+      }
       if (editing) {
-        await updateEmployee(editing.id, { ...data, status: form.status, pagamento: form.pagamento })
+        await updateEmployee(editing.id, { ...data, ...bankData, status: form.status, pagamento: form.pagamento })
       } else {
-        await createEmployee({ ...data, pagamento: form.pagamento })
+        await createEmployee({ ...data, ...bankData, pagamento: form.pagamento })
       }
       setOpen(false)
     } finally {
@@ -396,9 +428,13 @@ ${rows.map((emp, i) => `<tr>
       "Data Admissão": fmtDate(emp.hireDate),
       "Status": statusMap[emp.status as keyof typeof statusMap]?.label ?? emp.status,
       "Pagamento": pagamentoMap[emp.pagamento]?.label ?? emp.pagamento,
+      "Banco": emp.bankName ?? "",
+      "Agência": emp.bankAgency ?? "",
+      "Conta": emp.bankAccount ?? "",
+      "Chave PIX": emp.pixKey ?? "",
     }))
     const ws = XLSX.utils.json_to_sheet(data)
-    ws["!cols"] = [{ wch: 35 }, { wch: 16 }, { wch: 22 }, { wch: 20 }, { wch: 28 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 12 }]
+    ws["!cols"] = [{ wch: 35 }, { wch: 16 }, { wch: 22 }, { wch: 20 }, { wch: 28 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 20 }, { wch: 10 }, { wch: 15 }, { wch: 25 }]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, "Funcionários")
     const raw = XLSX.write(wb, { bookType: "xlsx", type: "array" })
@@ -426,10 +462,14 @@ ${rows.map((emp, i) => `<tr>
         "Salário": 2000,
         "Data Admissão": "01/01/2024",
         "Unidade/Departamento": "Administrativo",
+        "Banco": "NUBANK",
+        "Agência": "0001",
+        "Conta": "1234567-8",
+        "Chave PIX": "joao@email.com",
       },
     ]
     const ws = XLSX.utils.json_to_sheet(template)
-    ws["!cols"] = [{ wch: 35 }, { wch: 16 }, { wch: 25 }, { wch: 28 }, { wch: 20 }, { wch: 12 }, { wch: 16 }, { wch: 25 }]
+    ws["!cols"] = [{ wch: 35 }, { wch: 16 }, { wch: 25 }, { wch: 28 }, { wch: 20 }, { wch: 12 }, { wch: 16 }, { wch: 25 }, { wch: 15 }, { wch: 10 }, { wch: 15 }, { wch: 25 }]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, "Funcionários")
     const raw = XLSX.write(wb, { bookType: "xlsx", type: "array" })
@@ -820,11 +860,9 @@ ${rows.map((emp, i) => `<tr>
                                 <span className="text-xs font-bold text-slate-900 leading-none">
                                   {new Date(r.extractedAt).toLocaleDateString("pt-BR")}
                                 </span>
-                                {r.generatedAt && (
-                                  <span className="text-[9px] text-slate-400 font-medium mt-1 uppercase tracking-tight">
-                                    {r.generatedAt}
-                                  </span>
-                                )}
+                                <span className="text-[9px] text-slate-400 font-medium mt-1 uppercase tracking-tight truncate max-w-[150px]">
+                                  {r.fileName || r.generatedAt || "Comprovante"}
+                                </span>
                               </div>
                             </td>
                             <td className="px-4 py-4">
@@ -888,79 +926,156 @@ ${rows.map((emp, i) => `<tr>
 
       {/* ── Form Dialog ── */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>{editing ? "Editar Funcionário" : "Novo Funcionário"}</DialogTitle>
+        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
+          <DialogHeader className="px-6 pt-6 pb-4 border-b bg-slate-50/50">
+            <DialogTitle className="flex items-center gap-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white shadow-md shadow-blue-600/20">
+                {editing ? <Pencil className="h-4 w-4" /> : <UserPlus className="h-4 w-4" />}
+              </div>
+              <span className="text-xl font-black text-slate-800 uppercase tracking-tight">
+                {editing ? "Editar Funcionário" : "Novo Funcionário"}
+              </span>
+            </DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="col-span-2 space-y-1.5">
-                <Label>Nome completo *</Label>
-                <Input value={form.name} onChange={(e) => set("name", e.target.value)} required />
+          
+          <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto custom-scrollbar">
+            <div className="p-6 space-y-8">
+              {/* Seção: Informações Pessoais */}
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
+                  <User className="h-4 w-4 text-blue-500" />
+                  <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">Informações Pessoais</h3>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="md:col-span-2 space-y-1.5">
+                    <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Nome completo *</Label>
+                    <Input value={form.name} onChange={(e) => set("name", e.target.value)} required 
+                      className="h-11 bg-slate-50/50 border-slate-200 focus:bg-white transition-all font-medium" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">CPF</Label>
+                    <Input value={form.cpf} onChange={(e) => set("cpf", e.target.value)} placeholder="000.000.000-00" 
+                      className="h-11 bg-slate-50/50 border-slate-200 focus:bg-white transition-all font-medium" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">E-mail</Label>
+                    <Input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} 
+                      className="h-11 bg-slate-50/50 border-slate-200 focus:bg-white transition-all font-medium" />
+                  </div>
+                  <div className="space-y-1.5 md:col-span-2">
+                    <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Telefone</Label>
+                    <Input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="(00) 00000-0000" 
+                      className="h-11 bg-slate-50/50 border-slate-200 focus:bg-white transition-all font-medium" />
+                  </div>
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <Label>CPF</Label>
-                <Input value={form.cpf} onChange={(e) => set("cpf", e.target.value)} placeholder="000.000.000-00" />
+
+              {/* Seção: Contrato e Cargo */}
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
+                  <Briefcase className="h-4 w-4 text-blue-500" />
+                  <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">Contrato e Cargo</h3>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className="md:col-span-2 space-y-1.5">
+                    <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Cargo</Label>
+                    <Input value={form.position} onChange={(e) => set("position", e.target.value)} 
+                      className="h-11 bg-slate-50/50 border-slate-200 focus:bg-white transition-all font-medium" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Salário (R$) *</Label>
+                    <Input type="number" step="0.01" value={form.salary} onChange={(e) => set("salary", e.target.value)} required 
+                      className="h-11 bg-slate-50/50 border-slate-200 focus:bg-white transition-all font-bold text-blue-600" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Data de admissão</Label>
+                    <Input type="date" value={form.hireDate} onChange={(e) => set("hireDate", e.target.value)} 
+                      className="h-11 bg-slate-50/50 border-slate-200 focus:bg-white transition-all font-medium" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Unidade</Label>
+                    <Select value={form.departmentId} onValueChange={(v) => set("departmentId", v)}>
+                      <SelectTrigger className="h-11 bg-slate-50/50 border-slate-200 focus:bg-white transition-all font-medium">
+                        <SelectValue placeholder="Selecione..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {departments.map((d) => (
+                          <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Status</Label>
+                    <Select value={form.status} onValueChange={(v) => set("status", v)}>
+                      <SelectTrigger className="h-11 bg-slate-50/50 border-slate-200 focus:bg-white transition-all font-medium">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ACTIVE">Ativo</SelectItem>
+                        <SelectItem value="INACTIVE">Inativo</SelectItem>
+                        <SelectItem value="ON_LEAVE">Afastado</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="md:col-span-2 space-y-1.5">
+                    <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Situação de Pagamento</Label>
+                    <Select value={form.pagamento} onValueChange={(v) => set("pagamento", v)}>
+                      <SelectTrigger className="h-11 bg-slate-50/50 border-slate-200 focus:bg-white transition-all font-medium">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="pendente">PENDENTE</SelectItem>
+                        <SelectItem value="efetuado">EFETUADO</SelectItem>
+                        <SelectItem value="pago">PAGO</SelectItem>
+                        <SelectItem value="atrasado">ATRASADO</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <Label>Cargo</Label>
-                <Input value={form.position} onChange={(e) => set("position", e.target.value)} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>E-mail</Label>
-                <Input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Telefone</Label>
-                <Input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="(00) 00000-0000" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Salário (R$) *</Label>
-                <Input type="number" step="0.01" value={form.salary} onChange={(e) => set("salary", e.target.value)} required />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Data de admissão</Label>
-                <Input type="date" value={form.hireDate} onChange={(e) => set("hireDate", e.target.value)} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Unidade</Label>
-                <Select value={form.departmentId} onValueChange={(v) => set("departmentId", v)}>
-                  <SelectTrigger><SelectValue placeholder="Selecione..." /></SelectTrigger>
-                  <SelectContent>
-                    {departments.map((d) => (
-                      <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Status</Label>
-                <Select value={form.status} onValueChange={(v) => set("status", v)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ACTIVE">Ativo</SelectItem>
-                    <SelectItem value="INACTIVE">Inativo</SelectItem>
-                    <SelectItem value="ON_LEAVE">Afastado</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Situação de Pagamento</Label>
-                <Select value={form.pagamento} onValueChange={(v) => set("pagamento", v)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="pendente">PENDENTE</SelectItem>
-                    <SelectItem value="efetuado">EFETUADO</SelectItem>
-                    <SelectItem value="pago">PAGO</SelectItem>
-                    <SelectItem value="atrasado">ATRASADO</SelectItem>
-                  </SelectContent>
-                </Select>
+
+              {/* Seção: Dados Bancários / PIX */}
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
+                  <Landmark className="h-4 w-4 text-blue-500" />
+                  <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">Dados Bancários / PIX</h3>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 bg-blue-50/30 p-4 rounded-xl border border-blue-100/50">
+                  <div className="md:col-span-2 space-y-1.5">
+                    <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Banco</Label>
+                    <Input value={form.bankName} onChange={(e) => set("bankName", e.target.value)} placeholder="Ex: NUBANK, ITAÚ, BRADESCO" 
+                      className="h-11 bg-white border-slate-200 transition-all font-medium" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Agência</Label>
+                    <Input value={form.bankAgency} onChange={(e) => set("bankAgency", e.target.value)} placeholder="0001" 
+                      className="h-11 bg-white border-slate-200 transition-all font-medium" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Conta com Dígito</Label>
+                    <Input value={form.bankAccount} onChange={(e) => set("bankAccount", e.target.value)} placeholder="12345-6" 
+                      className="h-11 bg-white border-slate-200 transition-all font-medium" />
+                  </div>
+                  <div className="md:col-span-2 space-y-1.5">
+                    <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Chave PIX</Label>
+                    <Input value={form.pixKey} onChange={(e) => set("pixKey", e.target.value)} placeholder="CPF, E-MAIL, CELULAR OU CHAVE ALEATÓRIA" 
+                      className="h-11 bg-white border-slate-200 transition-all font-medium" />
+                  </div>
+                </div>
               </div>
             </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
-              <Button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-700">
-                {loading ? "Salvando..." : "Salvar"}
+            
+            <DialogFooter className="bg-slate-50 p-6 border-t">
+              <Button type="button" variant="outline" onClick={() => setOpen(false)} className="h-11 px-8 font-bold uppercase text-[10px] tracking-widest">
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={loading} className="h-11 px-12 bg-blue-600 hover:bg-blue-700 font-bold uppercase text-[10px] tracking-widest shadow-lg shadow-blue-600/20">
+                {loading ? (
+                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> SALVANDO...</>
+                ) : (
+                  "SALVAR ALTERAÇÕES"
+                )}
               </Button>
             </DialogFooter>
           </form>

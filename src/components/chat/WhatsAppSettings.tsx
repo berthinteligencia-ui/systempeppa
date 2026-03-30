@@ -49,33 +49,40 @@ export function WhatsAppSettings() {
     }
 
     return (
-        <div className="p-6 max-w-2xl mx-auto">
-            <Card className="border-slate-200 shadow-sm overflow-hidden">
-                <CardHeader className="bg-slate-50/50">
+        <div className="p-6 max-w-4xl mx-auto">
+            <Card className="border-slate-200 shadow-md overflow-hidden">
+                <CardHeader className="bg-slate-50/50 border-b border-slate-100">
                     <div className="flex items-center gap-3">
-                        <div className="rounded-lg bg-blue-100 p-2 text-blue-600">
-                            <Globe className="h-5 w-5" />
+                        <div className="rounded-lg bg-blue-100 p-2.5 text-blue-600">
+                            <Globe className="h-6 w-6" />
                         </div>
                         <div>
-                            <CardTitle>Webhook WhatsApp</CardTitle>
-                            <CardDescription>Endereço para onde o sistema enviará as mensagens</CardDescription>
+                            <CardTitle className="text-xl">Configuração Webhook WhatsApp</CardTitle>
+                            <CardDescription className="text-sm font-medium text-slate-500">
+                                Defina o endereço do servidor que processará as mensagens recebidas
+                            </CardDescription>
                         </div>
                     </div>
                 </CardHeader>
-                <CardContent className="pt-6">
-                    <form onSubmit={handleSave} className="space-y-6">
-                        <div className="space-y-2">
-                            <Label htmlFor="webhookUrl">URL do Webhook</Label>
-                            <div className="relative">
+                <CardContent className="pt-8 pb-10">
+                    <form onSubmit={handleSave} className="space-y-8">
+                        <div className="space-y-3">
+                            <Label htmlFor="webhookUrl" className="text-sm font-bold text-slate-700">URL do Webhook</Label>
+                            <div className="relative group">
                                 <Input
                                     id="webhookUrl"
                                     value={webhookUrl}
                                     onChange={(e) => setWebhookUrl(e.target.value)}
-                                    placeholder="https://webhook.berthia.com.br/webhook/..."
-                                    className="pr-10"
+                                    placeholder="https://seu-dominio.com/api/whatsapp/webhook"
+                                    className="pr-12 py-6 text-base shadow-sm border-slate-200 focus:border-blue-500 focus:ring-blue-500/20 transition-all font-mono"
                                 />
-                                <Globe className="absolute right-3 top-2.5 h-4 w-4 text-slate-400" />
+                                <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                                    <Globe className={cn("h-5 w-5 transition-colors", webhookUrl ? "text-blue-500" : "text-slate-300")} />
+                                </div>
                             </div>
+                            <p className="text-xs text-slate-400 font-medium">
+                                Certifique-se de que a URL comece com https:// para garantir a segurança dos dados.
+                            </p>
                         </div>
 
                         <div className="pt-4 flex items-center justify-between border-t">

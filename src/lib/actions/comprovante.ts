@@ -19,7 +19,7 @@ export type ComprovanteData = {
   isValid?: boolean
 }
 
-export async function extractComprovanteData(formData: FormData): Promise<ComprovanteData[]> {
+export async function extractComprovanteData(formData: FormData, bank?: string): Promise<ComprovanteData[]> {
   const session = await auth()
   if (!session?.user?.companyId) throw new Error("Não autorizado")
   const companyId = session.user.companyId
@@ -27,11 +27,15 @@ export async function extractComprovanteData(formData: FormData): Promise<Compro
   const file = formData.get("file") as File
   if (!file) throw new Error("Arquivo não enviado")
 
-  const webhookUrl = "https://webhook.berthia.com.br/webhook/comprovanteon"
+  const url = new URL("https://webhook.berthia.com.br/webhook/disparofolha")
+  if (bank) {
+    url.searchParams.append("banco", bank)
+    formData.append("banco", bank)
+  }
 
   try {
     // Encaminha o arquivo para o webhook externo da Berthia
-    const response = await fetch(webhookUrl, {
+    const response = await fetch(url.toString(), {
       method: "POST",
       body: formData
     })
@@ -86,7 +90,15 @@ export async function extractComprovanteData(formData: FormData): Promise<Compro
     return list
   } catch (err: any) {
     console.error("[EXTRACT_COMPROVANTE] Erro no Webhook:", err.message)
-    throw new Error("Falha ao analisar o comprovante via webhook: " + err.message)
+    // Se o webhook fallhar, retornamos um registro genérico para "aceitar o PDF" conforme solicitado
+    return [
+      {
+        nome: "ANÁLISE MANUAL NECESSÁRIA",
+        cpf: "",
+        situacao: "PENDENTE_ANALISE",
+        isValid: false,
+      }
+    ]
   }
 }
 

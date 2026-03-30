@@ -170,6 +170,7 @@ model Employee {
   bankName      String?
   bankAgency    String?
   bankAccount   String?
+  pixKey        String?
   hireDate      DateTime
   status        EmployeeStatus @default(ACTIVE)
   pagamento     String         @default("pendente")
