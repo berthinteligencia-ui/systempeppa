@@ -17,16 +17,29 @@ export async function GET(req: Request) {
     if (!leadId) return new NextResponse("Missing leadId", { status: 400 })
 
     try {
+        // conversationId pode ser lead_id (UUID) ou numero_funcionario (string de phone)
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(leadId)
+
         const messages = await query(
-            `SELECT
-                id::text,
-                conteudo AS content,
-                CASE WHEN tipo = 'lead' THEN 'EMPLOYEE' ELSE 'COMPANY' END AS "senderType",
-                created_at AS "createdAt",
-                lead_id::text AS "conversationId"
-             FROM mensagens_zap
-             WHERE lead_id = $1::uuid
-             ORDER BY created_at ASC`,
+            isUuid
+                ? `SELECT
+                    id::text,
+                    conteudo AS content,
+                    CASE WHEN tipo = 'lead' THEN 'EMPLOYEE' ELSE 'COMPANY' END AS "senderType",
+                    created_at AS "createdAt",
+                    lead_id::text AS "conversationId"
+                   FROM mensagens_zap
+                   WHERE lead_id = $1::uuid
+                   ORDER BY created_at ASC`
+                : `SELECT
+                    id::text,
+                    conteudo AS content,
+                    CASE WHEN tipo = 'lead' THEN 'EMPLOYEE' ELSE 'COMPANY' END AS "senderType",
+                    created_at AS "createdAt",
+                    numero_funcionario AS "conversationId"
+                   FROM mensagens_zap
+                   WHERE numero_funcionario = $1
+                   ORDER BY created_at ASC`,
             [leadId]
         )
         return NextResponse.json(messages, { headers: { "Cache-Control": "no-store" } })

@@ -12,17 +12,16 @@ export async function GET() {
     const companyId = session.user.companyId
 
     try {
+        // Agrupa por numero_funcionario (ou lead_id como fallback)
+        // Pega a mensagem mais recente de cada contato
         const conversations = await query(
-            `SELECT DISTINCT ON (mz.lead_id)
-                mz.lead_id::text            AS id,
+            `SELECT DISTINCT ON (grp_key)
+                grp_key                     AS id,
+                mz.lead_id::text            AS "lead_id",
                 mz.conteudo                 AS "msg_content",
                 mz.tipo                     AS "msg_tipo",
                 mz.created_at               AS "updatedAt",
-                -- tenta pegar numero_funcionario da mensagem, senão usa celular do lead
-                COALESCE(
-                    mz.numero_funcionario,
-                    regexp_replace(COALESCE(l.celular,''), '\\D','','g')
-                )                           AS "contact_phone",
+                mz.numero_funcionario       AS "contact_phone",
                 l.nome                      AS "lead_nome",
                 l.celular                   AS "lead_celular",
                 e.id                        AS "employeeId",
@@ -30,7 +29,6 @@ export async function GET() {
                 e.position                  AS "emp_position",
                 e.phone                     AS "emp_phone",
                 e.email                     AS "emp_email",
-                e."companyId",
                 e.cpf                       AS "emp_cpf",
                 e.salary                    AS "emp_salary",
                 e.pagamento                 AS "emp_pagamento",
@@ -39,22 +37,22 @@ export async function GET() {
                 e."bankAgency"             AS "emp_bankAgency",
                 e."bankAccount"            AS "emp_bankAccount",
                 d.name                      AS "dept_name"
-             FROM mensagens_zap mz
+             FROM (
+                SELECT *,
+                  COALESCE(
+                    numero_funcionario,
+                    lead_id::text,
+                    id::text
+                  ) AS grp_key
+                FROM mensagens_zap
+             ) mz
              LEFT JOIN leads l ON l.id = mz.lead_id
-             -- busca employee pelo numero_funcionario OU pelo celular do lead
              LEFT JOIN "Employee" e
                ON e."companyId" = $1
                AND regexp_replace(COALESCE(e.phone,''), '\\D','','g')
-                = regexp_replace(
-                    COALESCE(
-                        mz.numero_funcionario,
-                        l.celular,
-                        ''
-                    ), '\\D','','g'
-                  )
+                = regexp_replace(COALESCE(mz.numero_funcionario, l.celular, ''), '\\D','','g')
              LEFT JOIN "Department" d ON d.id = e."departmentId"
-             WHERE (e."companyId" = $1 OR e.id IS NULL)
-             ORDER BY mz.lead_id, mz.created_at DESC`,
+             ORDER BY grp_key, mz.created_at DESC`,
             [companyId]
         )
 
@@ -62,7 +60,7 @@ export async function GET() {
             id: row.id,
             active: true,
             updatedAt: row.updatedAt,
-            companyId: row.companyId ?? companyId,
+            companyId: companyId,
             employeeId: row.employeeId ?? null,
             isEmployee: !!row.employeeId,
             employee: {
@@ -81,7 +79,7 @@ export async function GET() {
                 department: row.dept_name ?? null,
             },
             messages: [{
-                id: row.id,
+                id: row.lead_id ?? row.id,
                 content: row.msg_content,
                 createdAt: row.updatedAt,
                 senderType: row.msg_tipo === "lead" ? "EMPLOYEE" : "COMPANY",
