@@ -63,7 +63,7 @@ export function WhatsAppChatWindow({ conversation, onMessageSent }: WhatsAppChat
                 {
                     event: 'INSERT',
                     schema: 'public',
-                    table: 'mensagens',
+                    table: 'mensagens_zap',
                     filter: `lead_id=eq.${conversationId}`
                 },
                 (payload) => {

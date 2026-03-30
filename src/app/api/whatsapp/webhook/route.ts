@@ -29,6 +29,7 @@ export async function POST(req: Request) {
     }
 
     const phoneClean = phone.replace(/\D/g, "")
+    console.log("[API/WHATSAPP/WEBHOOK] Processing phone:", phoneClean)
     const phoneWithoutPrefix = phoneClean.startsWith("55") ? phoneClean.substring(2) : phoneClean
 
     try {

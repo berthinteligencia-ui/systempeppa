@@ -1,16 +1,20 @@
 export const dynamic = "force-dynamic"
 export const revalidate = 0
+
 import { auth } from "@/lib/auth"
 import { query } from "@/lib/db"
 import { NextResponse } from "next/server"
 
 export async function GET() {
+    console.log("[API/WHATSAPP/CONVERSATIONS] Starting fetch...")
     const session = await auth()
     if (!session?.user?.companyId) {
+        console.warn("[API/WHATSAPP/CONVERSATIONS] Unauthorized: no companyId in session")
         return new NextResponse("Unauthorized", { status: 401 })
     }
 
     const companyId = session.user.companyId
+    console.log("[API/WHATSAPP/CONVERSATIONS] companyId:", companyId)
 
     try {
         // Agrupa por numero_funcionario (ou lead_id como fallback)
