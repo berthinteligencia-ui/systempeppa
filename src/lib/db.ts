@@ -12,8 +12,14 @@ function cleanConnectionString(url: string): string {
     }
 }
 
+// DIRECT_URL usa porta 5432 (conexão direta) — necessário para pg Pool no Vercel
+// DATABASE_URL usa porta 6543 (Supavisor/PgBouncer) — apenas para Prisma
+const connectionString = cleanConnectionString(
+    process.env.DIRECT_URL ?? process.env.DATABASE_URL ?? ""
+)
+
 const pool = new Pool({
-    connectionString: cleanConnectionString(process.env.DATABASE_URL ?? ""),
+    connectionString,
     ssl: { rejectUnauthorized: false },
     max: 5,
 })
