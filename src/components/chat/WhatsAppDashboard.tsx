@@ -49,10 +49,16 @@ export function WhatsAppDashboard({ onSelect }: { onSelect: (id: string) => void
     const [loading, setLoading] = useState(true)
 
     useEffect(() => {
-        fetch("/api/whatsapp/stats", { cache: "no-store" })
-            .then(r => r.ok ? r.json() : null)
-            .then(data => { if (data) setStats(data); setLoading(false) })
-            .catch(() => setLoading(false))
+        const fetchStats = () => {
+            fetch("/api/whatsapp/stats", { cache: "no-store" })
+                .then(r => r.ok ? r.json() : null)
+                .then(data => { if (data) setStats(data); setLoading(false) })
+                .catch(() => setLoading(false))
+        }
+
+        fetchStats()
+        const timer = setInterval(fetchStats, 5000)
+        return () => clearInterval(timer)
     }, [])
 
     const cards = [
@@ -125,10 +131,16 @@ function RecentConversations({ onSelect }: { onSelect: (id: string) => void }) {
     const [loading, setLoading] = useState(true)
 
     useEffect(() => {
-        fetch("/api/whatsapp/conversations", { cache: "no-store" })
-            .then(r => r.ok ? r.json() : [])
-            .then(data => { setConvs(Array.isArray(data) ? data.slice(0, 8) : []); setLoading(false) })
-            .catch(() => setLoading(false))
+        const fetchConvs = () => {
+            fetch("/api/whatsapp/conversations", { cache: "no-store" })
+                .then(r => r.ok ? r.json() : [])
+                .then(data => { setConvs(Array.isArray(data) ? data.slice(0, 8) : []); setLoading(false) })
+                .catch(() => setLoading(false))
+        }
+
+        fetchConvs()
+        const timer = setInterval(fetchConvs, 5000)
+        return () => clearInterval(timer)
     }, [])
 
     if (loading) return (
