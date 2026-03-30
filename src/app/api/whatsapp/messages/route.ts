@@ -17,29 +17,16 @@ export async function GET(req: Request) {
     if (!leadId) return new NextResponse("Missing leadId", { status: 400 })
 
     try {
-        // conversationId pode ser lead_id (UUID) ou numero_funcionario (string de phone)
-        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(leadId)
-
         const messages = await query(
-            isUuid
-                ? `SELECT
-                    id::text,
-                    conteudo AS content,
-                    CASE WHEN tipo = 'lead' THEN 'EMPLOYEE' ELSE 'COMPANY' END AS "senderType",
-                    created_at AS "createdAt",
-                    lead_id::text AS "conversationId"
-                   FROM mensagens_zap
-                   WHERE lead_id = $1::uuid
-                   ORDER BY created_at ASC`
-                : `SELECT
-                    id::text,
-                    conteudo AS content,
-                    CASE WHEN tipo = 'lead' THEN 'EMPLOYEE' ELSE 'COMPANY' END AS "senderType",
-                    created_at AS "createdAt",
-                    numero_funcionario AS "conversationId"
-                   FROM mensagens_zap
-                   WHERE numero_funcionario = $1
-                   ORDER BY created_at ASC`,
+            `SELECT
+                id::text,
+                conteudo AS content,
+                CASE WHEN tipo = 'lead' THEN 'EMPLOYEE' ELSE 'COMPANY' END AS "senderType",
+                created_at AS "createdAt",
+                lead_id::text AS "conversationId"
+               FROM mensagens_zap
+               WHERE lead_id = $1::uuid
+               ORDER BY created_at ASC`,
             [leadId]
         )
         return NextResponse.json(messages, { headers: { "Cache-Control": "no-store" } })
@@ -79,10 +66,12 @@ export async function POST(req: Request) {
 
             if (!employee) return new NextResponse("Employee not found", { status: 404 })
 
-            // Procura lead por telefone
+            // Procura lead por telefone (últimos 10 dígitos)
             const phoneClean = (employee.phone || "").replace(/\D/g, "")
             lead = await queryOne(
-                `SELECT id, celular, nome FROM leads WHERE regexp_replace(COALESCE(celular, ''), '\\D', '', 'g') = $1 LIMIT 1`,
+                `SELECT id, celular, nome FROM leads
+                 WHERE RIGHT(regexp_replace(COALESCE(celular, ''), '\\D', '', 'g'), 10) = RIGHT($1, 10)
+                 LIMIT 1`,
                 [phoneClean]
             )
 
@@ -101,7 +90,8 @@ export async function POST(req: Request) {
             lead = await queryOne(
                 `SELECT l.id, l.celular, l.nome
                  FROM leads l
-                 JOIN "Employee" e ON regexp_replace(COALESCE(e.phone, ''), '\\D', '', 'g') = regexp_replace(COALESCE(l.celular, ''), '\\D', '', 'g')
+                 JOIN "Employee" e ON RIGHT(regexp_replace(COALESCE(e.phone, ''), '\\D', '', 'g'), 10)
+                                    = RIGHT(regexp_replace(COALESCE(l.celular, ''), '\\D', '', 'g'), 10)
                  WHERE l.id = $1 AND e."companyId" = $2
                  LIMIT 1`,
                 [conversationId, session.user.companyId]

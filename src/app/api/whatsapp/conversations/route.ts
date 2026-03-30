@@ -16,8 +16,8 @@ export async function GET() {
         // Agrupa por numero_funcionario (ou lead_id como fallback)
         // Pega a mensagem mais recente de cada contato
         const conversations = await query(
-            `SELECT DISTINCT ON (grp_key)
-                grp_key                     AS id,
+            `SELECT DISTINCT ON (mz.lead_id)
+                mz.lead_id::text            AS id,
                 mz.lead_id::text            AS "lead_id",
                 mz.conteudo                 AS "msg_content",
                 mz.tipo                     AS "msg_tipo",
@@ -38,22 +38,15 @@ export async function GET() {
                 e."bankAgency"             AS "emp_bankAgency",
                 e."bankAccount"            AS "emp_bankAccount",
                 d.name                      AS "dept_name"
-             FROM (
-                SELECT *,
-                  COALESCE(
-                    numero_funcionario,
-                    lead_id::text,
-                    id::text
-                  ) AS grp_key
-                FROM mensagens_zap
-             ) mz
+             FROM mensagens_zap mz
              LEFT JOIN leads l ON l.id = mz.lead_id
              LEFT JOIN "Employee" e
                ON e."companyId" = $1
-               AND regexp_replace(COALESCE(e.phone,''), '\\D','','g')
-                = regexp_replace(COALESCE(mz.numero_funcionario, l.celular, ''), '\\D','','g')
+               AND RIGHT(regexp_replace(COALESCE(e.phone,''), '\\D','','g'), 10)
+                 = RIGHT(regexp_replace(COALESCE(mz.numero_funcionario, l.celular, ''), '\\D','','g'), 10)
              LEFT JOIN "Department" d ON d.id = e."departmentId"
-             ORDER BY grp_key, mz.created_at DESC`,
+             WHERE e.id IS NOT NULL
+             ORDER BY mz.lead_id, mz.created_at DESC`,
             [companyId]
         )
 

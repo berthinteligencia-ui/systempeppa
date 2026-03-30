@@ -36,9 +36,9 @@ export async function POST(req: Request) {
         // Tenta encontrar pelo número completo ou sem o prefixo 55
         const employee = await queryOne(
             `SELECT id, name, "companyId" FROM "Employee"
-             WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') IN ($1, $2)
+             WHERE RIGHT(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = RIGHT($1, 10)
              LIMIT 1`,
-            [phoneClean, phoneWithoutPrefix]
+            [phoneClean]
         )
 
         if (!employee) {
@@ -48,7 +48,9 @@ export async function POST(req: Request) {
 
         // Busca lead correspondente
         let lead = await queryOne(
-            `SELECT id, celular, nome FROM leads WHERE regexp_replace(COALESCE(celular, ''), '\\D', '', 'g') = $1 LIMIT 1`,
+            `SELECT id, celular, nome FROM leads
+             WHERE RIGHT(regexp_replace(COALESCE(celular, ''), '\\D', '', 'g'), 10) = RIGHT($1, 10)
+             LIMIT 1`,
             [phoneClean]
         )
 
