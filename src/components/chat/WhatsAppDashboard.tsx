@@ -49,7 +49,7 @@ export function WhatsAppDashboard({ onSelect }: { onSelect: (id: string) => void
     const [loading, setLoading] = useState(true)
 
     useEffect(() => {
-        fetch("/api/whatsapp/stats")
+        fetch("/api/whatsapp/stats", { cache: "no-store" })
             .then(r => r.ok ? r.json() : null)
             .then(data => { if (data) setStats(data); setLoading(false) })
             .catch(() => setLoading(false))
@@ -125,7 +125,7 @@ function RecentConversations({ onSelect }: { onSelect: (id: string) => void }) {
     const [loading, setLoading] = useState(true)
 
     useEffect(() => {
-        fetch("/api/whatsapp/conversations")
+        fetch("/api/whatsapp/conversations", { cache: "no-store" })
             .then(r => r.ok ? r.json() : [])
             .then(data => { setConvs(Array.isArray(data) ? data.slice(0, 8) : []); setLoading(false) })
             .catch(() => setLoading(false))

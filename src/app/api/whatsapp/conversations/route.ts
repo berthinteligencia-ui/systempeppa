@@ -88,7 +88,9 @@ export async function GET() {
             }],
         }))
 
-        return NextResponse.json(result)
+        return NextResponse.json(result, {
+            headers: { "Cache-Control": "no-store" }
+        })
     } catch (err: any) {
         console.error("[CONVERSATIONS_GET] Erro:", err.message)
         return new NextResponse(JSON.stringify({ error: err.message }), { status: 500 })

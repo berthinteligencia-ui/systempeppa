@@ -65,7 +65,7 @@ export async function GET() {
             totalMessages: stats?.totalMessages ?? 0,
             avgResponseMinutes: avgRow?.avg_minutes ?? 0,
             activeConvs: stats?.activeConvs ?? 0,
-        })
+        }, { headers: { "Cache-Control": "no-store" } })
     } catch (err: any) {
         console.error("[STATS_GET] Erro:", err.message)
         return new NextResponse(JSON.stringify({ error: err.message }), { status: 500 })

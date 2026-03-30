@@ -29,7 +29,7 @@ export async function GET(req: Request) {
              ORDER BY created_at ASC`,
             [leadId]
         )
-        return NextResponse.json(messages)
+        return NextResponse.json(messages, { headers: { "Cache-Control": "no-store" } })
     } catch (err: any) {
         console.error("[MESSAGES_GET]", err.message)
         return new NextResponse(JSON.stringify({ error: err.message }), { status: 500 })

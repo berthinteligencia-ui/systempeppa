@@ -19,7 +19,7 @@ export function WhatsAppContainer() {
 
     const fetchConversations = async () => {
         try {
-            const resp = await fetch("/api/whatsapp/conversations")
+            const resp = await fetch("/api/whatsapp/conversations", { cache: "no-store" })
             if (resp.ok) {
                 setConversations(await resp.json())
             } else {
