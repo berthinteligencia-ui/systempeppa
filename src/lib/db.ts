@@ -1,58 +1,25 @@
 import { Pool } from "pg"
 
-// Remove pgbouncer/pooler params that native 'pg' doesn't support
-function cleanConnectionString(url: string): string {
-    if (!url) return url
-    try {
-        const u = new URL(url)
-        u.searchParams.delete("pgbouncer")
-        u.searchParams.delete("connection_limit")
-        return u.toString()
-    } catch {
-        // Fallback for simple strings: remove common params manually
-        return url.replace(/pgbouncer=true&?/, '').replace(/connection_limit=\d+&?/, '').replace(/\?$/, '');
-    }
-}
-
-// Em produção (Vercel), recomendamos usar o Transaction Mode Pooler (6543)
-// se a conexão direta (5432) falhar com ENOTFOUND.
-const rawUrl = process.env.DIRECT_URL ?? process.env.DATABASE_URL ?? ""
-const connectionString = cleanConnectionString(rawUrl)
-
-if (!connectionString) {
-    console.error("[DB] CRITICAL: No database connection URL found in environment variables.")
-}
-
 const pool = new Pool({
-    connectionString,
+    connectionString: process.env.DATABASE_URL,
     ssl: { rejectUnauthorized: false },
-    max: 10,
+    max: 5,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 5000,
 })
 
-pool.on("error", (err) => {
-    console.error("[DB] GLOBAL POOL ERROR:", err.message)
-    if (err.message.includes("ENOTFOUND")) {
-        console.error("[DB] DNS Lookup failed. Host might be incorrect or unreachable on Vercel.")
-    }
-})
+pool.on("error", (err) => console.error("[DB] Pool error:", err.message))
 
 export async function query<T = any>(sql: string, params?: any[]): Promise<T[]> {
-    let client
+    const client = await pool.connect()
     try {
-        client = await pool.connect()
         const result = await client.query(sql, params)
         return result.rows as T[]
-    } catch (error: any) {
-        console.error("[DB_QUERY_ERROR]", error.message)
-        if (error.message.includes("ENOTFOUND")) {
-            const host = connectionString.match(/@([^:/]+)/)?.[1]
-            console.error(`[DB] Could not resolve host: ${host}. Try using the Pooler URL (port 6543) in Vercel.`)
-        }
-        throw error
+    } catch (err: any) {
+        console.error("[DB_QUERY_ERROR]", err.message)
+        throw err
     } finally {
-        if (client) client.release()
+        client.release()
     }
 }
 
