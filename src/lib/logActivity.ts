@@ -1,4 +1,4 @@
-import { query } from "@/lib/db"
+import { supabaseAdmin } from "@/lib/db"
 
 interface LogParams {
     userId: string
@@ -13,22 +13,17 @@ interface LogParams {
 
 export async function logActivity(params: LogParams): Promise<void> {
     try {
-        await query(
-            `INSERT INTO activity_logs (user_id, user_name, user_email, company_id, action, target, details, ip_address)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-            [
-                params.userId,
-                params.userName,
-                params.userEmail,
-                params.companyId,
-                params.action,
-                params.target ?? null,
-                params.details ? JSON.stringify(params.details) : null,
-                params.ipAddress ?? null,
-            ]
-        )
+        await supabaseAdmin.from("activity_logs").insert({
+            user_id: params.userId,
+            user_name: params.userName,
+            user_email: params.userEmail,
+            company_id: params.companyId,
+            action: params.action,
+            target: params.target ?? null,
+            details: params.details ? JSON.stringify(params.details) : null,
+            ip_address: params.ipAddress ?? null,
+        })
     } catch (err: any) {
-        // Não deixar erro de log quebrar o fluxo principal
         console.error("[logActivity] Erro ao registrar log:", err.message)
     }
 }

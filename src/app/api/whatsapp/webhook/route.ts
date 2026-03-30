@@ -1,21 +1,13 @@
-import { query, queryOne } from "@/lib/db"
+import { supabaseAdmin } from "@/lib/db"
 import { NextResponse } from "next/server"
 import { randomUUID } from "crypto"
 
-// Recebe mensagens do WhatsApp via berthia.com.br
-// Configure o provider para enviar POST para: /api/whatsapp/webhook
-
 export async function POST(req: Request) {
     let body: any
-    try {
-        body = await req.json()
-    } catch {
+    try { body = await req.json() } catch {
         return new NextResponse("Invalid JSON", { status: 400 })
     }
 
-    console.log("[WEBHOOK_IN] Payload:", JSON.stringify(body))
-
-    // Aceita diferentes formatos de payload
     const phone: string =
         body.phone ?? body.from ?? body.sender ?? body.numero ??
         body.remoteJid?.replace("@s.whatsapp.net", "") ?? ""
@@ -29,56 +21,55 @@ export async function POST(req: Request) {
     }
 
     const phoneClean = phone.replace(/\D/g, "")
-    console.log("[API/WHATSAPP/WEBHOOK] Processing phone:", phoneClean)
-    const phoneWithoutPrefix = phoneClean.startsWith("55") ? phoneClean.substring(2) : phoneClean
+    const phoneLast10 = phoneClean.slice(-10)
 
     try {
-        // Busca funcionário pelo telefone (normaliza dígitos)
-        // Tenta encontrar pelo número completo ou sem o prefixo 55
-        const employee = await queryOne(
-            `SELECT id, name, "companyId" FROM "Employee"
-             WHERE RIGHT(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = RIGHT($1, 10)
-             LIMIT 1`,
-            [phoneClean]
+        // Busca funcionário pelo telefone (últimos 10 dígitos)
+        const { data: employees } = await supabaseAdmin
+            .from("Employee")
+            .select("id, name, companyId, phone")
+
+        const employee = (employees ?? []).find(e =>
+            (e.phone ?? "").replace(/\D/g, "").slice(-10) === phoneLast10
         )
 
         if (!employee) {
-            console.warn("[WEBHOOK_IN] Funcionário não encontrado para phone:", phoneClean)
+            console.warn("[WEBHOOK_IN] Funcionário não encontrado:", phoneClean)
             return new NextResponse(JSON.stringify({ error: "Employee not found", phone: phoneClean }), { status: 404 })
         }
 
-        // Busca lead correspondente
-        let lead = await queryOne(
-            `SELECT id, celular, nome FROM leads
-             WHERE RIGHT(regexp_replace(COALESCE(celular, ''), '\\D', '', 'g'), 10) = RIGHT($1, 10)
-             LIMIT 1`,
-            [phoneClean]
+        // Busca lead pelo telefone
+        const { data: leads } = await supabaseAdmin
+            .from("leads")
+            .select("id, celular, nome")
+
+        const lead = (leads ?? []).find(l =>
+            (l.celular ?? "").replace(/\D/g, "").slice(-10) === phoneLast10
         )
 
         const now = new Date().toISOString()
-        const messageId = randomUUID()
+        let leadId = lead?.id
 
-        // Se o lead não existe, cria um novo a partir das informações do funcionário
-        if (!lead) {
-            console.log("[WEBHOOK_IN] Criando novo lead para phone:", phoneClean)
-            const newLeadId = randomUUID()
-            await query(
-                `INSERT INTO leads (id, nome, celular, created_at) VALUES ($1, $2, $3, $4)`,
-                [newLeadId, employee.name, phoneClean, now]
-            )
-            lead = { id: newLeadId, celular: phoneClean, nome: employee.name }
+        if (!leadId) {
+            leadId = randomUUID()
+            await supabaseAdmin.from("leads").insert({
+                id: leadId,
+                nome: employee.name,
+                celular: phoneClean,
+                created_at: now,
+            })
         }
 
-        // Salva na tabela "mensagens_zap" incluindo dados do funcionário
-        const phoneNorm = phoneClean
-        await query(
-            `INSERT INTO mensagens_zap (id, lead_id, tipo, conteudo, created_at, numero_funcionario, funcionario)
-             VALUES ($1, $2, 'lead', $3, $4, $5, $6)
-             ON CONFLICT DO NOTHING`,
-            [messageId, lead.id, messageText, now, phoneNorm, employee ? 'true' : 'false']
-        )
-
-        console.log("[WEBHOOK_IN] Mensagem salva em mensagens_zap:", messageId)
+        const messageId = randomUUID()
+        await supabaseAdmin.from("mensagens_zap").insert({
+            id: messageId,
+            lead_id: leadId,
+            tipo: "lead",
+            conteudo: messageText,
+            created_at: now,
+            numero_funcionario: phoneClean,
+            funcionario: "true",
+        })
 
         return NextResponse.json({ ok: true, messageId })
     } catch (err: any) {

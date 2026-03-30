@@ -2,91 +2,104 @@ export const dynamic = "force-dynamic"
 export const revalidate = 0
 
 import { auth } from "@/lib/auth"
-import { query } from "@/lib/db"
+import { supabaseAdmin } from "@/lib/db"
 import { NextResponse } from "next/server"
 
 export async function GET() {
-    console.log("[API/WHATSAPP/CONVERSATIONS] Starting fetch...")
     const session = await auth()
     if (!session?.user?.companyId) {
-        console.warn("[API/WHATSAPP/CONVERSATIONS] Unauthorized: no companyId in session")
         return new NextResponse("Unauthorized", { status: 401 })
     }
-
     const companyId = session.user.companyId
-    console.log("[API/WHATSAPP/CONVERSATIONS] companyId:", companyId)
 
     try {
-        // Agrupa por numero_funcionario (ou lead_id como fallback)
-        // Pega a mensagem mais recente de cada contato
-        const conversations = await query(
-            `SELECT DISTINCT ON (mz.lead_id)
-                mz.lead_id::text            AS id,
-                mz.lead_id::text            AS "lead_id",
-                mz.conteudo                 AS "msg_content",
-                mz.tipo                     AS "msg_tipo",
-                mz.created_at               AS "updatedAt",
-                mz.numero_funcionario       AS "contact_phone",
-                l.nome                      AS "lead_nome",
-                l.celular                   AS "lead_celular",
-                e.id                        AS "employeeId",
-                e.name                      AS "emp_name",
-                e.position                  AS "emp_position",
-                e.phone                     AS "emp_phone",
-                e.email                     AS "emp_email",
-                e.cpf                       AS "emp_cpf",
-                e.salary                    AS "emp_salary",
-                e.pagamento                 AS "emp_pagamento",
-                e."hireDate"               AS "emp_hireDate",
-                e."bankName"               AS "emp_bankName",
-                e."bankAgency"             AS "emp_bankAgency",
-                e."bankAccount"            AS "emp_bankAccount",
-                d.name                      AS "dept_name"
-             FROM mensagens_zap mz
-             LEFT JOIN leads l ON l.id = mz.lead_id
-             LEFT JOIN "Employee" e
-               ON e."companyId" = $1
-               AND RIGHT(regexp_replace(COALESCE(e.phone,''), '\\D','','g'), 10)
-                 = RIGHT(regexp_replace(COALESCE(mz.numero_funcionario, l.celular, ''), '\\D','','g'), 10)
-             LEFT JOIN "Department" d ON d.id = e."departmentId"
-             WHERE e.id IS NOT NULL
-             ORDER BY mz.lead_id, mz.created_at DESC`,
-            [companyId]
-        )
+        // 1. Busca todas as mensagens com lead info
+        const { data: messages, error: msgError } = await supabaseAdmin
+            .from("mensagens_zap")
+            .select("id, lead_id, conteudo, tipo, created_at, numero_funcionario")
+            .order("created_at", { ascending: false })
 
-        const result = conversations.map(row => ({
-            id: row.id,
-            active: true,
-            updatedAt: row.updatedAt,
-            companyId: companyId,
-            employeeId: row.employeeId ?? null,
-            isEmployee: !!row.employeeId,
-            employee: {
-                id: row.employeeId,
-                name: row.emp_name ?? row.lead_nome ?? row.contact_phone ?? "—",
-                position: row.emp_position ?? null,
-                phone: row.emp_phone ?? row.lead_celular ?? row.contact_phone,
-                email: row.emp_email ?? null,
-                cpf: row.emp_cpf ?? null,
-                salary: row.emp_salary ? Number(row.emp_salary) : null,
-                pagamento: row.emp_pagamento ?? null,
-                hireDate: row.emp_hireDate ?? null,
-                bankName: row.emp_bankName ?? null,
-                bankAgency: row.emp_bankAgency ?? null,
-                bankAccount: row.emp_bankAccount ?? null,
-                department: row.dept_name ?? null,
-            },
-            messages: [{
-                id: row.lead_id ?? row.id,
-                content: row.msg_content,
-                createdAt: row.updatedAt,
-                senderType: row.msg_tipo === "lead" ? "EMPLOYEE" : "COMPANY",
-            }],
-        }))
+        if (msgError) throw new Error(msgError.message)
 
-        return NextResponse.json(result, {
-            headers: { "Cache-Control": "no-store" }
+        // 2. Busca leads referenciados
+        const leadIds = [...new Set((messages ?? []).map(m => m.lead_id).filter(Boolean))]
+        const leadsMap: Record<string, any> = {}
+        if (leadIds.length > 0) {
+            const { data: leads } = await supabaseAdmin
+                .from("leads")
+                .select("id, nome, celular")
+                .in("id", leadIds)
+            for (const l of leads ?? []) leadsMap[l.id] = l
+        }
+
+        // 3. Busca funcionários da empresa com departamento
+        const { data: employees } = await supabaseAdmin
+            .from("Employee")
+            .select("id, name, position, phone, email, cpf, salary, pagamento, hireDate, bankName, bankAgency, bankAccount, departmentId, Department(name)")
+            .eq("companyId", companyId)
+
+        const empList = employees ?? []
+
+        // Normaliza telefone: remove não-dígitos, pega últimos 10 dígitos
+        const normPhone = (p: string | null | undefined) =>
+            (p ?? "").replace(/\D/g, "").slice(-10)
+
+        // Monta mapa: telefone normalizado → employee
+        const empByPhone: Record<string, any> = {}
+        for (const e of empList) {
+            const n = normPhone(e.phone)
+            if (n) empByPhone[n] = e
+        }
+
+        // 4. Agrupa mensagens por contato (numero_funcionario ou lead_id)
+        const grouped: Record<string, any[]> = {}
+        for (const msg of messages ?? []) {
+            const key = msg.numero_funcionario || msg.lead_id || msg.id
+            if (!grouped[key]) grouped[key] = []
+            grouped[key].push(msg)
+        }
+
+        // 5. Monta resultado
+        const result = Object.entries(grouped).map(([key, msgs]) => {
+            const latest = msgs[0]
+            const lead = latest.lead_id ? leadsMap[latest.lead_id] : null
+
+            // Tenta encontrar funcionário pelo numero_funcionario ou celular do lead
+            const contactPhone = normPhone(latest.numero_funcionario) || normPhone(lead?.celular)
+            const emp = contactPhone ? empByPhone[contactPhone] : null
+
+            return {
+                id: key,
+                active: true,
+                updatedAt: latest.created_at,
+                companyId,
+                employeeId: emp?.id ?? null,
+                isEmployee: !!emp,
+                employee: {
+                    id: emp?.id ?? null,
+                    name: emp?.name ?? lead?.nome ?? latest.numero_funcionario ?? "—",
+                    position: emp?.position ?? null,
+                    phone: emp?.phone ?? lead?.celular ?? latest.numero_funcionario,
+                    email: emp?.email ?? null,
+                    cpf: emp?.cpf ?? null,
+                    salary: emp?.salary ? Number(emp.salary) : null,
+                    pagamento: emp?.pagamento ?? null,
+                    hireDate: emp?.hireDate ?? null,
+                    bankName: emp?.bankName ?? null,
+                    bankAgency: emp?.bankAgency ?? null,
+                    bankAccount: emp?.bankAccount ?? null,
+                    department: (emp?.Department as any)?.name ?? null,
+                },
+                messages: [{
+                    id: latest.id,
+                    content: latest.conteudo,
+                    createdAt: latest.created_at,
+                    senderType: latest.tipo === "lead" ? "EMPLOYEE" : "COMPANY",
+                }],
+            }
         })
+
+        return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } })
     } catch (err: any) {
         console.error("[CONVERSATIONS_GET] Erro:", err.message)
         return new NextResponse(JSON.stringify({ error: err.message }), { status: 500 })

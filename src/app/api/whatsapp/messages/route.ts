@@ -1,34 +1,47 @@
 export const dynamic = "force-dynamic"
+
 import { auth } from "@/lib/auth"
-import { query, queryOne } from "@/lib/db"
+import { supabaseAdmin } from "@/lib/db"
 import { NextResponse } from "next/server"
 import { randomUUID } from "crypto"
 
 const DEFAULT_WEBHOOK_URL = "https://webhook.berthia.com.br/webhook/folhazap"
 
-// GET /api/whatsapp/messages?conversationId=X
-// X agora é o lead_id
+const normPhone = (p: string | null | undefined) => (p ?? "").replace(/\D/g, "").slice(-10)
+
 export async function GET(req: Request) {
     const session = await auth()
     const { searchParams } = new URL(req.url)
-    const leadId = searchParams.get("conversationId")
+    const conversationId = searchParams.get("conversationId")
 
     if (!session?.user?.companyId) return new NextResponse("Unauthorized", { status: 401 })
-    if (!leadId) return new NextResponse("Missing leadId", { status: 400 })
+    if (!conversationId) return new NextResponse("Missing conversationId", { status: 400 })
 
     try {
-        const messages = await query(
-            `SELECT
-                id::text,
-                conteudo AS content,
-                CASE WHEN tipo = 'lead' THEN 'EMPLOYEE' ELSE 'COMPANY' END AS "senderType",
-                created_at AS "createdAt",
-                lead_id::text AS "conversationId"
-               FROM mensagens_zap
-               WHERE lead_id = $1::uuid
-               ORDER BY created_at ASC`,
-            [leadId]
-        )
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationId)
+
+        let query = supabaseAdmin
+            .from("mensagens_zap")
+            .select("id, conteudo, tipo, created_at, lead_id, numero_funcionario")
+            .order("created_at", { ascending: true })
+
+        if (isUuid) {
+            query = query.eq("lead_id", conversationId)
+        } else {
+            query = query.eq("numero_funcionario", conversationId)
+        }
+
+        const { data, error } = await query
+        if (error) throw new Error(error.message)
+
+        const messages = (data ?? []).map(m => ({
+            id: m.id,
+            content: m.conteudo,
+            senderType: m.tipo === "lead" ? "EMPLOYEE" : "COMPANY",
+            createdAt: m.created_at,
+            conversationId,
+        }))
+
         return NextResponse.json(messages, { headers: { "Cache-Control": "no-store" } })
     } catch (err: any) {
         console.error("[MESSAGES_GET]", err.message)
@@ -36,8 +49,6 @@ export async function GET(req: Request) {
     }
 }
 
-// POST /api/whatsapp/messages
-// Salva apenas na tabela mensagens e dispara o webhook
 export async function POST(req: Request) {
     const session = await auth()
     if (!session?.user?.companyId) return new NextResponse("Unauthorized", { status: 401 })
@@ -47,124 +58,81 @@ export async function POST(req: Request) {
 
     const { content, conversationId, employeeId } = body
     if (!content || (!conversationId && !employeeId)) {
-        return new NextResponse("Missing content, leadId or employeeId", { status: 400 })
+        return new NextResponse("Missing content or conversationId", { status: 400 })
     }
 
     const now = new Date().toISOString()
 
     try {
-        console.log("[MESSAGES_POST] Input:", { conversationId, employeeId, contentLen: content?.length })
-
-        let lead: any
+        let lead: any = null
 
         if (employeeId) {
-            // Busca o funcionário primeiro para ter o telefone e nome
-            const employee = await queryOne(
-                `SELECT id, name, phone, "companyId" FROM "Employee" WHERE id = $1 AND "companyId" = $2`,
-                [employeeId, session.user.companyId]
-            )
+            const { data: emp } = await supabaseAdmin
+                .from("Employee")
+                .select("id, name, phone, companyId")
+                .eq("id", employeeId)
+                .eq("companyId", session.user.companyId)
+                .single()
 
-            if (!employee) return new NextResponse("Employee not found", { status: 404 })
+            if (!emp) return new NextResponse("Employee not found", { status: 404 })
 
-            // Procura lead por telefone (últimos 10 dígitos)
-            const phoneClean = (employee.phone || "").replace(/\D/g, "")
-            lead = await queryOne(
-                `SELECT id, celular, nome FROM leads
-                 WHERE RIGHT(regexp_replace(COALESCE(celular, ''), '\\D', '', 'g'), 10) = RIGHT($1, 10)
-                 LIMIT 1`,
-                [phoneClean]
-            )
+            const phoneClean = normPhone(emp.phone)
+            const { data: existingLead } = await supabaseAdmin
+                .from("leads")
+                .select("id, celular, nome")
+                .filter("celular", "ilike", `%${phoneClean.slice(-8)}%`)
+                .limit(1)
+                .maybeSingle()
 
-            // Se não existe lead, cria um
+            lead = existingLead
             if (!lead && phoneClean) {
                 const leadId = randomUUID()
-                await query(
-                    `INSERT INTO leads (id, nome, celular, created_at) VALUES ($1, $2, $3, $4)`,
-                    [leadId, employee.name, employee.phone, now]
-                )
-                lead = { id: leadId, celular: employee.phone, nome: employee.name }
-                console.log("[MESSAGES_POST] Novo lead criado para funcionário:", leadId)
+                await supabaseAdmin.from("leads").insert({ id: leadId, nome: emp.name, celular: emp.phone, created_at: now })
+                lead = { id: leadId, celular: emp.phone, nome: emp.name }
             }
         } else {
-            // Busca o lead por conversationId (que é o lead_id)
-            lead = await queryOne(
-                `SELECT l.id, l.celular, l.nome
-                 FROM leads l
-                 JOIN "Employee" e ON RIGHT(regexp_replace(COALESCE(e.phone, ''), '\\D', '', 'g'), 10)
-                                    = RIGHT(regexp_replace(COALESCE(l.celular, ''), '\\D', '', 'g'), 10)
-                 WHERE l.id = $1 AND e."companyId" = $2
-                 LIMIT 1`,
-                [conversationId, session.user.companyId]
-            )
+            const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationId)
+            if (isUuid) {
+                const { data } = await supabaseAdmin.from("leads").select("id, celular, nome").eq("id", conversationId).maybeSingle()
+                lead = data
+            }
         }
 
-        if (!lead) {
-            console.warn("[MESSAGES_POST] Lead não encontrado ou sem permissão:", conversationId || employeeId)
-            return new NextResponse("Lead not found or unauthorized", { status: 404 })
-        }
-
-        console.log("[MESSAGES_POST] Lead encontrado:", { id: lead.id, celular: lead.celular })
+        if (!lead) return new NextResponse("Lead not found", { status: 404 })
 
         const messageId = randomUUID()
+        await supabaseAdmin.from("mensagens_zap").insert({
+            id: messageId,
+            lead_id: lead.id,
+            tipo: "user",
+            conteudo: content,
+            created_at: now,
+        })
 
-        // Salva apenas na tabela "mensagens_zap"
-        await query(
-            `INSERT INTO mensagens_zap (id, lead_id, tipo, conteudo, created_at)
-             VALUES ($1, $2, 'user', $3, $4)`,
-            [messageId, lead.id, content, now]
-        )
+        // Busca webhook URL
+        const { data: settings } = await supabaseAdmin
+            .from("Settings")
+            .select("whatsappWebhookUrl")
+            .eq("companyId", session.user.companyId)
+            .maybeSingle()
 
-        // Busca URL do Webhook nas configurações da empresa
-        const settings = await queryOne(
-            `SELECT "whatsappWebhookUrl" FROM "Settings" WHERE "companyId" = $1 LIMIT 1`,
-            [session.user.companyId]
-        )
         const webhookUrl = settings?.whatsappWebhookUrl || DEFAULT_WEBHOOK_URL
 
-        // Envia para o webhook
         if (lead.celular) {
-            let cleanPhone = lead.celular.replace(/\D/g, "")
-            // Adiciona código do país 55 (Brasil) se não houver
-            if (cleanPhone.length >= 10 && cleanPhone.length <= 11) {
-                cleanPhone = "55" + cleanPhone
-            }
-
-            console.log("[MESSAGES_POST] Enviando para webhook:", { cleanPhone, url: webhookUrl })
-
+            let phone = lead.celular.replace(/\D/g, "")
+            if (phone.length <= 11) phone = "55" + phone
             try {
-                const whResp = await fetch(webhookUrl, {
+                await fetch(webhookUrl, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        lead_id: lead.id,          // Formato exato solicitado: lead_id
-                        celular: cleanPhone,      // Formato exato solicitado: celular
-                        mensagem: content         // Formato exato solicitado: mensagem
-                    }),
+                    body: JSON.stringify({ lead_id: lead.id, celular: phone, mensagem: content }),
                 })
-
-                console.log("[MESSAGES_POST] Webhook response:", {
-                    status: whResp.status,
-                    ok: whResp.ok
-                })
-
-                if (!whResp.ok) {
-                    const errorText = await whResp.text().catch(() => "no-body")
-                    console.error("[MESSAGES_POST] Webhook erro body:", errorText)
-                }
-            } catch (err: any) {
-                console.error("[MESSAGES_POST] Erro crítico no fetch do webhook:", err.message)
-            }
+            } catch (e: any) { console.error("[MESSAGES_POST] Webhook erro:", e.message) }
         }
 
-        return NextResponse.json({
-            id: messageId,
-            content,
-            senderType: 'COMPANY',
-            createdAt: now,
-            conversationId
-        })
+        return NextResponse.json({ id: messageId, content, senderType: "COMPANY", createdAt: now, conversationId })
     } catch (err: any) {
-        console.error("[MESSAGES_POST] Erro geral:", err.message)
+        console.error("[MESSAGES_POST] Erro:", err.message)
         return new NextResponse(JSON.stringify({ error: err.message }), { status: 500 })
     }
 }

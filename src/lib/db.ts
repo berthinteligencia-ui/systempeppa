@@ -1,26 +1,20 @@
-import { Pool } from "pg"
+import { createClient } from "@supabase/supabase-js"
 
-const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false },
-    max: 5,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 5000,
-})
+// Cliente admin com service role key — bypassa RLS, usa HTTP (funciona no Vercel)
+export const supabaseAdmin = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false } }
+)
 
-pool.on("error", (err) => console.error("[DB] Pool error:", err.message))
-
+// Compatibilidade com código legado que usa query() e queryOne()
 export async function query<T = any>(sql: string, params?: any[]): Promise<T[]> {
-    const client = await pool.connect()
-    try {
-        const result = await client.query(sql, params)
-        return result.rows as T[]
-    } catch (err: any) {
-        console.error("[DB_QUERY_ERROR]", err.message)
-        throw err
-    } finally {
-        client.release()
-    }
+    const { data, error } = await supabaseAdmin.rpc("exec_sql", {
+        query_text: sql,
+        query_params: params ?? [],
+    })
+    if (error) throw new Error(error.message)
+    return (data as T[]) ?? []
 }
 
 export async function queryOne<T = any>(sql: string, params?: any[]): Promise<T | null> {
