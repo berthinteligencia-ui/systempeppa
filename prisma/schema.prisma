@@ -117,6 +117,7 @@ model Settings {
   company               Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   whatsappNotifications Boolean  @default(false)
   autoBackup            Boolean  @default(false)
+  whatsappWebhookUrl    String?
   payrollReminderDays   Int      @default(5)
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt

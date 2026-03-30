@@ -47,22 +47,35 @@ export async function POST(req: Request) {
         }
 
         // Busca lead correspondente
-        const lead = await queryOne(
-            `SELECT id FROM leads WHERE regexp_replace(COALESCE(celular, ''), '\\D', '', 'g') = $1 LIMIT 1`,
+        let lead = await queryOne(
+            `SELECT id, celular, nome FROM leads WHERE regexp_replace(COALESCE(celular, ''), '\\D', '', 'g') = $1 LIMIT 1`,
             [phoneClean]
         )
 
         const now = new Date().toISOString()
         const messageId = randomUUID()
 
-        // Salva apenas na tabela "mensagens"
+        // Se o lead não existe, cria um novo a partir das informações do funcionário
+        if (!lead) {
+            console.log("[WEBHOOK_IN] Criando novo lead para phone:", phoneClean)
+            const newLeadId = randomUUID()
+            await query(
+                `INSERT INTO leads (id, nome, celular, created_at) VALUES ($1, $2, $3, $4)`,
+                [newLeadId, employee.name, phoneClean, now]
+            )
+            lead = { id: newLeadId, celular: phoneClean, nome: employee.name }
+        }
+
+        // Salva na tabela "mensagens_zap" incluindo dados do funcionário
+        const phoneNorm = phoneClean
         await query(
-            `INSERT INTO mensagens (id, lead_id, tipo, conteudo, created_at)
-             VALUES ($1, $2, 'lead', $3, $4)`,
-            [messageId, lead?.id, messageText, now]
+            `INSERT INTO mensagens_zap (id, lead_id, tipo, conteudo, created_at, numero_funcionario, funcionario)
+             VALUES ($1, $2, 'lead', $3, $4, $5, $6)
+             ON CONFLICT DO NOTHING`,
+            [messageId, lead.id, messageText, now, phoneNorm, employee ? 'true' : 'false']
         )
 
-        console.log("[WEBHOOK_IN] Mensagem salva em mensagens:", messageId)
+        console.log("[WEBHOOK_IN] Mensagem salva em mensagens_zap:", messageId)
 
         return NextResponse.json({ ok: true, messageId })
     } catch (err: any) {

@@ -3,7 +3,7 @@ import { query, queryOne } from "@/lib/db"
 import { NextResponse } from "next/server"
 import { randomUUID } from "crypto"
 
-const WEBHOOK_URL = "https://webhook.berthia.com.br/webhook/folha2"
+const DEFAULT_WEBHOOK_URL = "https://webhook.berthia.com.br/webhook/folhazap"
 
 // GET /api/whatsapp/messages?conversationId=X
 // X agora é o lead_id
@@ -23,7 +23,7 @@ export async function GET(req: Request) {
                 CASE WHEN tipo = 'lead' THEN 'EMPLOYEE' ELSE 'COMPANY' END AS "senderType",
                 created_at AS "createdAt",
                 lead_id::text AS "conversationId"
-             FROM mensagens
+             FROM mensagens_zap
              WHERE lead_id = $1::uuid
              ORDER BY created_at ASC`,
             [leadId]
@@ -103,12 +103,19 @@ export async function POST(req: Request) {
 
         const messageId = randomUUID()
 
-        // Salva apenas na tabela "mensagens"
+        // Salva apenas na tabela "mensagens_zap"
         await query(
-            `INSERT INTO mensagens (id, lead_id, tipo, conteudo, created_at)
+            `INSERT INTO mensagens_zap (id, lead_id, tipo, conteudo, created_at)
              VALUES ($1, $2, 'user', $3, $4)`,
             [messageId, lead.id, content, now]
         )
+
+        // Busca URL do Webhook nas configurações da empresa
+        const settings = await queryOne(
+            `SELECT "whatsappWebhookUrl" FROM "Settings" WHERE "companyId" = $1 LIMIT 1`,
+            [session.user.companyId]
+        )
+        const webhookUrl = settings?.whatsappWebhookUrl || DEFAULT_WEBHOOK_URL
 
         // Envia para o webhook
         if (lead.celular) {
@@ -118,10 +125,10 @@ export async function POST(req: Request) {
                 cleanPhone = "55" + cleanPhone
             }
 
-            console.log("[MESSAGES_POST] Enviando para webhook:", { cleanPhone, url: WEBHOOK_URL })
+            console.log("[MESSAGES_POST] Enviando para webhook:", { cleanPhone, url: webhookUrl })
 
             try {
-                const whResp = await fetch(WEBHOOK_URL, {
+                const whResp = await fetch(webhookUrl, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({

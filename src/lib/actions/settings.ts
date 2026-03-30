@@ -51,6 +51,7 @@ export async function updateCompanySettings(data: {
     settings?: {
         whatsappNotifications?: boolean
         autoBackup?: boolean
+        whatsappWebhookUrl?: string
         payrollReminderDays?: number
     }
 }) {
@@ -64,8 +65,15 @@ export async function updateCompanySettings(data: {
     check(await supabase.from("Company").update({ ...companyData, updatedAt: new Date().toISOString() }).eq("id", companyId))
 
     if (settings) {
+        // Fetch existing settings to get the ID if it exists
+        const { data: existing } = await supabase
+            .from("Settings")
+            .select("id")
+            .eq("companyId", companyId)
+            .single()
+
         check(await supabase.from("Settings").upsert(
-            { ...settings, companyId, updatedAt: new Date().toISOString() },
+            { ...settings, id: existing?.id || randomUUID(), companyId, updatedAt: new Date().toISOString() },
             { onConflict: "companyId" }
         ))
     }

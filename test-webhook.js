@@ -1,6 +1,6 @@
 const fetch = require('node-fetch');
 
-const WEBHOOK_URL = "https://webhook.berthia.com.br/webhook/folha2";
+const WEBHOOK_URL = "https://webhook.berthia.com.br/webhook/folhazap";
 
 async function testWebhook() {
     console.log("Iniciando teste de comunicação com o webhook...");

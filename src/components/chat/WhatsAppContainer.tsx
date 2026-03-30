@@ -1,14 +1,15 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { LayoutDashboard, MessageSquare } from "lucide-react"
+import { LayoutDashboard, MessageSquare, Settings } from "lucide-react"
 import { WhatsAppSidebar } from "./WhatsAppSidebar"
 import { WhatsAppChatWindow } from "./WhatsAppChatWindow"
 import { WhatsAppCRMPanel } from "./WhatsAppCRMPanel"
 import { WhatsAppDashboard } from "./WhatsAppDashboard"
+import { WhatsAppSettings } from "./WhatsAppSettings"
 import { cn } from "@/lib/utils"
 
-type View = "dashboard" | "chat"
+type View = "dashboard" | "chat" | "settings"
 
 export function WhatsAppContainer() {
     const [view, setView] = useState<View>("chat")
@@ -19,7 +20,12 @@ export function WhatsAppContainer() {
     const fetchConversations = async () => {
         try {
             const resp = await fetch("/api/whatsapp/conversations")
-            if (resp.ok) setConversations(await resp.json())
+            if (resp.ok) {
+                setConversations(await resp.json())
+            } else {
+                const text = await resp.text()
+                console.error("[CONTAINER] conversations error:", resp.status, text)
+            }
         } catch (err) { console.error("[CONTAINER]", err) }
         finally { setLoading(false) }
     }
@@ -36,6 +42,7 @@ export function WhatsAppContainer() {
     const navItems: { id: View; label: string; icon: React.ElementType }[] = [
         { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
         { id: "chat", label: "Conversas", icon: MessageSquare },
+        { id: "settings", label: "Configurações", icon: Settings },
     ]
 
     return (
@@ -69,6 +76,8 @@ export function WhatsAppContainer() {
                     <WhatsAppDashboard
                         onSelect={(id) => { setSelectedId(id); setView("chat"); }}
                     />
+                ) : view === "settings" ? (
+                    <WhatsAppSettings />
                 ) : (
                     <>
                         <WhatsAppSidebar
