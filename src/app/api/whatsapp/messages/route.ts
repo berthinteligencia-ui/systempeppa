@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic"
 import { auth } from "@/lib/auth"
 import { query, queryOne } from "@/lib/db"
 import { NextResponse } from "next/server"
