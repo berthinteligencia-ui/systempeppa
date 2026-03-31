@@ -1,5 +1,5 @@
 import { auth } from "@/lib/auth"
-import { query } from "@/lib/db"
+import { getSupabaseAdmin } from "@/lib/supabase-admin"
 import { logActivity } from "@/lib/logActivity"
 import { NextResponse } from "next/server"
 import { headers } from "next/headers"
@@ -15,23 +15,24 @@ export async function GET(req: Request) {
     const offset = parseInt(searchParams.get("offset") ?? "0")
     const userId = searchParams.get("userId") ?? null
 
-    const params: any[] = [session.user.companyId, limit, offset]
-    let userFilter = ""
-    if (userId) {
-        userFilter = ` AND user_id = $${params.length + 1}`
-        params.push(userId)
+    try {
+        const supabase = getSupabaseAdmin()
+        let q = supabase
+            .from("activity_logs")
+            .select("id, user_id, user_name, user_email, action, target, details, ip_address, created_at")
+            .eq("company_id", session.user.companyId)
+            .order("created_at", { ascending: false })
+            .range(offset, offset + limit - 1)
+
+        if (userId) q = q.eq("user_id", userId)
+
+        const { data, error } = await q
+        if (error) throw error
+        return NextResponse.json(data ?? [])
+    } catch (err: any) {
+        console.error("[logs GET] Error:", err?.message)
+        return NextResponse.json([])
     }
-
-    const logs = await query(
-        `SELECT id, user_id, user_name, user_email, action, target, details, ip_address, created_at
-         FROM activity_logs
-         WHERE company_id = $1${userFilter}
-         ORDER BY created_at DESC
-         LIMIT $2 OFFSET $3`,
-        params
-    )
-
-    return NextResponse.json(logs)
 }
 
 // POST /api/logs  — cria um log entry (chamado pelo ActivityLogger client-side)

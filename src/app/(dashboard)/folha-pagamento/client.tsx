@@ -804,6 +804,7 @@ export function FolhaPagamentoClient({
                 "Banco": r.bankName || "—",
                 "Agência": r.bankAgency || "—",
                 "Conta": r.bankAccount || "—",
+                "PIX": r.pix || "—",
                 "Salário Líquido": r.valor
             }))
 
@@ -815,11 +816,12 @@ export function FolhaPagamentoClient({
                 "Banco": "",
                 "Agência": "",
                 "Conta": "",
+                "PIX": "",
                 "Salário Líquido": totalInSheet
             } as any)
 
             const ws = XLSX.utils.json_to_sheet(data)
-            ws["!cols"] = [{ wch: 40 }, { wch: 15 }, { wch: 20 }, { wch: 15 }, { wch: 10 }, { wch: 15 }, { wch: 15 }]
+            ws["!cols"] = [{ wch: 40 }, { wch: 15 }, { wch: 20 }, { wch: 15 }, { wch: 10 }, { wch: 15 }, { wch: 25 }, { wch: 15 }]
             
             // Excel limita nomes de abas a 31 caracteres e proíbe certos caracteres
             let baseName = (sheetName || "Geral").substring(0, 31).replace(/[\[\]\?\*\/\\\:]/g, "")

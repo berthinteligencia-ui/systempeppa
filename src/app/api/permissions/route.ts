@@ -1,7 +1,6 @@
 import { auth } from "@/lib/auth"
 import { NextResponse } from "next/server"
-import { getRolePermissions } from "@/lib/actions/permissions"
-import { query } from "@/lib/db"
+import { getSupabaseAdmin } from "@/lib/supabase-admin"
 
 // GET /api/permissions — retorna as permissões do role do usuário logado
 export async function GET() {
@@ -16,11 +15,19 @@ export async function GET() {
         return NextResponse.json({ role, permissions: null, isAdmin: true })
     }
 
-    const rows = await query<{ permissions: Record<string, boolean> }>(
-        `SELECT permissions FROM role_permissions WHERE company_id = $1 AND role = $2`,
-        [companyId, role]
-    )
+    try {
+        const supabase = getSupabaseAdmin()
+        const { data, error } = await supabase
+            .from("role_permissions")
+            .select("permissions")
+            .eq("company_id", companyId)
+            .eq("role", role)
+            .maybeSingle()
 
-    const permissions = rows[0]?.permissions ?? null
-    return NextResponse.json({ role, permissions, isAdmin: false })
+        if (error) throw error
+        return NextResponse.json({ role, permissions: data?.permissions ?? null, isAdmin: false })
+    } catch (err: any) {
+        console.error("[permissions GET] Error:", err?.message)
+        return NextResponse.json({ role, permissions: null, isAdmin: false })
+    }
 }
