@@ -1470,7 +1470,7 @@ export function FolhaPagamentoClient({
                         </DialogTitle>
                     </DialogHeader>
                     <p className="text-sm text-muted-foreground">
-                        Selecione a coluna correta para cada campo ou escolha <strong>"Não existe"</strong> para remover o mapeamento.
+                        Selecione a coluna correta para cada campo ou escolha <strong>&quot;Não existe&quot;</strong> para remover o mapeamento.
                         A planilha será reanalisada ao confirmar.
                     </p>
                     <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">

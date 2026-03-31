@@ -10,10 +10,7 @@ export default async function AdminPage() {
 
     return (
         <AdminClient
-            initialCompanies={companies.map(c => ({
-                ...c,
-                createdAt: c.createdAt,
-            }))}
+            initialCompanies={companies}
         />
     )
 }

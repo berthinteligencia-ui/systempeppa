@@ -74,6 +74,7 @@ model Plan {
   description      String?
   basePrice        Decimal        @db.Decimal(10, 2)
   pricePerEmployee Decimal        @db.Decimal(10, 2)
+  billingType      String         @default("PER_EMPLOYEE") // PER_EMPLOYEE or FIXED
   active           Boolean        @default(true)
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt

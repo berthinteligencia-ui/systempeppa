@@ -3,6 +3,7 @@
 import { getSupabaseAdmin } from "@/lib/supabase-admin"
 import { cookies } from "next/headers"
 import { randomUUID } from "crypto"
+import { prisma } from "@/lib/prisma"
 import bcrypt from "bcryptjs"
 
 const ADMIN_SECRET = process.env.ADMIN_SECRET ?? "pepacorp@admin"
@@ -51,22 +52,37 @@ export type CompanyInput = {
 }
 
 export async function listAllCompanies() {
-    const supabase = getSupabaseAdmin()
-
-    const { data: companies } = await supabase
-        .from("Company")
-        .select("*")
-        .order("createdAt", { ascending: false })
-
-    const { data: users } = await supabase.from("User").select("companyId")
-    const { data: employees } = await supabase.from("Employee").select("companyId")
-
-    return (companies ?? []).map(c => ({
-        ...c,
-        _count: {
-            users: (users ?? []).filter(u => u.companyId === c.id).length,
-            employees: (employees ?? []).filter(e => e.companyId === c.id).length,
+    const companies = await prisma.company.findMany({
+        include: {
+            _count: {
+                select: { users: true, employees: { where: { status: "ACTIVE" } } }
+            },
+            subscription: {
+                include: { plan: true }
+            }
         },
+        orderBy: { createdAt: "desc" }
+    })
+
+    // Serialize Dates and Decimals for Client Component
+    return companies.map(c => ({
+        ...c,
+        createdAt: c.createdAt.toISOString(),
+        updatedAt: c.updatedAt.toISOString(),
+        subscription: c.subscription ? {
+            ...c.subscription,
+            createdAt: c.subscription.createdAt.toISOString(),
+            updatedAt: c.subscription.updatedAt.toISOString(),
+            customBasePrice: c.subscription.customBasePrice ? Number(c.subscription.customBasePrice) : null,
+            customPricePerEmployee: c.subscription.customPricePerEmployee ? Number(c.subscription.customPricePerEmployee) : null,
+            plan: c.subscription.plan ? {
+                ...c.subscription.plan,
+                basePrice: Number(c.subscription.plan.basePrice),
+                pricePerEmployee: Number(c.subscription.plan.pricePerEmployee),
+                createdAt: c.subscription.plan.createdAt.toISOString(),
+                updatedAt: c.subscription.plan.updatedAt.toISOString(),
+            } : null
+        } : null
     }))
 }
 

@@ -18,7 +18,7 @@ import {
 } from "@/lib/actions/billing"
 import { Company } from "@prisma/client"
 
-type CompanyWithCount = Company & { _count: { users: number; employees: number } }
+type CompanyWithCount = any // Use any for simplicity in this large component with serialized dates/decimals
 
 const emptyForm: CompanyInput = { name: "", cnpj: "", email: "", whatsapp: "", address: "", city: "", state: "" }
 const emptyUser = { name: "", email: "", password: "" }
@@ -64,7 +64,7 @@ export function AdminClient({ initialCompanies }: { initialCompanies: CompanyWit
     const [loadingAdmin, setLoadingAdmin] = useState(false)
     const [isPlanDialogOpen, setIsPlanDialogOpen] = useState(false)
     const [editingPlanId, setEditingPlanId] = useState<string | null>(null)
-    const [planForm, setPlanForm] = useState({ name: "", description: "", basePrice: "", pricePerEmployee: "", active: true })
+    const [planForm, setPlanForm] = useState({ name: "", description: "", basePrice: "", pricePerEmployee: "", billingType: "PER_EMPLOYEE", active: true })
 
     // Subscription state in company form
     const [subForm, setSubForm] = useState<{
@@ -73,10 +73,17 @@ export function AdminClient({ initialCompanies }: { initialCompanies: CompanyWit
         customPricePerEmployee: string;
     }>({ planId: "", customBasePrice: "", customPricePerEmployee: "" })
 
+    const [updatingSub, setUpdatingSub] = useState<string | null>(null)
+
+
     useEffect(() => {
-        if (activeTab === "plans") loadPlans()
+        loadPlans()
+    }, [])
+
+    useEffect(() => {
         if (activeTab === "finance") loadInvoices()
     }, [activeTab])
+
 
     async function loadPlans() {
         setLoadingPlans(true)
@@ -253,7 +260,7 @@ export function AdminClient({ initialCompanies }: { initialCompanies: CompanyWit
     // Plans Actions
     function openCreatePlan() {
         setEditingPlanId(null)
-        setPlanForm({ name: "", description: "", basePrice: "", pricePerEmployee: "", active: true })
+        setPlanForm({ name: "", description: "", basePrice: "", pricePerEmployee: "", billingType: "PER_EMPLOYEE", active: true })
         setError(null)
         setIsPlanDialogOpen(true)
     }
@@ -265,6 +272,7 @@ export function AdminClient({ initialCompanies }: { initialCompanies: CompanyWit
             description: p.description || "",
             basePrice: String(p.basePrice),
             pricePerEmployee: String(p.pricePerEmployee),
+            billingType: p.billingType || "PER_EMPLOYEE",
             active: p.active
         })
         setError(null)
@@ -281,6 +289,7 @@ export function AdminClient({ initialCompanies }: { initialCompanies: CompanyWit
                 description: planForm.description,
                 basePrice: parseFloat(planForm.basePrice) || 0,
                 pricePerEmployee: parseFloat(planForm.pricePerEmployee) || 0,
+                billingType: planForm.billingType,
                 active: planForm.active
             }
 
@@ -306,6 +315,21 @@ export function AdminClient({ initialCompanies }: { initialCompanies: CompanyWit
             setPlans(ps => ps.filter(p => p.id !== id))
         } catch (e: any) {
             alert(e.message)
+        }
+    }
+
+    async function handleQuickPlanChange(companyId: string, planId: string) {
+        if (!planId) return
+        setUpdatingSub(companyId)
+        try {
+            await updateCompanySubscription(companyId, { planId })
+            // Update local companies state
+            const updatedSub = await getCompanySubscription(companyId)
+            setCompanies(cs => cs.map(c => c.id === companyId ? { ...c, subscription: updatedSub } : c))
+        } catch (e: any) {
+            alert(e.message)
+        } finally {
+            setUpdatingSub(null)
         }
     }
 
@@ -513,6 +537,25 @@ export function AdminClient({ initialCompanies }: { initialCompanies: CompanyWit
                                     <div className="flex items-center gap-1">
                                         <Users className="h-3.5 w-3.5" />
                                         <span><strong className="text-slate-700">{c._count.employees}</strong> funcionários</span>
+                                    </div>
+                                </div>
+
+                                 {/* Plan selection */}
+                                <div className="space-y-2 pt-1">
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Plano Atual</p>
+                                    <div className="flex items-center gap-2">
+                                        <select 
+                                            value={(c as any).subscription?.planId || ""}
+                                            onChange={(e) => handleQuickPlanChange(c.id, e.target.value)}
+                                            disabled={updatingSub === c.id}
+                                            className="grow bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        >
+                                            <option value="" disabled>Selecionar Plano</option>
+                                            {plans.map(p => (
+                                                <option key={p.id} value={p.id}>{p.name}</option>
+                                            ))}
+                                        </select>
+                                        {updatingSub === c.id && <Loader2 className="h-4 w-4 animate-spin text-blue-500" />}
                                     </div>
                                 </div>
 
@@ -830,9 +873,29 @@ export function AdminClient({ initialCompanies }: { initialCompanies: CompanyWit
                                 />
                             </div>
                             <div className="grid grid-cols-2 gap-4">
-                                <Field label="Preço Base (R$)" value={planForm.basePrice} onChange={v => setPlanForm(f => ({ ...f, basePrice: v }))} type="number" placeholder="0.00" />
-                                <Field label="Preço por Func. (R$)" value={planForm.pricePerEmployee} onChange={v => setPlanForm(f => ({ ...f, pricePerEmployee: v }))} type="number" placeholder="0.00" />
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Tipo de Cobrança</label>
+                                    <div className="flex p-1 bg-slate-100 rounded-xl">
+                                        <button 
+                                            onClick={() => setPlanForm(f => ({ ...f, billingType: "PER_EMPLOYEE" }))}
+                                            className={`flex-1 px-2 py-1.5 rounded-lg text-[10px] font-bold transition-all ${planForm.billingType === "PER_EMPLOYEE" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                                        >
+                                            POR FUNC.
+                                        </button>
+                                        <button 
+                                            onClick={() => setPlanForm(f => ({ ...f, billingType: "FIXED" }))}
+                                            className={`flex-1 px-2 py-1.5 rounded-lg text-[10px] font-bold transition-all ${planForm.billingType === "FIXED" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                                        >
+                                            VALOR FIXO
+                                        </button>
+                                    </div>
+                                </div>
+                                <Field label={planForm.billingType === "FIXED" ? "Valor Mensal (R$)" : "Preço Base (R$)"} value={planForm.basePrice} onChange={v => setPlanForm(f => ({ ...f, basePrice: v }))} type="number" placeholder="0.00" />
                             </div>
+
+                            {planForm.billingType !== "FIXED" && (
+                                <Field label="Preço por Func. (R$)" value={planForm.pricePerEmployee} onChange={v => setPlanForm(f => ({ ...f, pricePerEmployee: v }))} type="number" placeholder="0.00" />
+                            )}
                             
                             <div className="flex items-center gap-2 pt-2">
                                 <button 

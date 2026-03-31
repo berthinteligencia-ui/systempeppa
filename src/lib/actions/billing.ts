@@ -25,6 +25,8 @@ function serializePlan(plan: any) {
     ...plan,
     basePrice: plan.basePrice ? Number(plan.basePrice) : 0,
     pricePerEmployee: plan.pricePerEmployee ? Number(plan.pricePerEmployee) : 0,
+    createdAt: plan.createdAt instanceof Date ? plan.createdAt.toISOString() : plan.createdAt,
+    updatedAt: plan.updatedAt instanceof Date ? plan.updatedAt.toISOString() : plan.updatedAt,
   }
 }
 
@@ -34,6 +36,8 @@ function serializeSubscription(sub: any) {
     ...sub,
     customBasePrice: sub.customBasePrice !== null ? Number(sub.customBasePrice) : null,
     customPricePerEmployee: sub.customPricePerEmployee !== null ? Number(sub.customPricePerEmployee) : null,
+    createdAt: sub.createdAt instanceof Date ? sub.createdAt.toISOString() : sub.createdAt,
+    updatedAt: sub.updatedAt instanceof Date ? sub.updatedAt.toISOString() : sub.updatedAt,
     plan: sub.plan ? serializePlan(sub.plan) : undefined
   }
 }
@@ -45,6 +49,9 @@ function serializeInvoice(inv: any) {
     amount: inv.amount ? Number(inv.amount) : 0,
     basePriceUsed: inv.basePriceUsed ? Number(inv.basePriceUsed) : 0,
     pricePerEmployeeUsed: inv.pricePerEmployeeUsed ? Number(inv.pricePerEmployeeUsed) : 0,
+    dueDate: inv.dueDate instanceof Date ? inv.dueDate.toISOString() : inv.dueDate,
+    createdAt: inv.createdAt instanceof Date ? inv.createdAt.toISOString() : inv.createdAt,
+    updatedAt: inv.updatedAt instanceof Date ? inv.updatedAt.toISOString() : inv.updatedAt,
     company: inv.company || undefined
   }
 }
@@ -63,6 +70,7 @@ export async function createPlan(data: {
   description?: string
   basePrice: number
   pricePerEmployee: number
+  billingType?: string
 }) {
   await checkAdmin()
   const plan = await prisma.plan.create({
@@ -80,6 +88,7 @@ export async function updatePlan(id: string, data: {
   description?: string
   basePrice: number
   pricePerEmployee: number
+  billingType: string
   active: boolean
 }) {
   await checkAdmin()
@@ -177,7 +186,7 @@ export async function generateInvoicesForMonth(month: number, year: number) {
     const basePrice = sub.customBasePrice !== null ? Number(sub.customBasePrice) : Number(plan.basePrice)
     const perEmpPrice = sub.customPricePerEmployee !== null ? Number(sub.customPricePerEmployee) : Number(plan.pricePerEmployee)
     
-    const amount = basePrice + (perEmpPrice * empCount)
+    const amount = plan.billingType === "FIXED" ? basePrice : basePrice + (perEmpPrice * empCount)
 
     // Due date is the 15th of the current Billing month
     const dueDate = new Date(year, month - 1, 15)
