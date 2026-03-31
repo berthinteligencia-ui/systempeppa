@@ -36,6 +36,7 @@ export async function POST(req: NextRequest) {
             if (r.bankName)    parts.push(`banco:"${r.bankName}"`)
             if (r.bankAgency)  parts.push(`agencia:"${r.bankAgency}"`)
             if (r.bankAccount) parts.push(`conta:"${r.bankAccount}"`)
+            if (r.pix)         parts.push(`pix:"${r.pix}"`)
             if (r.telefone)    parts.push(`tel:${r.telefone}`)
             if (r.cargo)       parts.push(`cargo:"${r.cargo}"`)
             return parts.join(" ")
@@ -85,7 +86,7 @@ Retorne SEMPRE um JSON puro (sem markdown) com esta estrutura:
 Tipos de ação disponíveis:
 - Alterar valor:     { "type": "update_valor", "cpf": "...", "sheet": "...", "newValor": 0000 }
 - Remover linha:     { "type": "remove_row",   "cpf": "...", "sheet": "..." }
-- Alterar campo:     { "type": "update_field",  "cpf": "...", "sheet": "...", "field": "nome|valor|bankName|bankAgency|bankAccount|telefone|cargo", "newValue": "..." }
+- Alterar campo:     { "type": "update_field",  "cpf": "...", "sheet": "...", "field": "nome|valor|bankName|bankAgency|bankAccount|pix|telefone|cargo", "newValue": "..." }
   (para alterar valor via update_field use "field":"valor" e "newValue": número como string, ex: "3500.00")
 
 REGRAS:

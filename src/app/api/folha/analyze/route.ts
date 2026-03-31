@@ -5,7 +5,6 @@ import { auth } from "@/lib/auth"
 
 // ── CPF helpers ───────────────────────────────────────────────────────────────
 
-const CPF_RE = /^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$|^\d{11}$/
 
 function normalizeCpf(raw: unknown): string {
     let s = String(raw ?? "").replace(/\D/g, "")
@@ -68,17 +67,58 @@ function toTitleCase(str: string): string {
 // ── Column name candidates ────────────────────────────────────────────────────
 
 const CPF_NAMES = ["cpf", "doc", "documento", "cpf/cnpj", "cnpj/cpf", "nr documento", "nr.documento", "nrdocumento", "registro", "matricula", "matrícula", "id", "c.p.f"]
-const NOME_NAMES = ["nome", "name", "funcionario", "funcionário", "colaborador", "empregado", "trabalhador", "nomefuncionario", "nome funcionário", "nome funcionario", "servidor", "beneficiario", "beneficiário"]
-const VALOR_NAMES = ["valor", "total", "liquido", "líquido", "bruto", "vencimento", "salario", "salário", "remuneracao", "remuneração", "pagamento", "totalvencimentos", "total vencimentos", "vlr", "vlrliquido", "vlrbruto", "proventos", "creditado", "valor pago", "vlr.pago"]
+const NOME_NAMES = ["nome", "name", "funcionario", "funcionário", "colaborador", "empregado", "trabalhador", "nomefuncionario", "nome funcionário", "nome funcionario", "servidor", "beneficiario", "beneficiário", "nome completo", "razao social", "razão social"]
+const VALOR_NAMES = ["valor", "total", "liquido", "líquido", "bruto", "vencimento", "salario", "salário", "remuneracao", "remuneração", "pagamento", "totalvencimentos", "total vencimentos", "vlr", "vlrliquido", "vlrbruto", "proventos", "creditado", "valor pago", "vlr.pago", "sal liquido", "sal. liquido", "salario liquido", "salário líquido", "sal bruto", "sal. bruto", "salario bruto", "salário bruto", "sal base", "salario base", "vencimentos", "liquido a receber", "líquido a receber"]
 const TELEFONE_NAMES = ["telefone", "fone", "celular", "cel", "phone", "contato", "tel", "whatsapp", "zap", "fone/cel", "cel/fone", "numero", "número", "tel.", "cel.", "contato 1", "contato 2", "tel_contato", "telefone residencial", "telefone celular"]
 const CARGO_NAMES = ["cargo", "função", "funcao", "ocupação", "ocupacao", "atividade", "posição", "posicao", "função/cargo", "cargo/função", "descr cargo", "descrição cargo", "cbo", "car.", "func.", "cargo atual", "função atual", "profissão", "profissao"]
 const BANCO_NAMES = ["banco", "bank", "instituição", "instituicao", "nome banco", "ag./banco", "banco/ag."]
 const AGENCIA_NAMES = ["agencia", "agência", "ag", "nr agencia", "nr agência", "ag.", "agencia pagadora"]
 const CONTA_NAMES = ["conta", "account", "nr conta", "conta corrente", "cc", "c/c", "conta poupança", "conta pagamento"]
 
+const PIX_NAMES = ["pix", "chave pix", "chave", "tipo chave", "chave/pix"]
+
+const ALL_KNOWN_NAMES = [...CPF_NAMES, ...NOME_NAMES, ...VALOR_NAMES, ...TELEFONE_NAMES, ...CARGO_NAMES, ...BANCO_NAMES, ...AGENCIA_NAMES, ...CONTA_NAMES, ...PIX_NAMES]
+
+// ── Header row detection ──────────────────────────────────────────────────────
+// Scans the first rows of the sheet to find the actual header row.
+// Some sheets have title rows (e.g. "FOLHA DE PAGAMENTO - FEVEREIRO 2026") before the real headers.
+function findHeaderRow(rawArrays: unknown[][]): { headerRowIdx: number; headers: string[] } {
+    let bestRow = 0
+    let bestScore = 0
+
+    for (let i = 0; i < Math.min(15, rawArrays.length); i++) {
+        const row = rawArrays[i] as unknown[]
+        let score = 0
+        for (const cell of row) {
+            const s = String(cell ?? "").toLowerCase().trim()
+            if (!s) continue
+            // Skip cells that are purely numeric (e.g. dates stored as numbers)
+            if (/^[\d.,\s\-\/]+$/.test(s)) continue
+            for (const candidate of ALL_KNOWN_NAMES) {
+                const words = candidate.split(" ")
+                if (words.every(w => s.includes(w))) {
+                    score++
+                    break
+                }
+            }
+        }
+        if (score > bestScore) {
+            bestScore = score
+            bestRow = i
+        }
+    }
+
+    const headerRow = (rawArrays[bestRow] ?? []) as unknown[]
+    const headers = headerRow.map(h => String(h ?? "").trim())
+    return { headerRowIdx: bestRow, headers }
+}
+
 function matchHeader(header: string, candidates: string[]): boolean {
     const h = header.toLowerCase().trim().replace(/\s+/g, " ")
-    return candidates.some((c) => h === c || h.includes(c))
+    return candidates.some((c) => {
+        const words = c.split(" ")
+        return words.every(word => h.includes(word))
+    })
 }
 
 // ── Auto-detect column indices by scanning cell contents ─────────────────────
@@ -86,7 +126,7 @@ function matchHeader(header: string, candidates: string[]): boolean {
 function detectColumns(
     headers: string[],
     rows: Record<string, unknown>[]
-): { cpfIdx: number; nomeIdx: number; valorIdx: number; telefoneIdx: number; cargoIdx: number; bancoIdx: number; agenciaIdx: number; contaIdx: number } {
+): { cpfIdx: number; nomeIdx: number; valorIdx: number; telefoneIdx: number; cargoIdx: number; bancoIdx: number; agenciaIdx: number; contaIdx: number; pixIdx: number } {
     // 1st pass: match by header name
     let cpfIdx = headers.findIndex((h) => matchHeader(h, CPF_NAMES))
     let nomeIdx = headers.findIndex((h) => matchHeader(h, NOME_NAMES))
@@ -96,6 +136,7 @@ function detectColumns(
     let bancoIdx = headers.findIndex((h) => matchHeader(h, BANCO_NAMES))
     let agenciaIdx = headers.findIndex((h) => matchHeader(h, AGENCIA_NAMES))
     let contaIdx = headers.findIndex((h) => matchHeader(h, CONTA_NAMES))
+    let pixIdx = headers.findIndex((h) => matchHeader(h, PIX_NAMES))
 
     // 2nd pass: scan cell content to find CPF column when name didn't match
     if (cpfIdx === -1) {
@@ -145,7 +186,7 @@ function detectColumns(
     // Cargo is detected ONLY by header name (passes 1). No content scan.
     // cargoIdx is already set (or -1) from the 1st pass above.
 
-    return { cpfIdx, nomeIdx, valorIdx, telefoneIdx, cargoIdx, bancoIdx, agenciaIdx, contaIdx }
+    return { cpfIdx, nomeIdx, valorIdx, telefoneIdx, cargoIdx, bancoIdx, agenciaIdx, contaIdx, pixIdx }
 }
 
 // ── Route Handler ─────────────────────────────────────────────────────────────
@@ -162,6 +203,10 @@ export async function POST(req: NextRequest) {
         const file = form.get("file") as File | null
         if (!file) return NextResponse.json({ error: "Arquivo não enviado" }, { status: 400 })
 
+        // Column hints: { "SheetName": { cpf?: "COL", nome?: "COL", valor?: "COL", ... }, "*": {...} }
+        const columnHintsRaw = form.get("columnHints") as string | null
+        const columnHints: Record<string, Record<string, string>> = columnHintsRaw ? JSON.parse(columnHintsRaw) : {}
+
         const buffer = Buffer.from(await file.arrayBuffer())
         const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true })
 
@@ -175,51 +220,102 @@ export async function POST(req: NextRequest) {
             bankName?: string;
             bankAgency?: string;
             bankAccount?: string;
+            pix?: string;
             isInvalidCpf?: boolean;
         }
         const allRows: PayrollRow[] = []
         const extraRows: any[] = []
         const debugInfo: Record<string, unknown>[] = []
         const sheetMap = new Map<string, { count: number; total: number }>()
+        const sheetsNeedingMapping: { sheet: string; availableHeaders: string[]; undetected: string[] }[] = []
 
         for (const sheetName of workbook.SheetNames) {
             const sheet = workbook.Sheets[sheetName]
 
-            const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" })
+            // Get raw arrays so we can detect the actual header row (skip title rows)
+            const rawArrays = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "" })
+            if (rawArrays.length === 0) continue
+
+            const { headerRowIdx, headers } = findHeaderRow(rawArrays)
+
+            // Build rowObjects from data rows after the detected header row
+            const rawRows: Record<string, unknown>[] = rawArrays
+                .slice(headerRowIdx + 1)
+                .filter(row => (row as unknown[]).some(cell => String(cell ?? "").trim() !== ""))
+                .map(row => {
+                    const obj: Record<string, unknown> = {}
+                    headers.forEach((h, i) => { if (h) obj[h] = (row as unknown[])[i] ?? "" })
+                    return obj
+                })
+
             if (rawRows.length === 0) continue
 
-            const headers = Object.keys(rawRows[0] || {})
-            const { cpfIdx, nomeIdx, valorIdx, telefoneIdx, cargoIdx, bancoIdx, agenciaIdx, contaIdx } = detectColumns(headers, rawRows)
+            let { cpfIdx, nomeIdx, valorIdx, telefoneIdx, cargoIdx, bancoIdx, agenciaIdx, contaIdx, pixIdx } = detectColumns(headers, rawRows)
 
-            console.log(`[Analyze] Sheet: ${sheetName}`, {
+            // Apply user-provided column hints (override auto-detection per sheet or globally via "*")
+            // "__none__" explicitly removes a mapping; any other value sets it to that column header
+            const hints = columnHints[sheetName] ?? columnHints["*"] ?? {}
+            function applyHint(hint: string | undefined, current: number): number {
+                if (hint === undefined) return current
+                if (hint === "__none__") return -1
+                const i = headers.indexOf(hint)
+                return i !== -1 ? i : current
+            }
+            cpfIdx      = applyHint(hints.cpf,      cpfIdx)
+            nomeIdx     = applyHint(hints.nome,     nomeIdx)
+            valorIdx    = applyHint(hints.valor,    valorIdx)
+            telefoneIdx = applyHint(hints.telefone, telefoneIdx)
+            cargoIdx    = applyHint(hints.cargo,    cargoIdx)
+            bancoIdx    = applyHint(hints.banco,    bancoIdx)
+            agenciaIdx  = applyHint(hints.agencia,  agenciaIdx)
+            contaIdx    = applyHint(hints.conta,    contaIdx)
+            pixIdx      = applyHint(hints.pix,      pixIdx)
+
+            // Track which critical columns couldn't be found
+            const undetected: string[] = []
+            if (nomeIdx  === -1) undetected.push("nome")
+            if (valorIdx === -1) undetected.push("valor")
+            if (cpfIdx   === -1) undetected.push("cpf")
+
+            console.log(`[Analyze] Sheet: ${sheetName} (header row ${headerRowIdx})`, {
                 headers,
                 detected: {
-                    cpf: cpfIdx !== -1 ? headers[cpfIdx] : "MISSING",
-                    nome: nomeIdx !== -1 ? headers[nomeIdx] : "MISSING",
-                    valor: valorIdx !== -1 ? headers[valorIdx] : "MISSING",
+                    cpf:      cpfIdx      !== -1 ? headers[cpfIdx]      : "MISSING",
+                    nome:     nomeIdx     !== -1 ? headers[nomeIdx]     : "MISSING",
+                    valor:    valorIdx    !== -1 ? headers[valorIdx]    : "MISSING",
                     telefone: telefoneIdx !== -1 ? headers[telefoneIdx] : "MISSING",
-                    cargo: cargoIdx !== -1 ? headers[cargoIdx] : "MISSING",
-                    banco: bancoIdx !== -1 ? headers[bancoIdx] : "MISSING",
-                    agencia: agenciaIdx !== -1 ? headers[agenciaIdx] : "MISSING",
-                    conta: contaIdx !== -1 ? headers[contaIdx] : "MISSING"
+                    cargo:    cargoIdx    !== -1 ? headers[cargoIdx]    : "MISSING",
+                    banco:    bancoIdx    !== -1 ? headers[bancoIdx]    : "MISSING",
+                    agencia:  agenciaIdx  !== -1 ? headers[agenciaIdx]  : "MISSING",
+                    conta:    contaIdx    !== -1 ? headers[contaIdx]    : "MISSING",
+                    pix:      pixIdx      !== -1 ? headers[pixIdx]      : "MISSING",
                 }
             })
 
             debugInfo.push({
                 sheet: sheetName,
+                headerRowIdx,
                 totalRows: rawRows.length,
                 headers,
                 detected: {
-                    cpf: cpfIdx !== -1 ? headers[cpfIdx] : null,
-                    nome: nomeIdx !== -1 ? headers[nomeIdx] : null,
-                    valor: valorIdx !== -1 ? headers[valorIdx] : null,
+                    cpf:      cpfIdx      !== -1 ? headers[cpfIdx]      : null,
+                    nome:     nomeIdx     !== -1 ? headers[nomeIdx]     : null,
+                    valor:    valorIdx    !== -1 ? headers[valorIdx]    : null,
                     telefone: telefoneIdx !== -1 ? headers[telefoneIdx] : null,
-                    cargo: cargoIdx !== -1 ? headers[cargoIdx] : null,
-                    banco: bancoIdx !== -1 ? headers[bancoIdx] : null,
-                    agencia: agenciaIdx !== -1 ? headers[agenciaIdx] : null,
-                    conta: contaIdx !== -1 ? headers[contaIdx] : null,
+                    cargo:    cargoIdx    !== -1 ? headers[cargoIdx]    : null,
+                    banco:    bancoIdx    !== -1 ? headers[bancoIdx]    : null,
+                    agencia:  agenciaIdx  !== -1 ? headers[agenciaIdx]  : null,
+                    conta:    contaIdx    !== -1 ? headers[contaIdx]    : null,
+                    pix:      pixIdx      !== -1 ? headers[pixIdx]      : null,
                 },
             })
+
+            // If neither nome nor valor detected, ask the user to map columns
+            if (nomeIdx === -1 && valorIdx === -1) {
+                const nonEmptyHeaders = headers.filter(h => h.trim() !== "")
+                sheetsNeedingMapping.push({ sheet: sheetName, availableHeaders: nonEmptyHeaders, undetected })
+                continue
+            }
 
             if (cpfIdx === -1 && nomeIdx === -1 && valorIdx === -1) continue
 
@@ -240,6 +336,7 @@ export async function POST(req: NextRequest) {
                 const bankName = bancoIdx !== -1 ? String(row[headers[bancoIdx]] ?? "").trim() : undefined
                 const bankAgency = agenciaIdx !== -1 ? String(row[headers[agenciaIdx]] ?? "").trim() : undefined
                 const bankAccount = contaIdx !== -1 ? String(row[headers[contaIdx]] ?? "").trim().replace(/\./g, "") : undefined
+                const pix = pixIdx !== -1 ? String(row[headers[pixIdx]] ?? "").trim() : undefined
 
                 const isInvalidCpf = !isValidCpf(cpf)
 
@@ -248,9 +345,9 @@ export async function POST(req: NextRequest) {
 
                 // Categorize
                 if (cpf && cpf !== "00000000000") {
-                    allRows.push({ cpf, nome, valor, sheet: sheetName, telefone, cargo, bankName, bankAgency, bankAccount, isInvalidCpf })
+                    allRows.push({ cpf, nome, valor, sheet: sheetName, telefone, cargo, bankName, bankAgency, bankAccount, pix, isInvalidCpf })
                 } else if (nomeRaw && valor > 0) {
-                    extraRows.push({ nome, cpfCnpj: cpfRaw || "—", valor, sheet: sheetName, telefone, cargo, bankName, bankAgency, bankAccount })
+                    extraRows.push({ nome, cpfCnpj: cpfRaw || "—", valor, sheet: sheetName, telefone, cargo, bankName, bankAgency, bankAccount, pix })
                 } else {
                     continue
                 }
@@ -283,10 +380,11 @@ export async function POST(req: NextRequest) {
         const duplicates = Array.from(sameAbaDuplicates)
         const crossAbaDuplicatesList = Array.from(crossAbaDuplicates)
 
-        if (finalRows.length === 0) {
+        // Only block when truly nothing was parsed — rows without CPF still land in extraRows
+        if (finalRows.length === 0 && extraRows.length === 0) {
             return NextResponse.json(
                 {
-                    error: "Nenhuma linha com CPF válido foi encontrada na planilha.",
+                    error: "Nenhum dado foi encontrado na planilha. Verifique se as colunas estão corretas.",
                     debug: debugInfo,
                 },
                 { status: 422 }
@@ -296,11 +394,13 @@ export async function POST(req: NextRequest) {
         // ── Cross-reference DB ────────────────────────────────────────────────────
         const cpfs = [...new Set(finalRows.map((r) => r.cpf))]
         const supabase = getSupabaseAdmin()
-        const { data: dbEmployees, error: dbError } = await supabase
-            .from("Employee")
-            .select("id, cpf, name, phone, position, bankName, bankAgency, bankAccount")
-            .eq("companyId", companyId)
-            .in("cpf", cpfs)
+        const { data: dbEmployees, error: dbError } = cpfs.length > 0
+            ? await supabase
+                .from("Employee")
+                .select("id, cpf, name, phone, position, bankName, bankAgency, bankAccount, pixKey")
+                .eq("companyId", companyId)
+                .in("cpf", cpfs)
+            : { data: [], error: null }
 
         if (dbError) {
             console.error("[ANALYZE_ROUTE] DB Error:", dbError)
@@ -331,6 +431,7 @@ export async function POST(req: NextRequest) {
                     bankName: e.bankName || r.bankName,
                     bankAgency: e.bankAgency || r.bankAgency,
                     bankAccount: e.bankAccount || r.bankAccount,
+                    pix: e.pixKey || r.pix,
                     isInvalidCpf: r.isInvalidCpf,
                     nameMismatch
                 }
@@ -348,6 +449,7 @@ export async function POST(req: NextRequest) {
                 bankName: r.bankName,
                 bankAgency: r.bankAgency,
                 bankAccount: r.bankAccount,
+                pix: r.pix,
                 isInvalidCpf: r.isInvalidCpf
             }))
 
@@ -368,13 +470,22 @@ export async function POST(req: NextRequest) {
             sheetSummary.push({ sheet, ...data })
         }
 
+        // If some sheets couldn't have columns detected, return mapping request
+        if (sheetsNeedingMapping.length > 0 && finalRows.length === 0 && extraRows.length === 0) {
+            return NextResponse.json(
+                { needsColumnMapping: true, sheetsNeedingMapping, debug: debugInfo },
+                { status: 422 }
+            )
+        }
+
         console.log(`[Analyze] Final response:`, {
             foundCount: found.length,
             missingCount: missing.length,
             extrasCount: extraRows.length,
+            sheetsNeedingMapping: sheetsNeedingMapping.length,
             hasDebug: !!debugInfo,
         })
-        return NextResponse.json({ found, missing, extras: extraRows, total, sheetSummary, duplicates, crossAbaDuplicates: crossAbaDuplicatesList, phoneUpdates, debug: debugInfo })
+        return NextResponse.json({ found, missing, extras: extraRows, total, sheetSummary, duplicates, crossAbaDuplicates: crossAbaDuplicatesList, phoneUpdates, debug: debugInfo, sheetsNeedingMapping })
     } catch (e: any) {
         console.error("[ANALYZE_ROUTE] Unhandled error:", e)
         return NextResponse.json(

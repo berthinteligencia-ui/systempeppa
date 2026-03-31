@@ -33,13 +33,15 @@ import { updateNotaFiscalStatus } from "@/lib/actions/nfs"
 type Department = { id: string; name: string }
 type NfRow = { id: string; numero: string; emitente: string; valor: number | string; dataEmissao: Date | string; status: string }
 
-type FoundRow = { id: string; nome: string; cpf: string; valor: number; sheet: string; telefone?: string; cargo?: string; bankName?: string; bankAgency?: string; bankAccount?: string; isInvalidCpf?: boolean; nameMismatch?: boolean; dbName?: string }
-type MissingRow = { cpf: string; nome: string; valor: number; sheet: string; telefone?: string; cargo?: string; bankName?: string; bankAgency?: string; bankAccount?: string; isInvalidCpf?: boolean }
-type ExtraRow = { nome: string; cpfCnpj: string; valor: number; sheet: string; telefone?: string; cargo?: string; bankName?: string; bankAgency?: string; bankAccount?: string }
+type FoundRow = { id: string; nome: string; cpf: string; valor: number; sheet: string; telefone?: string; cargo?: string; bankName?: string; bankAgency?: string; bankAccount?: string; pix?: string; isInvalidCpf?: boolean; nameMismatch?: boolean; dbName?: string }
+type MissingRow = { cpf: string; nome: string; valor: number; sheet: string; telefone?: string; cargo?: string; bankName?: string; bankAgency?: string; bankAccount?: string; pix?: string; isInvalidCpf?: boolean }
+type ExtraRow = { nome: string; cpfCnpj: string; valor: number; sheet: string; telefone?: string; cargo?: string; bankName?: string; bankAgency?: string; bankAccount?: string; pix?: string }
 type SheetSummary = { sheet: string; count: number; total: number }
 type PhoneUpdateRow = { id: string; nome: string; cpf: string; phoneInSheet: string }
-type AnalysisResult = { found: FoundRow[]; missing: MissingRow[]; extras: ExtraRow[]; total: number; sheetSummary: SheetSummary[]; duplicates?: string[]; crossAbaDuplicates?: string[]; phoneUpdates?: PhoneUpdateRow[] }
-type SheetDebug = { sheet: string; headers: string[]; totalRows: number; detected: { cpf: string | null; nome: string | null; valor: string | null; telefone: string | null; cargo: string | null } }
+type AnalysisResult = { found: FoundRow[]; missing: MissingRow[]; extras: ExtraRow[]; total: number; sheetSummary: SheetSummary[]; duplicates?: string[]; crossAbaDuplicates?: string[]; phoneUpdates?: PhoneUpdateRow[]; sheetsNeedingMapping?: SheetNeedingMapping[] }
+type SheetDebug = { sheet: string; headers: string[]; totalRows: number; detected: { cpf: string | null; nome: string | null; valor: string | null; telefone: string | null; cargo: string | null; banco: string | null; agencia: string | null; conta: string | null; pix: string | null } }
+type SheetNeedingMapping = { sheet: string; availableHeaders: string[]; undetected: string[] }
+type ColumnHints = Record<string, Record<string, string>> // { sheetName: { cpf?: col, nome?: col, valor?: col, "__none__" = remove } }
 
 type AnalyzedRow =
     | (FoundRow & { status: "found" })
@@ -116,8 +118,8 @@ export function FolhaPagamentoClient({
     const [isAddingExtra, setIsAddingExtra] = useState(false)
     const [isAddingSheet, setIsAddingSheet] = useState(false)
     const [newSheetName, setNewSheetName] = useState("")
-    const [manualForm, setManualForm] = useState({ nome: "", cpf: "", valor: "", sheet: "", id: "", telefone: "", cargo: "", bankName: "", bankAgency: "", bankAccount: "" })
-    const [extraForm, setExtraForm] = useState({ nome: "", cpfCnpj: "", valor: "", sheet: "", cargo: "" })
+    const [manualForm, setManualForm] = useState({ nome: "", cpf: "", valor: "", sheet: "", id: "", telefone: "", cargo: "", bankName: "", bankAgency: "", bankAccount: "", pix: "" })
+    const [extraForm, setExtraForm] = useState({ nome: "", cpfCnpj: "", valor: "", sheet: "", cargo: "", pix: "" })
     const [isSearchingCpf, setIsSearchingCpf] = useState(false)
 
     // AI chat
@@ -126,6 +128,13 @@ export function FolhaPagamentoClient({
     const [isAiOpen, setIsAiOpen] = useState(false)
     const [aiInput, setAiInput] = useState("")
     const aiChatEndRef = useRef<HTMLDivElement>(null)
+
+    // Column mapping (when backend can't detect columns automatically)
+    const [columnMappingSheets, setColumnMappingSheets] = useState<SheetNeedingMapping[] | null>(null)
+    const [columnHints, setColumnHints] = useState<ColumnHints>({})
+    // Column correction (post-analysis, user wants to fix wrong columns)
+    const [isColumnCorrectionOpen, setIsColumnCorrectionOpen] = useState(false)
+    const [correctionDraft, setCorrectionDraft] = useState<ColumnHints>({})
 
     // Sheet filter
     const [selectedSheet, setSelectedSheet] = useState<string | null>(null)
@@ -192,7 +201,7 @@ export function FolhaPagamentoClient({
         confirmAndAnalyze()
     }
 
-    async function confirmAndAnalyze() {
+    async function confirmAndAnalyze(hints?: ColumnHints) {
         if (!file) return
         setPhase("loading")
         setError(null)
@@ -203,9 +212,20 @@ export function FolhaPagamentoClient({
             fd.append("mes", mes)
             fd.append("ano", ano)
             fd.append("unidade", unidade)
+            const activeHints = hints ?? columnHints
+            if (Object.keys(activeHints).length > 0) {
+                fd.append("columnHints", JSON.stringify(activeHints))
+            }
             const res = await fetch("/api/folha/analyze", { method: "POST", body: fd })
             const data = await res.json()
             if (!res.ok) {
+                if (data.needsColumnMapping && data.sheetsNeedingMapping?.length > 0) {
+                    // Backend couldn't detect columns — ask the user to map them
+                    if (data.debug) setDebugInfo(data.debug as SheetDebug[])
+                    setColumnMappingSheets(data.sheetsNeedingMapping)
+                    setPhase("form")
+                    return
+                }
                 setError(data.error ?? "Erro ao analisar.")
                 if (data.debug) setDebugInfo(data.debug as SheetDebug[])
                 setPhase("form"); return
@@ -216,6 +236,10 @@ export function FolhaPagamentoClient({
             setViewFilter("GERAL")
             setPhoneUpdates(data.phoneUpdates ?? [])
             setDebugInfo(data.debug as SheetDebug[])
+            // Show column mapping dialog for any sheets that still need it (but analysis still ran for others)
+            if (data.sheetsNeedingMapping?.length > 0) {
+                setColumnMappingSheets(data.sheetsNeedingMapping)
+            }
             setPhase(data.missing.length > 0 ? "pending" : "result")
         } catch (e: any) {
             setError(e?.message ?? "Falha na conexão. Tente novamente.")
@@ -242,8 +266,8 @@ export function FolhaPagamentoClient({
 
         setRegistering(true)
         try {
-            await registerBatchFromPayroll(toRegister.map(({ cpf, nome, valor, telefone, cargo, bankName, bankAgency, bankAccount }) => ({
-                cpf, nome, valor, telefone, cargo, bankName, bankAgency, bankAccount
+            await registerBatchFromPayroll(toRegister.map(({ cpf, nome, valor, telefone, cargo, bankName, bankAgency, bankAccount, pix }) => ({
+                cpf, nome, valor, telefone, cargo, bankName, bankAgency, bankAccount, pix
             })), unidade)
             const fd = new FormData()
             fd.append("file", file!); fd.append("mes", mes); fd.append("ano", ano); fd.append("unidade", unidade)
@@ -290,9 +314,9 @@ export function FolhaPagamentoClient({
 
     function reset() {
         setMes(""); setAno(String(CURRENT_YEAR)); setUnidade(""); setFile(null)
-        setResult(null); setMissing([]); setPhase("form"); setError(null); setDebugInfo(null); setPhoneUpdates([])
-        setManualForm({ nome: "", cpf: "", valor: "", sheet: "", id: "", telefone: "", cargo: "", bankName: "", bankAgency: "", bankAccount: "" })
-        setExtraForm({ nome: "", cpfCnpj: "", valor: "", sheet: "", cargo: "" })
+        setResult(null); setMissing([]); setPhase("form"); setError(null); setDebugInfo(null); setPhoneUpdates([]); setColumnMappingSheets(null); setColumnHints({})
+        setManualForm({ nome: "", cpf: "", valor: "", sheet: "", id: "", telefone: "", cargo: "", bankName: "", bankAgency: "", bankAccount: "", pix: "" })
+        setExtraForm({ nome: "", cpfCnpj: "", valor: "", sheet: "", cargo: "", pix: "" })
         setNewSheetName(""); setAnalysisId(null)
     }
 
@@ -619,7 +643,7 @@ export function FolhaPagamentoClient({
         setIsSearchingCpf(true)
         try {
             const emp = await getEmployeeByCpf(manualForm.cpf)
-            if (emp) setManualForm(f => ({ ...f, nome: emp.name, id: emp.id, telefone: emp.phone || "", cargo: emp.position || "", bankName: emp.bankName || "", bankAgency: emp.bankAgency || "", bankAccount: emp.bankAccount || "" }))
+            if (emp) setManualForm(f => ({ ...f, nome: emp.name, id: emp.id, telefone: emp.phone || "", cargo: emp.position || "", bankName: emp.bankName || "", bankAgency: emp.bankAgency || "", bankAccount: emp.bankAccount || "", pix: emp.pixKey || "" }))
             else { setManualForm(f => ({ ...f, id: "" })); alert("Funcionário não encontrado.") }
         } finally { setIsSearchingCpf(false) }
     }
@@ -628,22 +652,22 @@ export function FolhaPagamentoClient({
         if (!manualForm.nome || !manualForm.cpf || !manualForm.valor || !manualForm.sheet) { alert("Preencha todos os campos"); return }
         const val = parseFloat(manualForm.valor.replace(",", ".")) || 0
         if (manualForm.id) {
-            const newRow: FoundRow = { id: manualForm.id, nome: manualForm.nome, cpf: manualForm.cpf.replace(/\D/g, ""), valor: val, sheet: manualForm.sheet, telefone: manualForm.telefone || undefined, cargo: manualForm.cargo || undefined, bankName: manualForm.bankName || undefined, bankAgency: manualForm.bankAgency || undefined, bankAccount: manualForm.bankAccount || undefined }
+            const newRow: FoundRow = { id: manualForm.id, nome: manualForm.nome, cpf: manualForm.cpf.replace(/\D/g, ""), valor: val, sheet: manualForm.sheet, telefone: manualForm.telefone || undefined, cargo: manualForm.cargo || undefined, bankName: manualForm.bankName || undefined, bankAgency: manualForm.bankAgency || undefined, bankAccount: manualForm.bankAccount || undefined, pix: manualForm.pix || undefined }
             if (result) { const r = { ...result }; r.found = [...r.found, newRow]; r.total += val; updateSheetSummary(r, manualForm.sheet, val); setResult(r) }
         } else {
-            const newRow: MissingRow = { nome: manualForm.nome, cpf: manualForm.cpf.replace(/\D/g, ""), valor: val, sheet: manualForm.sheet, telefone: manualForm.telefone || undefined, bankName: manualForm.bankName || undefined, bankAgency: manualForm.bankAgency || undefined, bankAccount: manualForm.bankAccount || undefined }
+            const newRow: MissingRow = { nome: manualForm.nome, cpf: manualForm.cpf.replace(/\D/g, ""), valor: val, sheet: manualForm.sheet, telefone: manualForm.telefone || undefined, bankName: manualForm.bankName || undefined, bankAgency: manualForm.bankAgency || undefined, bankAccount: manualForm.bankAccount || undefined, pix: manualForm.pix || undefined }
             setMissing(prev => [...prev, newRow])
             if (result) { const r = { ...result }; r.missing = [...r.missing, newRow]; r.total += val; updateSheetSummary(r, manualForm.sheet, val); setResult(r) }
         }
-        setManualForm({ nome: "", cpf: "", valor: "", sheet: manualForm.sheet, id: "", telefone: "", cargo: "", bankName: "", bankAgency: "", bankAccount: "" }); setIsAddingEmp(false)
+        setManualForm({ nome: "", cpf: "", valor: "", sheet: manualForm.sheet, id: "", telefone: "", cargo: "", bankName: "", bankAgency: "", bankAccount: "", pix: "" }); setIsAddingEmp(false)
     }
 
     function addManualExtra() {
         if (!extraForm.nome || !extraForm.cpfCnpj || !extraForm.valor || !extraForm.sheet) { alert("Preencha todos os campos"); return }
         const val = parseFloat(extraForm.valor.replace(",", ".")) || 0
-        const newRow: ExtraRow = { nome: extraForm.nome, cpfCnpj: extraForm.cpfCnpj, valor: val, sheet: extraForm.sheet, cargo: extraForm.cargo || undefined }
+        const newRow: ExtraRow = { nome: extraForm.nome, cpfCnpj: extraForm.cpfCnpj, valor: val, sheet: extraForm.sheet, cargo: extraForm.cargo || undefined, pix: extraForm.pix || undefined }
         if (result) { const r = { ...result }; r.extras = [...(r.extras || []), newRow]; r.total += val; updateSheetSummary(r, extraForm.sheet, val); setResult(r) }
-        setExtraForm({ nome: "", cpfCnpj: "", valor: "", sheet: extraForm.sheet, cargo: "" }); setIsAddingExtra(false)
+        setExtraForm({ nome: "", cpfCnpj: "", valor: "", sheet: extraForm.sheet, cargo: "", pix: "" }); setIsAddingExtra(false)
     }
 
     function updateSheetSummary(res: AnalysisResult, sheet: string, val: number) {
@@ -1073,6 +1097,33 @@ export function FolhaPagamentoClient({
                                     <span className="text-sm font-bold text-blue-600">{fmtBRL(result.total)}</span>
                                 </div>
 
+                                {/* Corrigir colunas */}
+                                {debugInfo && debugInfo.length > 0 && (
+                                    <button
+                                        onClick={() => {
+                                            // Pre-populate draft with current detected values
+                                            const draft: ColumnHints = {}
+                                            for (const s of debugInfo) {
+                                                draft[s.sheet] = {
+                                                    nome:     columnHints[s.sheet]?.nome     ?? s.detected.nome     ?? "",
+                                                    valor:    columnHints[s.sheet]?.valor    ?? s.detected.valor    ?? "",
+                                                    cpf:      columnHints[s.sheet]?.cpf      ?? s.detected.cpf      ?? "",
+                                                    telefone: columnHints[s.sheet]?.telefone ?? s.detected.telefone ?? "",
+                                                    cargo:    columnHints[s.sheet]?.cargo    ?? s.detected.cargo    ?? "",
+                                                    banco:    columnHints[s.sheet]?.banco    ?? s.detected.banco    ?? "",
+                                                    agencia:  columnHints[s.sheet]?.agencia  ?? s.detected.agencia  ?? "",
+                                                    conta:    columnHints[s.sheet]?.conta    ?? s.detected.conta    ?? "",
+                                                    pix:      columnHints[s.sheet]?.pix      ?? s.detected.pix      ?? "",
+                                                }
+                                            }
+                                            setCorrectionDraft(draft)
+                                            setIsColumnCorrectionOpen(true)
+                                        }}
+                                        className="flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100 transition-colors"
+                                    >
+                                        <Edit className="h-3.5 w-3.5" /> Corrigir colunas
+                                    </button>
+                                )}
 
                                 {/* Fechar Unidade */}
                                 <button
@@ -1268,6 +1319,7 @@ export function FolhaPagamentoClient({
                                             <th className="px-5 py-3">Colaborador</th>
                                             <th className="px-5 py-3">ABA</th>
                                             <th className="px-5 py-3">Dados Bancários</th>
+                                            <th className="px-5 py-3 text-left border-l border-slate-100 italic font-medium text-blue-500">Pix</th>
                                             <th className="px-5 py-3 text-right">Valor Líquido</th>
                                             <th className="px-5 py-3">Status</th>
                                             <th className="px-5 py-3 text-right">Ações</th>
@@ -1341,6 +1393,15 @@ export function FolhaPagamentoClient({
                                                         <span className="text-slate-300 italic text-[11px]">Não informado</span>
                                                     )}
                                                 </td>
+                                                <td className="px-5 py-3 border-l border-slate-50">
+                                                    {row.pix ? (
+                                                        <span className="font-mono text-[11px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-md truncate max-w-[150px] block" title={row.pix}>
+                                                            {row.pix}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-slate-300 italic text-[11px]">Não inf.</span>
+                                                    )}
+                                                </td>
                                                 <td className="px-5 py-3 text-right font-bold text-slate-800">{fmtBRL(row.valor)}</td>
                                                 <td className="px-5 py-3">
                                                     {row.status === "found"
@@ -1400,6 +1461,146 @@ export function FolhaPagamentoClient({
                 </div>
             </div>
 
+            {/* ─── Column Correction dialog (post-analysis) ─── */}
+            <Dialog open={isColumnCorrectionOpen} onOpenChange={setIsColumnCorrectionOpen}>
+                <DialogContent className="max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Edit className="h-5 w-5 text-amber-500" /> Corrigir mapeamento de colunas
+                        </DialogTitle>
+                    </DialogHeader>
+                    <p className="text-sm text-muted-foreground">
+                        Selecione a coluna correta para cada campo ou escolha <strong>"Não existe"</strong> para remover o mapeamento.
+                        A planilha será reanalisada ao confirmar.
+                    </p>
+                    <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+                        {(debugInfo ?? []).map((sheetInfo) => {
+                            const sheetDraft = correctionDraft[sheetInfo.sheet] ?? {}
+                            const nonEmptyHeaders = sheetInfo.headers.filter(h => h.trim() !== "")
+                            const FIELDS: { key: string; label: string; critical?: boolean }[] = [
+                                { key: "nome",     label: "Nome do funcionário", critical: true },
+                                { key: "valor",    label: "Valor / Salário",     critical: true },
+                                { key: "cpf",      label: "CPF / Documento",     critical: true },
+                                { key: "telefone", label: "Telefone" },
+                                { key: "cargo",    label: "Cargo / Função" },
+                                { key: "banco",    label: "Banco" },
+                                { key: "agencia",  label: "Agência" },
+                                { key: "conta",    label: "Conta" },
+                                { key: "pix",      label: "Chave PIX" },
+                            ]
+                            return (
+                                <div key={sheetInfo.sheet} className="rounded-lg border p-3 space-y-3">
+                                    <p className="text-sm font-semibold flex items-center gap-1.5">
+                                        <FileSpreadsheet className="h-3.5 w-3.5 text-blue-500" />
+                                        Aba: <span className="text-blue-600">{sheetInfo.sheet}</span>
+                                    </p>
+                                    <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                                        {FIELDS.map(({ key, label, critical }) => (
+                                            <div key={key} className="space-y-0.5">
+                                                <Label className="text-xs flex items-center gap-1">
+                                                    {label}
+                                                    {critical && <span className="text-red-400">*</span>}
+                                                </Label>
+                                                <Select
+                                                    value={sheetDraft[key] ?? ""}
+                                                    onValueChange={(val) => setCorrectionDraft(prev => ({
+                                                        ...prev,
+                                                        [sheetInfo.sheet]: { ...(prev[sheetInfo.sheet] ?? {}), [key]: val }
+                                                    }))}
+                                                >
+                                                    <SelectTrigger className="h-8 text-xs">
+                                                        <SelectValue placeholder="— não mapeado —" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="__none__" className="text-slate-400 italic">Não existe (remover)</SelectItem>
+                                                        {nonEmptyHeaders.map(h => (
+                                                            <SelectItem key={h} value={h}>{h}</SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )
+                        })}
+                    </div>
+                    <DialogFooter className="gap-2">
+                        <Button variant="outline" onClick={() => setIsColumnCorrectionOpen(false)}>Cancelar</Button>
+                        <Button
+                            className="bg-amber-500 hover:bg-amber-600 text-white"
+                            onClick={() => {
+                                const hints = { ...correctionDraft }
+                                setColumnHints(hints)
+                                setIsColumnCorrectionOpen(false)
+                                confirmAndAnalyze(hints)
+                            }}
+                        >
+                            Reanalisar com correções
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* ─── Column Mapping dialog ─── */}
+            <Dialog open={!!columnMappingSheets} onOpenChange={(open) => { if (!open) setColumnMappingSheets(null) }}>
+                <DialogContent className="max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <AlertTriangle className="h-5 w-5 text-amber-500" /> Mapeamento de colunas necessário
+                        </DialogTitle>
+                    </DialogHeader>
+                    <p className="text-sm text-muted-foreground">
+                        Não foi possível identificar automaticamente as colunas de algumas abas. Selecione abaixo qual coluna corresponde a cada campo:
+                    </p>
+                    <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+                        {(columnMappingSheets ?? []).map((sheetInfo) => {
+                            const sheetHints = columnHints[sheetInfo.sheet] ?? {}
+                            const FIELD_LABELS: Record<string, string> = { nome: "Nome do funcionário", valor: "Valor / Salário", cpf: "CPF / Documento" }
+                            return (
+                                <div key={sheetInfo.sheet} className="rounded-lg border p-3 space-y-3">
+                                    <p className="text-sm font-semibold">Aba: <span className="text-blue-600">{sheetInfo.sheet}</span></p>
+                                    {sheetInfo.undetected.map(field => (
+                                        <div key={field} className="space-y-1">
+                                            <Label className="text-xs">{FIELD_LABELS[field] ?? field}</Label>
+                                            <Select
+                                                value={sheetHints[field] ?? ""}
+                                                onValueChange={(val) => setColumnHints(prev => ({
+                                                    ...prev,
+                                                    [sheetInfo.sheet]: { ...(prev[sheetInfo.sheet] ?? {}), [field]: val }
+                                                }))}
+                                            >
+                                                <SelectTrigger className="h-8 text-sm">
+                                                    <SelectValue placeholder="Selecione a coluna..." />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {sheetInfo.availableHeaders.filter(h => h).map(h => (
+                                                        <SelectItem key={h} value={h}>{h}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    ))}
+                                </div>
+                            )
+                        })}
+                    </div>
+                    <DialogFooter className="gap-2">
+                        <Button variant="outline" onClick={() => setColumnMappingSheets(null)}>Cancelar</Button>
+                        <Button
+                            className="bg-blue-600 hover:bg-blue-700"
+                            onClick={() => {
+                                const hints = { ...columnHints }
+                                setColumnMappingSheets(null)
+                                confirmAndAnalyze(hints)
+                            }}
+                        >
+                            Reanalisar com mapeamento
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
             {/* ─── Confirmation modal ─── */}
             <Dialog open={phase === "confirm"} onOpenChange={(open) => { if (!open) setPhase("form") }}>
                 <DialogContent>
@@ -1426,7 +1627,7 @@ export function FolhaPagamentoClient({
                     </div>
                     <DialogFooter className="gap-2">
                         <Button variant="outline" onClick={() => setPhase("form")}>Corrigir</Button>
-                        <Button onClick={confirmAndAnalyze} className="bg-blue-600 hover:bg-blue-700 gap-2">
+                        <Button onClick={() => confirmAndAnalyze()} className="bg-blue-600 hover:bg-blue-700 gap-2">
                             Confirmar e analisar <ChevronRight className="h-4 w-4" />
                         </Button>
                     </DialogFooter>
@@ -1476,6 +1677,10 @@ export function FolhaPagamentoClient({
                                 <Label>Conta (Opcional)</Label>
                                 <Input placeholder="00000-0" value={manualForm.bankAccount} onChange={e => setManualForm(f => ({ ...f, bankAccount: e.target.value }))} />
                             </div>
+                            <div className="space-y-2">
+                                <Label>PIX (Opcional)</Label>
+                                <Input placeholder="Chave PIX" value={manualForm.pix} onChange={e => setManualForm(f => ({ ...f, pix: e.target.value }))} />
+                            </div>
                         </div>
                         <div className="space-y-2">
                             <Label>Aba</Label>
@@ -1513,6 +1718,10 @@ export function FolhaPagamentoClient({
                             <div className="space-y-2">
                                 <Label>Cargo (Opcional)</Label>
                                 <Input placeholder="Ex: Consultor" value={extraForm.cargo} onChange={e => setExtraForm(f => ({ ...f, cargo: e.target.value }))} />
+                            </div>
+                            <div className="space-y-2">
+                                <Label>PIX (Opcional)</Label>
+                                <Input placeholder="Chave PIX" value={extraForm.pix || ""} onChange={e => setExtraForm(f => ({ ...f, pix: e.target.value }))} />
                             </div>
                         </div>
                         <div className="space-y-2">
