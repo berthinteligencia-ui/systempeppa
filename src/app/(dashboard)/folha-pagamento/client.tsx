@@ -765,20 +765,13 @@ export function FolhaPagamentoClient({
     function handleExportExcel() {
         if (!result) return
         const wb = XLSX.utils.book_new()
-        const rowsToExport = filteredRows
 
+        // ── Exportação específica Banco do Brasil ─────────────────────────────
         if (viewFilter === "BANCO DO BRASIL") {
-            const aoa = [
-                ["CPF", "Agência com DV", "Conta com DV", "Valor"]
-            ]
-            rowsToExport.forEach(r => {
+            const aoa: any[][] = [["CPF", "Agência com DV", "Conta com DV", "Valor"]]
+            filteredRows.forEach(r => {
                 const cpfBB = r.cpf.length === 11 ? r.cpf.substring(0, 9) + "-" + r.cpf.substring(9) : r.cpf
-                aoa.push([
-                    cpfBB,
-                    r.bankAgency || "",
-                    (r.bankAccount || "").replace(/\./g, ""),
-                    r.valor.toFixed(2).replace(".", ",")
-                ])
+                aoa.push([cpfBB, r.bankAgency || "", (r.bankAccount || "").replace(/\./g, ""), r.valor.toFixed(2).replace(".", ",")])
             })
             const ws = XLSX.utils.aoa_to_sheet(aoa)
             ws["!cols"] = [{ wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 15 }]
@@ -786,45 +779,47 @@ export function FolhaPagamentoClient({
             XLSX.writeFile(wb, `folha-bb-${mes}-${ano}.xlsx`)
             return
         }
-        
-        // Agrupa por nome da aba original baseado na visão atual
-        const sheetNames = Array.from(new Set(rowsToExport.map(r => r.sheet))).sort()
-        
+
+        // ── Abas de dados (uma por aba da planilha original) ─────────────────
+        // Usa sempre todos os resultRows (não apenas filteredRows) para a exportação geral
+        const allExportRows = viewFilter === "EXCLUIDOS" ? [] : resultRows
+        const sheetNames = Array.from(new Set(allExportRows.map(r => r.sheet))).sort()
+
         const usedNames = new Set<string>()
         sheetNames.forEach(sheetName => {
-            const rowsInSheet = rowsToExport.filter(r => r.sheet === sheetName)
+            const rowsInSheet = allExportRows.filter(r => r.sheet === sheetName)
             if (rowsInSheet.length === 0) return
 
             const totalInSheet = rowsInSheet.reduce((acc, r) => acc + r.valor, 0)
-            
+
             const data = rowsInSheet.map(r => ({
                 "Nome": r.nome,
-                "CPF": r.cpf,
-                "ABA": unidadeLabel || r.sheet,
+                "CPF": fmtCpf(r.cpf),
+                "Status": r.status === "found" ? "Cadastrado" : r.status === "missing" ? "Não cadastrado" : "Sem CPF",
                 "Banco": r.bankName || "—",
                 "Agência": r.bankAgency || "—",
                 "Conta": r.bankAccount || "—",
                 "PIX": r.pix || "—",
-                "Salário Líquido": r.valor
+                "Salário Líquido": r.valor,
+                "Aba Origem": r.sheet,
             }))
 
-            // Adiciona linha de total no final de cada aba
             data.push({
-                "Nome": "TOTAL DA ABA",
+                "Nome": "TOTAL",
                 "CPF": "",
-                "ABA": "",
+                "Status": "",
                 "Banco": "",
                 "Agência": "",
                 "Conta": "",
                 "PIX": "",
-                "Salário Líquido": totalInSheet
+                "Salário Líquido": totalInSheet,
+                "Aba Origem": "",
             } as any)
 
             const ws = XLSX.utils.json_to_sheet(data)
-            ws["!cols"] = [{ wch: 40 }, { wch: 15 }, { wch: 20 }, { wch: 15 }, { wch: 10 }, { wch: 15 }, { wch: 25 }, { wch: 15 }]
-            
-            // Excel limita nomes de abas a 31 caracteres e proíbe certos caracteres
-            let baseName = (sheetName || "Geral").substring(0, 31).replace(/[\[\]\?\*\/\\\:]/g, "")
+            ws["!cols"] = [{ wch: 40 }, { wch: 16 }, { wch: 16 }, { wch: 22 }, { wch: 12 }, { wch: 16 }, { wch: 28 }, { wch: 16 }, { wch: 16 }]
+
+            let baseName = (sheetName || "Geral").substring(0, 31).replace(/[\[\]?*/\\:]/g, "")
             let finalName = baseName
             let counter = 1
             while (usedNames.has(finalName)) {
@@ -835,6 +830,30 @@ export function FolhaPagamentoClient({
             usedNames.add(finalName)
             XLSX.utils.book_append_sheet(wb, ws, finalName)
         })
+
+        // ── Aba "Motivo" — funcionários excluídos com observação ─────────────
+        if (excludedRows.length > 0) {
+            const motivoData = excludedRows.map(r => ({
+                "Nome": r.nome,
+                "CPF": fmtCpf(r.cpf),
+                "Aba Origem": r.sheet,
+                "Salário Líquido": r.valor,
+                "Motivo / Observação": (r as ExcludedRow).observacao || "Sem motivo informado",
+            }))
+
+            const totalExcluido = excludedRows.reduce((acc, r) => acc + r.valor, 0)
+            motivoData.push({
+                "Nome": "TOTAL EXCLUÍDO",
+                "CPF": "",
+                "Aba Origem": "",
+                "Salário Líquido": totalExcluido,
+                "Motivo / Observação": "",
+            } as any)
+
+            const wsMotivo = XLSX.utils.json_to_sheet(motivoData)
+            wsMotivo["!cols"] = [{ wch: 40 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 50 }]
+            XLSX.utils.book_append_sheet(wb, wsMotivo, "Motivo")
+        }
 
         XLSX.writeFile(wb, `folha-analisada-${mes}-${ano}.xlsx`)
     }
