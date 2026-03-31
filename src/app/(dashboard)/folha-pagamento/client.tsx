@@ -762,11 +762,10 @@ export function FolhaPagamentoClient({
         setNewSheetName(""); setIsAddingSheet(false)
     }
 
-    function handleExportExcel() {
+    async function handleExportExcel() {
         if (!result) return
-        const wb = XLSX.utils.book_new()
 
-        // ── Exportação específica Banco do Brasil ─────────────────────────────
+        // ── Exportação específica Banco do Brasil (mantém xlsx simples) ───────
         if (viewFilter === "BANCO DO BRASIL") {
             const aoa: any[][] = [["CPF", "Agência com DV", "Conta com DV", "Valor"]]
             filteredRows.forEach(r => {
@@ -775,49 +774,49 @@ export function FolhaPagamentoClient({
             })
             const ws = XLSX.utils.aoa_to_sheet(aoa)
             ws["!cols"] = [{ wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 15 }]
+            const wb = XLSX.utils.book_new()
             XLSX.utils.book_append_sheet(wb, ws, "Banco do Brasil")
             XLSX.writeFile(wb, `folha-bb-${mes}-${ano}.xlsx`)
             return
         }
 
-        // ── Abas de dados (uma por aba da planilha original) ─────────────────
-        // Usa sempre todos os resultRows (não apenas filteredRows) para a exportação geral
+        // ── ExcelJS: cabeçalho amarelo + negrito + autofilter ─────────────────
+        const ExcelJS = (await import("exceljs")).default
+        const wb = new ExcelJS.Workbook()
+        wb.creator = "PepaCorp"
+        wb.created = new Date()
+
+        const HEADER_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } }
+        const HEADER_FONT: Partial<ExcelJS.Font> = { bold: true, size: 11 }
+        const TOTAL_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9D9D9" } }
+        const TOTAL_FONT: Partial<ExcelJS.Font> = { bold: true }
+
+        function styleHeaderRow(ws: ExcelJS.Worksheet, colCount: number) {
+            const row = ws.getRow(1)
+            row.font = HEADER_FONT
+            row.fill = HEADER_FILL
+            row.alignment = { vertical: "middle", horizontal: "center" }
+            row.height = 18
+            // AutoFilter across all header columns
+            ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: colCount } }
+        }
+
+        function styleTotalRow(ws: ExcelJS.Worksheet) {
+            const row = ws.getRow(ws.rowCount)
+            row.font = TOTAL_FONT
+            row.fill = TOTAL_FILL
+        }
+
+        // ── Abas de dados ─────────────────────────────────────────────────────
         const allExportRows = viewFilter === "EXCLUIDOS" ? [] : resultRows
         const sheetNames = Array.from(new Set(allExportRows.map(r => r.sheet))).sort()
 
         const usedNames = new Set<string>()
-        sheetNames.forEach(sheetName => {
+        for (const sheetName of sheetNames) {
             const rowsInSheet = allExportRows.filter(r => r.sheet === sheetName)
-            if (rowsInSheet.length === 0) return
+            if (rowsInSheet.length === 0) continue
 
             const totalInSheet = rowsInSheet.reduce((acc, r) => acc + r.valor, 0)
-
-            const data = rowsInSheet.map(r => ({
-                "Nome": r.nome,
-                "CPF": fmtCpf(r.cpf),
-                "Status": r.status === "found" ? "Cadastrado" : r.status === "missing" ? "Não cadastrado" : "Sem CPF",
-                "Banco": r.bankName || "—",
-                "Agência": r.bankAgency || "—",
-                "Conta": r.bankAccount || "—",
-                "PIX": r.pix || "—",
-                "Salário Líquido": r.valor,
-                "Aba Origem": r.sheet,
-            }))
-
-            data.push({
-                "Nome": "TOTAL",
-                "CPF": "",
-                "Status": "",
-                "Banco": "",
-                "Agência": "",
-                "Conta": "",
-                "PIX": "",
-                "Salário Líquido": totalInSheet,
-                "Aba Origem": "",
-            } as any)
-
-            const ws = XLSX.utils.json_to_sheet(data)
-            ws["!cols"] = [{ wch: 40 }, { wch: 16 }, { wch: 16 }, { wch: 22 }, { wch: 12 }, { wch: 16 }, { wch: 28 }, { wch: 16 }, { wch: 16 }]
 
             let baseName = (sheetName || "Geral").substring(0, 31).replace(/[\[\]?*/\\:]/g, "")
             let finalName = baseName
@@ -828,34 +827,81 @@ export function FolhaPagamentoClient({
                 counter++
             }
             usedNames.add(finalName)
-            XLSX.utils.book_append_sheet(wb, ws, finalName)
-        })
 
-        // ── Aba "Motivo" — funcionários excluídos com observação ─────────────
-        if (excludedRows.length > 0) {
-            const motivoData = excludedRows.map(r => ({
-                "Nome": r.nome,
-                "CPF": fmtCpf(r.cpf),
-                "Aba Origem": r.sheet,
-                "Salário Líquido": r.valor,
-                "Motivo / Observação": (r as ExcludedRow).observacao || "Sem motivo informado",
-            }))
+            const ws = wb.addWorksheet(finalName)
+            ws.columns = [
+                { header: "Nome",           key: "nome",    width: 42 },
+                { header: "CPF",            key: "cpf",     width: 18 },
+                { header: "Status",         key: "status",  width: 18 },
+                { header: "Banco",          key: "banco",   width: 24 },
+                { header: "Agência",        key: "agencia", width: 14 },
+                { header: "Conta",          key: "conta",   width: 18 },
+                { header: "PIX",            key: "pix",     width: 30 },
+                { header: "Salário Líquido",key: "valor",   width: 18 },
+                { header: "Aba Origem",     key: "aba",     width: 18 },
+            ]
 
-            const totalExcluido = excludedRows.reduce((acc, r) => acc + r.valor, 0)
-            motivoData.push({
-                "Nome": "TOTAL EXCLUÍDO",
-                "CPF": "",
-                "Aba Origem": "",
-                "Salário Líquido": totalExcluido,
-                "Motivo / Observação": "",
-            } as any)
+            rowsInSheet.forEach(r => {
+                ws.addRow({
+                    nome:   r.nome,
+                    cpf:    fmtCpf(r.cpf),
+                    status: r.status === "found" ? "Cadastrado" : r.status === "missing" ? "Não cadastrado" : "Sem CPF",
+                    banco:  r.bankName  || "—",
+                    agencia:r.bankAgency|| "—",
+                    conta:  r.bankAccount|| "—",
+                    pix:    r.pix       || "—",
+                    valor:  r.valor,
+                    aba:    r.sheet,
+                })
+            })
 
-            const wsMotivo = XLSX.utils.json_to_sheet(motivoData)
-            wsMotivo["!cols"] = [{ wch: 40 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 50 }]
-            XLSX.utils.book_append_sheet(wb, wsMotivo, "Motivo")
+            ws.addRow({ nome: "TOTAL", cpf: "", status: "", banco: "", agencia: "", conta: "", pix: "", valor: totalInSheet, aba: "" })
+
+            styleHeaderRow(ws, 9)
+            styleTotalRow(ws)
+
+            // Formata coluna Salário Líquido como moeda
+            ws.getColumn("valor").numFmt = '"R$"#,##0.00'
         }
 
-        XLSX.writeFile(wb, `folha-analisada-${mes}-${ano}.xlsx`)
+        // ── Aba "Motivo" ──────────────────────────────────────────────────────
+        if (excludedRows.length > 0) {
+            const wsMotivo = wb.addWorksheet("Motivo")
+            wsMotivo.columns = [
+                { header: "Nome",               key: "nome",    width: 42 },
+                { header: "CPF",                key: "cpf",     width: 18 },
+                { header: "Aba Origem",         key: "aba",     width: 18 },
+                { header: "Salário Líquido",    key: "valor",   width: 18 },
+                { header: "Motivo / Observação",key: "motivo",  width: 52 },
+            ]
+
+            excludedRows.forEach(r => {
+                wsMotivo.addRow({
+                    nome:   r.nome,
+                    cpf:    fmtCpf(r.cpf),
+                    aba:    r.sheet,
+                    valor:  r.valor,
+                    motivo: (r as ExcludedRow).observacao || "Sem motivo informado",
+                })
+            })
+
+            const totalExcluido = excludedRows.reduce((acc, r) => acc + r.valor, 0)
+            wsMotivo.addRow({ nome: "TOTAL EXCLUÍDO", cpf: "", aba: "", valor: totalExcluido, motivo: "" })
+
+            styleHeaderRow(wsMotivo, 5)
+            styleTotalRow(wsMotivo)
+            wsMotivo.getColumn("valor").numFmt = '"R$"#,##0.00'
+        }
+
+        // Gera e faz download
+        const buffer = await wb.xlsx.writeBuffer()
+        const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement("a")
+        a.href = url
+        a.download = `folha-analisada-${mes}-${ano}.xlsx`
+        a.click()
+        URL.revokeObjectURL(url)
     }
 
     const resultRows: AnalyzedRow[] = result
@@ -892,30 +938,36 @@ export function FolhaPagamentoClient({
         return { duplicateCpfSet: dupCpf, crossAbaDuplicateSet: crossDup, duplicateNomeSet: dupNome }
     }, [resultRows])
 
-    const sortedResultRows = useMemo(() => {
-        const sortFn = (a: AnalyzedRow, b: AnalyzedRow) => {
-            const isNameDupA = duplicateNomeSet.has(a.nome.toLowerCase().trim())
-            const isNameDupB = duplicateNomeSet.has(b.nome.toLowerCase().trim())
-            
-            const hasDivA = a.status !== "found" || !!(a as any).isInvalidCpf || (a.status === "found" && (a as any).nameMismatch) || duplicateCpfSet.has(`${a.sheet}::${a.cpf}`) || crossAbaDuplicateSet.has(a.cpf) || isNameDupA;
-            const hasDivB = b.status !== "found" || !!(b as any).isInvalidCpf || (b.status === "found" && (b as any).nameMismatch) || duplicateCpfSet.has(`${b.sheet}::${b.cpf}`) || crossAbaDuplicateSet.has(b.cpf) || isNameDupB;
+    // Priority: 0 = inconsistência (CPF inválido, dup, divergência, extra) → topo
+    //           1 = não cadastrado (missing sem outra inconsistência)
+    //           2 = cadastrado sem problemas → base
+    const rowPriority = useCallback((r: AnalyzedRow): number => {
+        const hasInconsistency =
+            !!(r as any).isInvalidCpf ||
+            (r.status === "found" && !!(r as FoundRow).nameMismatch) ||
+            duplicateCpfSet.has(`${r.sheet}::${r.cpf}`) ||
+            crossAbaDuplicateSet.has(r.cpf) ||
+            duplicateNomeSet.has(r.nome.toLowerCase().trim()) ||
+            r.status === "extra"
+        if (hasInconsistency) return 0
+        if (r.status === "missing") return 1
+        return 2
+    }, [duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet])
 
-            if (hasDivA && !hasDivB) return -1;
-            if (!hasDivA && hasDivB) return 1;
-            return a.nome.localeCompare(b.nome);
-        }
-        return [...resultRows].sort(sortFn);
-    }, [resultRows, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet])
+    const sortedResultRows = useMemo(() => {
+        return [...resultRows].sort((a, b) => {
+            const pa = rowPriority(a)
+            const pb = rowPriority(b)
+            if (pa !== pb) return pa - pb
+            return a.nome.localeCompare(b.nome)
+        })
+    }, [resultRows, rowPriority])
 
     const filteredRows = useMemo(() => {
         const sortFn = (a: AnalyzedRow, b: AnalyzedRow) => {
-            const isNameDupA = duplicateNomeSet.has(a.nome.toLowerCase().trim())
-            const isNameDupB = duplicateNomeSet.has(b.nome.toLowerCase().trim())
-            const hasDivA = a.status !== "found" || !!(a as any).isInvalidCpf || (a.status === "found" && (a as any).nameMismatch) || duplicateCpfSet.has(`${a.sheet}::${a.cpf}`) || crossAbaDuplicateSet.has(a.cpf) || isNameDupA;
-            const hasDivB = b.status !== "found" || !!(b as any).isInvalidCpf || (b.status === "found" && (b as any).nameMismatch) || duplicateCpfSet.has(`${b.sheet}::${b.cpf}`) || crossAbaDuplicateSet.has(b.cpf) || isNameDupB;
-            if (hasDivA && !hasDivB) return -1;
-            if (!hasDivA && hasDivB) return 1;
-            return a.nome.localeCompare(b.nome);
+            const pa = rowPriority(a), pb = rowPriority(b)
+            if (pa !== pb) return pa - pb
+            return a.nome.localeCompare(b.nome)
         }
 
         let base = viewFilter === "EXCLUIDOS" ? [...excludedRows].sort(sortFn) : sortedResultRows
