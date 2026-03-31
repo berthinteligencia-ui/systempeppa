@@ -3,6 +3,56 @@ import * as XLSX from "xlsx"
 import { getSupabaseAdmin } from "@/lib/supabase-admin"
 import { auth } from "@/lib/auth"
 
+// ── Bank name normalization ───────────────────────────────────────────────────
+
+const BANK_PATTERNS: [RegExp, string][] = [
+    [/bradesco/i,                                              "Bradesco"],
+    [/banco.?do.?brasil|^brasil$|^bb$|^001$/i,                "Banco do Brasil"],
+    [/nubank|nubanck|nu.?pagamentos|nupag|^0?260$/i,          "Nubank"],
+    [/caixa|cef|poupan.a.caixa|^104$/i,                      "Caixa Econômica Federal"],
+    [/santander|^033$/i,                                      "Santander"],
+    [/ita[uú]|^341$/i,                                        "Itaú"],
+    [/\binter\b|^077$/i,                                      "Banco Inter"],
+    [/\bnext\b/i,                                             "Next"],
+    [/\bneon\b/i,                                             "Neon"],
+    [/mercado.?pago/i,                                        "Mercado Pago"],
+    [/banco.?c6|c6.?bank|c6.?s\.?a|^c6$|^336$/i,            "Banco C6"],
+    [/pagbank|pagseguro|pakbank|^290$/i,                      "PagBank"],
+    [/nordeste|^004$/i,                                       "Banco do Nordeste"],
+    [/picpay|pic.?pay/i,                                      "PicPay"],
+    [/sicredi/i,                                              "Sicredi"],
+    [/sicoob/i,                                               "Sicoob"],
+    [/banco.?original|\boriginal\b|^212$/i,                   "Banco Original"],
+    [/safra|^422$/i,                                          "Banco Safra"],
+    [/btg.?pactual|^208$/i,                                   "BTG Pactual"],
+    [/\bxp\b|^102$/i,                                         "XP"],
+    [/\bstone\b|^197$/i,                                      "Stone"],
+    [/banrisul|^041$/i,                                       "Banrisul"],
+    [/unicred/i,                                              "Unicred"],
+    [/\bbs2\b|^218$/i,                                        "BS2"],
+    [/will.?bank/i,                                           "Will Bank"],
+    [/agi.?bank|agibank/i,                                    "Agibank"],
+    [/creditas/i,                                             "Creditas"],
+    [/banco.?pan|\bpan\b|^623$/i,                             "Banco Pan"],
+    [/modal|^746$/i,                                          "Banco Modal"],
+    [/c2.?bank/i,                                             "C2 Bank"],
+    [/^380$|limebank/i,                                       "PicPay Bank"],
+    [/votorantim|^655$/i,                                     "Banco Votorantim"],
+    [/daycoval|^707$/i,                                       "Banco Daycoval"],
+]
+
+function normalizeBankName(raw: string | undefined | null): string | undefined {
+    if (!raw || raw.trim() === "") return undefined
+    const s = raw.trim()
+    // Looks like account number (CC:, C/C:, or pure digits/dashes)
+    if (/^(cc:|c\/c:|conta |ag\.)/i.test(s)) return undefined
+    if (/^\d[\d.\-/\s]*\d$/.test(s)) return undefined
+    for (const [pattern, canonical] of BANK_PATTERNS) {
+        if (pattern.test(s)) return canonical
+    }
+    return s // keep original if unrecognized — do not discard
+}
+
 // ── CPF helpers ───────────────────────────────────────────────────────────────
 
 
@@ -333,7 +383,7 @@ export async function POST(req: NextRequest) {
                 const cargoRaw = cargoIdx !== -1 ? String(row[headers[cargoIdx]] ?? "").trim() : ""
                 const cargo = (cargoRaw && looksLikeProfession(cargoRaw)) ? toTitleCase(cargoRaw) : undefined
 
-                const bankName = bancoIdx !== -1 ? String(row[headers[bancoIdx]] ?? "").trim() : undefined
+                const bankName = bancoIdx !== -1 ? normalizeBankName(String(row[headers[bancoIdx]] ?? "")) : undefined
                 const bankAgency = agenciaIdx !== -1 ? String(row[headers[agenciaIdx]] ?? "").trim() : undefined
                 const bankAccount = contaIdx !== -1 ? String(row[headers[contaIdx]] ?? "").trim().replace(/\./g, "") : undefined
                 const pix = pixIdx !== -1 ? String(row[headers[pixIdx]] ?? "").trim() : undefined
@@ -428,7 +478,7 @@ export async function POST(req: NextRequest) {
                     sheet: r.sheet,
                     telefone: e.phone || r.telefone,
                     cargo: e.position || r.cargo,
-                    bankName: e.bankName || r.bankName,
+                    bankName: normalizeBankName(e.bankName || r.bankName),
                     bankAgency: e.bankAgency || r.bankAgency,
                     bankAccount: e.bankAccount || r.bankAccount,
                     pix: e.pixKey || r.pix,

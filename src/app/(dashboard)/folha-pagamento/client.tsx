@@ -42,6 +42,7 @@ type AnalysisResult = { found: FoundRow[]; missing: MissingRow[]; extras: ExtraR
 type SheetDebug = { sheet: string; headers: string[]; totalRows: number; detected: { cpf: string | null; nome: string | null; valor: string | null; telefone: string | null; cargo: string | null; banco: string | null; agencia: string | null; conta: string | null; pix: string | null } }
 type SheetNeedingMapping = { sheet: string; availableHeaders: string[]; undetected: string[] }
 type ColumnHints = Record<string, Record<string, string>> // { sheetName: { cpf?: col, nome?: col, valor?: col, "__none__" = remove } }
+type ExcludedRow = AnalyzedRow & { observacao: string }
 
 type AnalyzedRow =
     | (FoundRow & { status: "found" })
@@ -84,6 +85,59 @@ function fmtFile(b: number) {
 function fmtDate(d: Date | string) {
     const dt = new Date(d)
     return dt.toLocaleDateString("pt-BR")
+}
+
+// ─── Bank name normalization ──────────────────────────────────────────────────
+// Maps raw bank name strings (from spreadsheets) to canonical bank names.
+// Variations like "BRASIL", "BANCO DO BRASIL", "BB" all map to "Banco do Brasil".
+// Strings that look like account numbers (CC: 12345-6) → "Não identificado".
+
+const BANK_PATTERNS: [RegExp, string][] = [
+    [/bradesco/i,                                                   "Bradesco"],
+    [/banco.?do.?brasil|^brasil$|^bb$|^001$/i,                     "Banco do Brasil"],
+    [/nubank|nubanck|nu.?pagamentos|nupag|^0?260$/i,               "Nubank"],
+    [/caixa|cef|poupan.a.caixa|^104$/i,                           "Caixa Econômica Federal"],
+    [/santander|^033$/i,                                           "Santander"],
+    [/ita[uú]|^341$/i,                                             "Itaú"],
+    [/\binter\b|^077$/i,                                           "Banco Inter"],
+    [/\bnext\b/i,                                                  "Next"],
+    [/\bneon\b/i,                                                  "Neon"],
+    [/mercado.?pago/i,                                             "Mercado Pago"],
+    [/banco.?c6|c6.?bank|c6.?s\.?a|^c6$|^336$/i,                 "Banco C6"],
+    [/pagbank|pagseguro|pakbank|^290$/i,                           "PagBank"],
+    [/nordeste|^004$/i,                                            "Banco do Nordeste"],
+    [/picpay|pic.?pay/i,                                           "PicPay"],
+    [/sicredi/i,                                                   "Sicredi"],
+    [/sicoob/i,                                                    "Sicoob"],
+    [/banco.?original|\boriginal\b|^212$/i,                        "Banco Original"],
+    [/safra|^422$/i,                                               "Banco Safra"],
+    [/btg.?pactual|^208$/i,                                        "BTG Pactual"],
+    [/\bxp\b|^102$/i,                                              "XP"],
+    [/\bstone\b|^197$/i,                                           "Stone"],
+    [/banrisul|^041$/i,                                            "Banrisul"],
+    [/unicred/i,                                                   "Unicred"],
+    [/\bbs2\b|^218$/i,                                             "BS2"],
+    [/will.?bank/i,                                                "Will Bank"],
+    [/agi.?bank|agibank/i,                                         "Agibank"],
+    [/creditas/i,                                                  "Creditas"],
+    [/banco.?pan|\bpan\b|^623$/i,                                  "Banco Pan"],
+    [/modal|^746$/i,                                               "Banco Modal"],
+    [/c2.?bank/i,                                                  "C2 Bank"],
+    [/^380$|limebank/i,                                            "PicPay Bank"],
+    [/votorantim|^655$/i,                                          "Banco Votorantim"],
+    [/daycoval|^707$/i,                                            "Banco Daycoval"],
+]
+
+function normalizeBankName(raw: string | undefined | null): string {
+    if (!raw || raw.trim() === "") return "Não informado"
+    const s = raw.trim()
+    // Looks like an account number (CC:, C/C:, or pure number with digits/dashes/dots)
+    if (/^(cc:|c\/c:|conta |ag\.|agencia)/i.test(s)) return "Não identificado"
+    if (/^\d[\d.\-/\s]*\d$/.test(s)) return "Não identificado"
+    for (const [pattern, canonical] of BANK_PATTERNS) {
+        if (pattern.test(s)) return canonical
+    }
+    return "Não identificado"
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -147,7 +201,9 @@ export function FolhaPagamentoClient({
     const [isLoadingHistory, setIsLoadingHistory] = useState(false)
     const [historyFilterUnit, setHistoryFilterUnit] = useState<string | null>(null)
     const [viewFilter, setViewFilter] = useState("GERAL")
-    const [excludedRows, setExcludedRows] = useState<AnalyzedRow[]>([])
+    const [excludedRows, setExcludedRows] = useState<ExcludedRow[]>([])
+    const [pendingExclude, setPendingExclude] = useState<{ row: AnalyzedRow; autoReason: string } | null>(null)
+    const [excludeReasonInput, setExcludeReasonInput] = useState("")
 
     const searchParams = useSearchParams()
     const router = useRouter()
@@ -320,10 +376,20 @@ export function FolhaPagamentoClient({
         setNewSheetName(""); setAnalysisId(null)
     }
 
-    function handleDeleteRow(row: AnalyzedRow) {
-        if (!result) return
-        if (!confirm(`Deseja realmente excluir a linha de "${row.nome}"?`)) return
+    function detectExcludeReason(row: AnalyzedRow): string {
+        const reasons: string[] = []
+        if ((row as any).isInvalidCpf)  reasons.push("CPF inválido")
+        if (row.status === "found" && (row as FoundRow).nameMismatch) reasons.push("Divergência de nome")
+        if (duplicateCpfSet.has(`${row.sheet}::${row.cpf}`))  reasons.push("Duplicado na mesma aba")
+        if (crossAbaDuplicateSet.has(row.cpf))                reasons.push("Duplicado entre abas")
+        if (row.status === "extra")      reasons.push("Sem CPF cadastrado")
+        if (row.status === "missing")    reasons.push("Não cadastrado no sistema")
+        if (row.valor === 0)             reasons.push("Valor zerado")
+        return reasons.join(", ")
+    }
 
+    function doExcludeRow(row: AnalyzedRow, observacao: string) {
+        if (!result) return
         const newResult = { ...result }
         let newMissing = [...missing]
 
@@ -340,8 +406,7 @@ export function FolhaPagamentoClient({
             if (idx !== -1) newResult.extras.splice(idx, 1)
         }
 
-        // Add to excluded list
-        setExcludedRows(prev => [...prev, { ...row, status: "excluded" as any }])
+        setExcludedRows(prev => [...prev, { ...row, status: "excluded" as any, observacao }])
 
         // Update total
         newResult.total -= row.valor
@@ -367,6 +432,20 @@ export function FolhaPagamentoClient({
 
         setResult(newResult)
         setMissing(newMissing)
+    }
+
+    function handleDeleteRow(row: AnalyzedRow) {
+        if (!result) return
+        const autoReason = detectExcludeReason(row)
+        if (autoReason) {
+            // Has an auto-detected reason — confirm and proceed
+            if (!confirm(`Excluir "${row.nome}"?\nMotivo detectado: ${autoReason}`)) return
+            doExcludeRow(row, autoReason)
+        } else {
+            // No auto reason — ask the user
+            setExcludeReasonInput("")
+            setPendingExclude({ row, autoReason: "" })
+        }
     }
 
     function handleMergeDuplicates(cpf: string) {
@@ -534,7 +613,7 @@ export function FolhaPagamentoClient({
                 
                 if (newFound.length < beforeFound || newMissing.length < beforeMissing || newExtras.length < beforeExtras) {
                     count++
-                    setExcludedRows(prev => [...prev, ...[...removedFound, ...removedMissing].map(r => ({ ...r, status: "excluded" as any })), ...removedExtras.map((r: any) => ({ ...r, cpf: r.cpfCnpj ?? "", status: "excluded" as any }))])
+                    setExcludedRows(prev => [...prev, ...[...removedFound, ...removedMissing].map(r => ({ ...r, status: "excluded" as any, observacao: "Removido pela IA" })), ...removedExtras.map((r: any) => ({ ...r, cpf: r.cpfCnpj ?? "", status: "excluded" as any, observacao: "Removido pela IA" }))])
                 }
             } else if (action.type === "update_field") {
                 const val = action.field === "valor" ? parseFloat(action.newValue) : action.newValue
@@ -822,6 +901,8 @@ export function FolhaPagamentoClient({
         
         if (viewFilter === "BANCO") {
             base = sortedResultRows.filter(r => r.bankName && r.bankName !== "—")
+        } else if (viewFilter === "NAO_IDENTIFICADO") {
+            base = sortedResultRows.filter(r => normalizeBankName(r.bankName) === "Não identificado")
         } else if (viewFilter === "CAIXA") {
             base = sortedResultRows.filter(r => (r.bankName || "").toUpperCase().startsWith("CAIXA"))
         } else if (viewFilter !== "GERAL" && viewFilter !== "EXCLUIDOS") {
@@ -852,7 +933,7 @@ export function FolhaPagamentoClient({
         if (!result) return []
         const counts: Record<string, { count: number; total: number }> = {}
         resultRows.forEach(r => {
-            const bank = r.bankName || "Não informado"
+            const bank = normalizeBankName(r.bankName)
             if (!counts[bank]) counts[bank] = { count: 0, total: 0 }
             counts[bank].count++
             counts[bank].total += r.valor
@@ -1145,6 +1226,7 @@ export function FolhaPagamentoClient({
                                         { value: "GERAL", label: "Geral" },
                                         { value: "EXCLUIDOS", label: "Excluídos" },
                                         { value: "BANCO", label: "Banco (Todos)" },
+                                        { value: "NAO_IDENTIFICADO", label: "Banco não identificado" },
                                         { value: "MENTORE", label: "Mentore" },
                                         { value: "BANCO DO BRASIL", label: "Banco do Brasil" },
                                         { value: "CAIXA", label: "Caixa" },
@@ -1318,8 +1400,11 @@ export function FolhaPagamentoClient({
                                         <tr className="border-b bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                                             <th className="px-5 py-3">Colaborador</th>
                                             <th className="px-5 py-3">ABA</th>
-                                            <th className="px-5 py-3">Dados Bancários</th>
-                                            <th className="px-5 py-3 text-left border-l border-slate-100 italic font-medium text-blue-500">Pix</th>
+                                            {viewFilter === "EXCLUIDOS"
+                                                ? <th className="px-5 py-3 text-amber-600">Observação / Motivo</th>
+                                                : <><th className="px-5 py-3">Dados Bancários</th>
+                                                    <th className="px-5 py-3 text-left border-l border-slate-100 italic font-medium text-blue-500">Pix</th></>
+                                            }
                                             <th className="px-5 py-3 text-right">Valor Líquido</th>
                                             <th className="px-5 py-3">Status</th>
                                             <th className="px-5 py-3 text-right">Ações</th>
@@ -1383,25 +1468,39 @@ export function FolhaPagamentoClient({
                                                         {row.sheet}
                                                     </span>
                                                 </td>
-                                                <td className="px-5 py-3 text-xs text-slate-500">
-                                                    {(row.bankName || row.bankAgency || row.bankAccount) ? (
-                                                        <div className="flex flex-col">
-                                                            <span className="font-medium text-slate-700">{row.bankName || "—"}</span>
-                                                            <span className="text-[10px]">Ag: {row.bankAgency || "—"} | Cc: {row.bankAccount || "—"}</span>
-                                                        </div>
-                                                    ) : (
-                                                        <span className="text-slate-300 italic text-[11px]">Não informado</span>
-                                                    )}
-                                                </td>
-                                                <td className="px-5 py-3 border-l border-slate-50">
-                                                    {row.pix ? (
-                                                        <span className="font-mono text-[11px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-md truncate max-w-[150px] block" title={row.pix}>
-                                                            {row.pix}
-                                                        </span>
-                                                    ) : (
-                                                        <span className="text-slate-300 italic text-[11px]">Não inf.</span>
-                                                    )}
-                                                </td>
+                                                {viewFilter === "EXCLUIDOS" ? (
+                                                    <td className="px-5 py-3 max-w-[260px]">
+                                                        {(row as ExcludedRow).observacao ? (
+                                                            <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 block">
+                                                                {(row as ExcludedRow).observacao}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-slate-300 italic text-[11px]">Sem observação</span>
+                                                        )}
+                                                    </td>
+                                                ) : (
+                                                    <>
+                                                        <td className="px-5 py-3 text-xs text-slate-500">
+                                                            {(row.bankName || row.bankAgency || row.bankAccount) ? (
+                                                                <div className="flex flex-col">
+                                                                    <span className="font-medium text-slate-700">{row.bankName || "—"}</span>
+                                                                    <span className="text-[10px]">Ag: {row.bankAgency || "—"} | Cc: {row.bankAccount || "—"}</span>
+                                                                </div>
+                                                            ) : (
+                                                                <span className="text-slate-300 italic text-[11px]">Não informado</span>
+                                                            )}
+                                                        </td>
+                                                        <td className="px-5 py-3 border-l border-slate-50">
+                                                            {row.pix ? (
+                                                                <span className="font-mono text-[11px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-md truncate max-w-[150px] block" title={row.pix}>
+                                                                    {row.pix}
+                                                                </span>
+                                                            ) : (
+                                                                <span className="text-slate-300 italic text-[11px]">Não inf.</span>
+                                                            )}
+                                                        </td>
+                                                    </>
+                                                )}
                                                 <td className="px-5 py-3 text-right font-bold text-slate-800">{fmtBRL(row.valor)}</td>
                                                 <td className="px-5 py-3">
                                                     {row.status === "found"
@@ -1460,6 +1559,42 @@ export function FolhaPagamentoClient({
                     )}
                 </div>
             </div>
+
+            {/* ─── Exclude reason dialog ─── */}
+            <Dialog open={!!pendingExclude} onOpenChange={(open) => { if (!open) setPendingExclude(null) }}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Trash2 className="h-5 w-5 text-red-500" /> Excluir funcionário
+                        </DialogTitle>
+                    </DialogHeader>
+                    <p className="text-sm text-slate-600">
+                        Excluindo <strong>{pendingExclude?.row.nome}</strong>.<br />
+                        Informe o motivo da exclusão para registro:
+                    </p>
+                    <Textarea
+                        placeholder="Ex: Férias, afastamento, pagamento em duplicidade, rescisão..."
+                        value={excludeReasonInput}
+                        onChange={e => setExcludeReasonInput(e.target.value)}
+                        className="resize-none h-24"
+                        autoFocus
+                    />
+                    <DialogFooter className="gap-2">
+                        <Button variant="outline" onClick={() => setPendingExclude(null)}>Cancelar</Button>
+                        <Button
+                            variant="destructive"
+                            onClick={() => {
+                                if (pendingExclude) {
+                                    doExcludeRow(pendingExclude.row, excludeReasonInput.trim() || "Sem motivo informado")
+                                    setPendingExclude(null)
+                                }
+                            }}
+                        >
+                            Confirmar exclusão
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             {/* ─── Column Correction dialog (post-analysis) ─── */}
             <Dialog open={isColumnCorrectionOpen} onOpenChange={setIsColumnCorrectionOpen}>
