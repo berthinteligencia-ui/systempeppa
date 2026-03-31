@@ -10,6 +10,7 @@ import {
     AlertCircle,
 } from "lucide-react"
 import * as XLSX from "xlsx"
+import type * as ExcelJSTypes from "exceljs"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -786,12 +787,12 @@ export function FolhaPagamentoClient({
         wb.creator = "PepaCorp"
         wb.created = new Date()
 
-        const HEADER_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } }
-        const HEADER_FONT: Partial<ExcelJS.Font> = { bold: true, size: 11 }
-        const TOTAL_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9D9D9" } }
-        const TOTAL_FONT: Partial<ExcelJS.Font> = { bold: true }
+        const HEADER_FILL: ExcelJSTypes.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } }
+        const HEADER_FONT: Partial<ExcelJSTypes.Font> = { bold: true, size: 11 }
+        const TOTAL_FILL: ExcelJSTypes.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9D9D9" } }
+        const TOTAL_FONT: Partial<ExcelJSTypes.Font> = { bold: true }
 
-        function styleHeaderRow(ws: ExcelJS.Worksheet, colCount: number) {
+        function styleHeaderRow(ws: ExcelJSTypes.Worksheet, colCount: number) {
             const row = ws.getRow(1)
             row.font = HEADER_FONT
             row.fill = HEADER_FILL
@@ -801,7 +802,7 @@ export function FolhaPagamentoClient({
             ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: colCount } }
         }
 
-        function styleTotalRow(ws: ExcelJS.Worksheet) {
+        function styleTotalRow(ws: ExcelJSTypes.Worksheet) {
             const row = ws.getRow(ws.rowCount)
             row.font = TOTAL_FONT
             row.fill = TOTAL_FILL

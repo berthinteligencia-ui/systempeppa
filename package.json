@@ -48,6 +48,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "npm:tailwindcss@^3.4.19",
+    "@types/exceljs": "^0.5.3",
     "@types/node": "^22",
     "@types/pdf-parse": "^1.1.5",
     "@types/react": "^19",
