@@ -241,7 +241,7 @@ export async function sendMassMessage(data: { departmentId: string, month: numbe
     const companyId = session.user.companyId
     const companyName = session.user.companyName || "Empresa"
     
-    // Fetch employees for this unit with "efetuado" payment status
+    // Fetch employees with their department info
     const employees = await prisma.employee.findMany({
         where: {
             companyId,
@@ -257,7 +257,13 @@ export async function sendMassMessage(data: { departmentId: string, month: numbe
             cpf: true,
             pagamento: true,
             salary: true,
-            phone: true
+            phone: true,
+            department: {
+                select: {
+                    id: true,
+                    name: true
+                }
+            }
         }
     })
 
@@ -270,26 +276,15 @@ export async function sendMassMessage(data: { departmentId: string, month: numbe
         "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
     ][data.month - 1]
 
-    let departmentName = "Todas as Unidades"
-    if (data.departmentId !== "all") {
-        const dept = await prisma.department.findUnique({
-            where: { id: data.departmentId },
-            select: { name: true }
-        })
-        if (dept) departmentName = dept.name
+    // Group employees by department ID
+    const groups: Record<string, { name: string, members: typeof employees }> = {}
+    
+    for (const e of employees) {
+        const dId = e.department?.id || "unassigned"
+        const dName = e.department?.name || "Sem Unidade"
+        if (!groups[dId]) groups[dId] = { name: dName, members: [] }
+        groups[dId].members.push(e)
     }
-
-    const payload = employees.map(e => ({
-        nome: e.name,
-        company: companyName,
-        unidade: departmentName,
-        month: monthLabel,
-        year: data.year,
-        employee: e.name,
-        salary: Number(e.salary),
-        contact: e.phone || "Não informado",
-        cpf: e.cpf
-    }))
 
     const company = await prisma.company.findUnique({
         where: { id: companyId },
@@ -297,15 +292,42 @@ export async function sendMassMessage(data: { departmentId: string, month: numbe
     })
 
     const webhookUrl = company?.whatsappWebhookUrl || "https://webhook.berthia.com.br/webhook/envio-de-mensagem"
+    let totalSent = 0
 
-    const response = await fetch(webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-    })
+    // Send one hit per unit
+    for (const dId in groups) {
+        const group = groups[dId]
+        const payload = {
+            unidade: group.name,
+            company: companyName,
+            month: monthLabel,
+            year: data.year,
+            funcionarios: group.members.map(e => ({
+                nome: e.name,
+                employee: e.name,
+                salary: Number(e.salary),
+                contact: e.phone || "Não informado",
+                cpf: e.cpf
+            }))
+        }
 
-    if (!response.ok) {
-        throw new Error("Falha ao enviar para o webhook externo.")
+        const response = await fetch(webhookUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        })
+
+        if (!response.ok) {
+            console.error(`[SEND_MASS_MESSAGE] Falha ao enviar para unidade ${group.name}`)
+            // Continuamos para as próximas unidades mesmo se uma falhar?
+            // Vamos assumir que sim para não interromper todo o processo.
+        } else {
+            totalSent += group.members.length
+        }
+    }
+
+    if (totalSent === 0 && employees.length > 0) {
+        throw new Error("Falha ao enviar para o webhook externo em todas as tentativas.")
     }
 
     // Registrar envios no histórico de mensagens (mensagens_zap) usando Prisma
@@ -349,7 +371,7 @@ export async function sendMassMessage(data: { departmentId: string, month: numbe
         }
     }
 
-    return { success: true, count: employees.length }
+    return { success: true, count: totalSent }
 }
 
 export async function deleteComprovante(id: string) {
