@@ -1046,18 +1046,16 @@ export function FolhaPagamentoClient({
         if (!result) return 0
         return invalidCpfCount + 
                nameMismatchCount + 
-               valMismatchCount +
                duplicateCpfCount + 
                crossAbaDuplicateCount + 
                (result?.extras?.length || 0)
-    }, [result, resultRows, invalidCpfCount, nameMismatchCount, valMismatchCount, duplicateCpfCount, crossAbaDuplicateCount])
+    }, [result, resultRows, invalidCpfCount, nameMismatchCount, duplicateCpfCount, crossAbaDuplicateCount])
 
     const errorGroups = useMemo(() => {
-        if (!result) return { invalidCpfs: [], nameMismatches: [], valueMismatches: [], duplicates: [], extras: [] }
+        if (!result) return { invalidCpfs: [], nameMismatches: [], duplicates: [], extras: [] }
         
         const invalidCpfs = resultRows.filter(r => (r as any).isInvalidCpf).map(r => ({ ...r, errorType: "invalidCpf" as const }))
         const nameMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).nameMismatch).map(r => ({ ...r, errorType: "nameMismatch" as const }))
-        const valueMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).valueMismatch).map(r => ({ ...r, errorType: "valueMismatch" as const }))
         
         // Group duplicates by CPF or Name
         const duplicates: AnalyzedRow[] = resultRows.filter(r => 
@@ -1068,10 +1066,10 @@ export function FolhaPagamentoClient({
         
         const extras = (result.extras || []).map(r => ({ ...r, status: "extra" as const, cpf: (r as any).cpfCnpj || "", errorType: "extra" as const }))
 
-        return { invalidCpfs, nameMismatches, valueMismatches, duplicates, extras }
+        return { invalidCpfs, nameMismatches, duplicates, extras }
     }, [result, resultRows, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet])
 
-    const [activeErrorTab, setActiveErrorTab] = useState<"invalidCpfs" | "duplicates" | "nameMismatches" | "valueMismatches" | "extras">("invalidCpfs")
+    const [activeErrorTab, setActiveErrorTab] = useState<"invalidCpfs" | "duplicates" | "nameMismatches" | "extras">("invalidCpfs")
 
     const showResults = phase === "result" || phase === "pending"
 
@@ -2220,7 +2218,6 @@ export function FolhaPagamentoClient({
                                         {activeErrorTab === "invalidCpfs" && "CPFs com formato ou dígitos inválidos"}
                                         {activeErrorTab === "duplicates" && "Registros duplicados detectados"}
                                         {activeErrorTab === "nameMismatches" && "Divergências entre planilha e sistema"}
-                                        {activeErrorTab === "valueMismatches" && "Divergências de valores (spreadsheet vs sistema)"}
                                         {activeErrorTab === "extras" && "Registros extras sem CPF identificado"}
                                     </h3>
                                     <p className="text-xs text-slate-400 mt-1 font-medium">Selecione os registros para correção ou exclusão em massa.</p>
@@ -2264,17 +2261,6 @@ export function FolhaPagamentoClient({
                                                     <Trash2 className="h-3 w-3" /> Excluir ({selectedErrorRows.length})
                                                 </button>
 
-                                                                    const data = await res.json()
-                                                                    if (res.ok) setResult(data)
-                                                                    setSelectedErrorRows([])
-                                                                } finally { setRegistering(false) }
-                                                            }
-                                                        }}
-                                                        className="flex items-center gap-1.5 bg-blue-600 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider hover:bg-blue-700 transition-colors"
-                                                    >
-                                                        <UserPlus className="h-3 w-3" /> Cadastrar Selecionados
-                                                    </button>
-                                                )}
 
                                                 {activeErrorTab === "duplicates" && (
                                                     <button 
@@ -2303,11 +2289,9 @@ export function FolhaPagamentoClient({
                                         
                                         // Configurações de estilo por tipo de aba
                                         const tabStyles: Record<string, { border: string, bg: string, text: string, icon: any }> = {
-                                            unregistered: { border: "border-l-amber-500", bg: "bg-amber-50", text: "text-amber-700", icon: UserPlus },
                                             invalidCpfs: { border: "border-l-red-500", bg: "bg-red-50", text: "text-red-700", icon: ShieldCheck },
                                             duplicates: { border: "border-l-purple-500", bg: "bg-purple-50", text: "text-purple-700", icon: RotateCcw },
                                             nameMismatches: { border: "border-l-blue-500", bg: "bg-blue-50", text: "text-blue-700", icon: Info },
-                                            valueMismatches: { border: "border-l-emerald-500", bg: "bg-emerald-50", text: "text-emerald-700", icon: Receipt },
                                             extras: { border: "border-l-orange-500", bg: "bg-orange-50", text: "text-orange-700", icon: AlertCircle }
                                         }
                                         const style = tabStyles[activeErrorTab] || tabStyles.unregistered
