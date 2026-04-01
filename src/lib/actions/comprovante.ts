@@ -356,7 +356,7 @@ export async function sendMassMessage(data: { departmentId: string, month: numbe
 
     } catch (err: any) {
         console.error("[SEND_MASS_MESSAGE] Unexpected crash:", err.message)
-        return { success: false, message: "Erro interno no servidor ao processar o envio." }
+        return { success: false, message: `Erro no servidor: ${err.message}` } 
     }
 }
 
