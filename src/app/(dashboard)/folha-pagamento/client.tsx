@@ -1068,18 +1068,18 @@ export function FolhaPagamentoClient({
         if (!result) return { unregistered: [], invalidCpfs: [], nameMismatches: [], valueMismatches: [], duplicates: [], extras: [] }
         
         const unregistered = missing.map(r => ({ ...r, status: "missing" as const, errorType: "unregistered" as const }))
-        const invalidCpfs = resultRows.filter(r => (r as any).isInvalidCpf).map(r => ({ ...r, errorType: "invalidCpf" as const }))
-        const nameMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).nameMismatch).map(r => ({ ...r, status: "found" as const, errorType: "nameMismatch" as const }))
-        const valueMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).valueMismatch).map(r => ({ ...r, status: "found" as const, errorType: "valueMismatch" as const }))
+        const invalidCpfs = resultRows.filter(r => (r as any).isInvalidCpf).map(r => ({ ...r, errorType: "invalidCpf" as const } as any))
+        const nameMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).nameMismatch).map(r => ({ ...r, status: "found" as const, errorType: "nameMismatch" as const } as any))
+        const valueMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).valueMismatch).map(r => ({ ...r, status: "found" as const, errorType: "valueMismatch" as const } as any))
         
         // Group duplicates by CPF or Name
-        const duplicates: AnalyzedRow[] = resultRows.filter(r => 
+        const duplicates = resultRows.filter(r => 
             duplicateCpfSet.has(`${r.sheet}::${r.cpf}`) || 
             crossAbaDuplicateSet.has(r.cpf) || 
-            duplicateNomeSet.has(r.nome.toLowerCase().trim())
-        ).map(r => ({ ...r, errorType: "duplicate" as const }))
+            duplicateNomeSet.has(((r as any).nome || "").toLowerCase().trim())
+        ).map(r => ({ ...r, errorType: "duplicate" as const } as any))
         
-        const extras = (result.extras || []).map(r => ({ ...r, status: "extra" as const, cpf: (r as any).cpfCnpj || "", errorType: "extra" as const }))
+        const extras = (result.extras || []).map(r => ({ ...r, status: "extra" as const, cpf: (r as any).cpfCnpj || "", errorType: "extra" as const } as any))
 
         return { unregistered, invalidCpfs, nameMismatches, valueMismatches, duplicates, extras }
     }, [result, resultRows, missing, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet])
