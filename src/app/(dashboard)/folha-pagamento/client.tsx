@@ -2210,7 +2210,6 @@ export function FolhaPagamentoClient({
                             <div className="px-8 py-6 bg-white border-b flex items-center justify-between">
                                 <div>
                                     <h3 className="font-bold text-slate-800 text-lg">
-                                        {activeErrorTab === "unregistered" && "Funcionários não encontrados no sistema"}
                                         {activeErrorTab === "invalidCpfs" && "CPFs com formato ou dígitos inválidos"}
                                         {activeErrorTab === "duplicates" && "Registros duplicados detectados"}
                                         {activeErrorTab === "nameMismatches" && "Divergências entre planilha e sistema"}
@@ -2346,12 +2345,6 @@ export function FolhaPagamentoClient({
                                                                 {duplicateCpfSet.has(`${row.sheet}::${row.cpf}`) ? "DUPLICADO NESTA ABA" : "DUPLICADO ENTRE ABAS"}
                                                             </div>
                                                         )}
-                                                        {activeErrorTab === "valueMismatches" && (
-                                                            <div className="flex items-center gap-1 text-[9px] px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-600 border border-emerald-100 font-bold underline decoration-dotted">
-                                                                <Receipt className="h-2.5 w-2.5" />
-                                                                SISTEMA: {fmtBRL((row as FoundRow).dbSalary || 0)}
-                                                            </div>
-                                                        )}
                                                     </div>
                                                 </div>
 
@@ -2378,14 +2371,6 @@ export function FolhaPagamentoClient({
                                                                 <RotateCcw className="h-3 w-3" /> Consolidar
                                                             </button>
                                                         )}
-                                                        {activeErrorTab === "valueMismatches" && (
-                                                            <button 
-                                                                onClick={() => handleReconcileSalary(row as FoundRow)}
-                                                                className="h-8 px-3 rounded-lg flex items-center gap-2 bg-emerald-600 text-white hover:bg-emerald-700 transition-all font-black text-[9px] uppercase tracking-wider shadow-sm hover:shadow-emerald-200"
-                                                            >
-                                                                <CheckCircle2 className="h-3 w-3" /> Conciliar
-                                                            </button>
-                                                        )}
                                                         
                                                         <button 
                                                             onClick={() => handleDeleteRow(row)}
@@ -2404,16 +2389,6 @@ export function FolhaPagamentoClient({
 
                             <div className="px-8 py-4 bg-white border-t flex justify-end gap-3">
                                 <Button variant="outline" onClick={() => setIsErrorCorrectionOpen(false)} className="rounded-xl px-6">Fechar</Button>
-                                {activeErrorTab === "unregistered" && errorGroups.unregistered.length > 0 && (
-                                    <Button 
-                                        onClick={handleRegisterAll}
-                                        disabled={registering}
-                                        className="bg-amber-500 hover:bg-amber-600 text-white rounded-xl px-6 gap-2"
-                                    >
-                                        {registering ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
-                                        Cadastrar Todos ({errorGroups.unregistered.length})
-                                    </Button>
-                                )}
                             </div>
                         </div>
                     </div>
