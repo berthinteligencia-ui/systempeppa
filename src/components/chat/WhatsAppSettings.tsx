@@ -1,110 +1,86 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Save, Globe, Loader2, CheckCircle2, AlertCircle } from "lucide-react"
+import { Globe, Loader2, AlertCircle } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { updateCompanySettings } from "@/lib/actions/settings"
 
 export function WhatsAppSettings() {
-    const [webhookUrl, setWebhookUrl] = useState("")
+    const [savedUrl, setSavedUrl] = useState("")
     const [loading, setLoading] = useState(true)
-    const [saving, setSaving] = useState(false)
-    const [success, setSuccess] = useState(false)
-    const [error, setError] = useState<string | null>(null)
 
     useEffect(() => {
         fetch("/api/whatsapp/settings")
             .then(res => res.ok ? res.json() : null)
             .then(data => {
-                if (data) setWebhookUrl(data.whatsappWebhookUrl || "")
+                if (data) {
+                    setSavedUrl(data.whatsappWebhookUrl || "")
+                }
             })
             .catch(() => {})
             .finally(() => setLoading(false))
     }, [])
 
-    const handleSave = async (e: React.FormEvent) => {
-        e.preventDefault()
-        setSaving(true)
-        setError(null)
-        setSuccess(false)
-        try {
-            await updateCompanySettings({ settings: { whatsappWebhookUrl: webhookUrl } })
-            setSuccess(true)
-        } catch (err: any) {
-            setError(err.message || "Erro ao salvar configuração")
-        } finally {
-            setSaving(false)
-        }
-    }
-
     if (loading) {
         return (
-            <div className="flex items-center justify-center py-12">
-                <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+            <div className="flex items-center justify-center py-24">
+                <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
             </div>
         )
     }
 
     return (
         <div className="p-6 max-w-4xl mx-auto">
-            <Card className="border-slate-200 shadow-md overflow-hidden">
-                <CardHeader className="bg-slate-50/50 border-b border-slate-100">
-                    <div className="flex items-center gap-3">
-                        <div className="rounded-lg bg-blue-100 p-2.5 text-blue-600">
-                            <Globe className="h-6 w-6" />
+            <Card className="border-slate-200 shadow-xl overflow-hidden rounded-2xl">
+                <CardHeader className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white border-b-0 pb-8 pt-10">
+                    <div className="flex items-center gap-4">
+                        <div className="rounded-xl bg-white/20 backdrop-blur-sm p-3 text-white ring-1 ring-white/30">
+                            <Globe className="h-8 w-8" />
                         </div>
                         <div>
-                            <CardTitle className="text-xl">Configuração Webhook WhatsApp</CardTitle>
-                            <CardDescription className="text-sm font-medium text-slate-500">
-                                Defina o endereço do servidor que processará as mensagens recebidas
+                            <CardTitle className="text-2xl font-bold tracking-tight">WhatsApp Webhook</CardTitle>
+                            <CardDescription className="text-blue-100 text-sm mt-1 font-medium opacity-90">
+                                Monitoramento do canal de integração em tempo real
                             </CardDescription>
                         </div>
                     </div>
                 </CardHeader>
-                <CardContent className="pt-8 pb-10">
-                    <form onSubmit={handleSave} className="space-y-8">
-                        <div className="space-y-3">
-                            <Label htmlFor="webhookUrl" className="text-sm font-bold text-slate-700">URL do Webhook</Label>
-                            <div className="relative group">
-                                <Input
-                                    id="webhookUrl"
-                                    value={webhookUrl}
-                                    onChange={(e) => setWebhookUrl(e.target.value)}
-                                    placeholder="https://seu-dominio.com/api/whatsapp/webhook"
-                                    className="pr-12 py-6 text-base shadow-sm border-slate-200 focus:border-blue-500 focus:ring-blue-500/20 transition-all font-mono"
-                                />
-                                <div className="absolute right-4 top-1/2 -translate-y-1/2">
-                                    <Globe className={cn("h-5 w-5 transition-colors", webhookUrl ? "text-blue-500" : "text-slate-300")} />
+                <CardContent className="pt-10 pb-12 px-8">
+                    <div className="space-y-8">
+                        <div className="bg-blue-50/50 p-8 rounded-3xl border border-blue-100 flex flex-col gap-6 relative overflow-hidden group">
+                            {/* Decorative background element */}
+                            <div className="absolute top-0 right-0 -translate-y-1/2 translate-x-1/2 w-64 h-64 bg-blue-100/50 rounded-full blur-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-700"></div>
+                            
+                            <div className="flex items-center justify-between relative z-10">
+                                <div className="flex items-center gap-2.5 text-blue-800 font-bold text-xs uppercase tracking-widest">
+                                    <div className="h-2 w-2 rounded-full bg-blue-600 animate-pulse"></div>
+                                    Servidor de Processamento Ativo
+                                </div>
+                                <div className={cn(
+                                    "px-4 py-1.5 rounded-full text-[11px] font-black uppercase tracking-wider shadow-sm",
+                                    savedUrl ? "bg-emerald-500 text-white" : "bg-indigo-600 text-white"
+                                )}>
+                                    {savedUrl ? "Personalizado" : "Padrão de Rede"}
                                 </div>
                             </div>
-                            <p className="text-xs text-slate-400 font-medium">
-                                Certifique-se de que a URL comece com https:// para garantir a segurança dos dados.
-                            </p>
-                        </div>
-
-                        <div className="pt-4 flex items-center justify-between border-t">
-                            <div>
-                                {success && (
-                                    <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-600 animate-in fade-in">
-                                        <CheckCircle2 className="h-4 w-4" /> Salvo com sucesso!
-                                    </span>
-                                )}
-                                {error && (
-                                    <span className="flex items-center gap-1.5 text-xs font-bold text-red-600 animate-in fade-in">
-                                        <AlertCircle className="h-4 w-4" /> {error}
-                                    </span>
-                                )}
+                            
+                            <div className="bg-white p-6 rounded-2xl border border-blue-100/80 shadow-md relative z-10 hover:border-blue-300 transition-colors duration-300">
+                                <p className="text-xl font-mono text-slate-800 font-semibold break-all leading-relaxed">
+                                    {savedUrl || "https://webhook.berthia.com.br/webhook/folhazap"}
+                                </p>
                             </div>
-                            <Button type="submit" disabled={saving} className="gap-2 bg-blue-600 hover:bg-blue-700 shadow-sm min-w-[120px]">
-                                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                                {saving ? "Salvando..." : "Salvar"}
-                            </Button>
+                            
+                            <div className="flex items-start gap-3 text-blue-700/80 bg-white/40 p-4 rounded-xl border border-blue-100/40 relative z-10">
+                                <AlertCircle className="h-5 w-5 mt-0.5 shrink-0 text-blue-500" />
+                                <div className="space-y-1">
+                                    <p className="text-sm font-bold uppercase tracking-tight text-blue-900">Acesso Restrito</p>
+                                    <p className="text-[13px] leading-relaxed">
+                                        As configurações de integração são gerenciais. Para solicitar alterações ou atualizações no destino das mensagens, entre em contato com o suporte técnico ou utilize o painel de master administração.
+                                    </p>
+                                </div>
+                            </div>
                         </div>
-                    </form>
+                    </div>
                 </CardContent>
             </Card>
         </div>

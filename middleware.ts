@@ -20,8 +20,9 @@ export default auth(async (req) => {
     const { nextUrl } = req
     const pathname = nextUrl.pathname
 
-    // Controle e change-password são rotas independentes
+    // Controle, admin e change-password são rotas independentes
     if (pathname.startsWith("/controle")) return undefined
+    if (pathname.startsWith("/admin")) return undefined
 
     const isPublicPath = pathname === "/login" || pathname === "/preview-dashboard"
 

@@ -66,6 +66,7 @@ model Company {
   subscription    Subscription?
   invoices        Invoice[]
   comprovantes    Comprovante[]
+  whatsappWebhookUrl String?
 }
 
 model Plan {
@@ -118,8 +119,9 @@ model Settings {
   company               Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   whatsappNotifications Boolean  @default(false)
   autoBackup            Boolean  @default(false)
-  whatsappWebhookUrl    String?
   payrollReminderDays   Int      @default(5)
+  lastResetMonth        Int?
+  lastResetYear         Int?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 }
@@ -291,6 +293,44 @@ model NotaFiscal {
   company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+model Leads {
+  id        String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  nome      String?
+  celular   String?
+  createdAt DateTime?      @default(now()) @map("created_at") @db.Timestamptz(6)
+  messages  MensagensZap[]
+
+  @@map("leads")
+}
+
+model MensagensZap {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  leadId            String?   @map("lead_id") @db.Uuid
+  lead              Leads?    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  conteudo          String?
+  tipo              String?
+  createdAt         DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+  numeroFuncionario String?   @map("numero_funcionario")
+  funcionario       String?   @default("false")
+
+  @@map("mensagens_zap")
+}
+
+model ActivityLogs {
+  id        BigInt    @id @default(autoincrement())
+  userId    String?   @map("user_id")
+  userName  String?   @map("user_name")
+  userEmail String?   @map("user_email")
+  companyId String?   @map("company_id")
+  action    String?
+  target    String?
+  details   Json?
+  ipAddress String?   @map("ip_address")
+  createdAt DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("activity_logs")
 }
 
 enum NfStatus {

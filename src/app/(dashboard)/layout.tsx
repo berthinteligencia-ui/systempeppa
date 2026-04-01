@@ -4,6 +4,7 @@ import { Sidebar } from "@/components/layout/Sidebar"
 import { Header } from "@/components/layout/Header"
 import { SessionProvider } from "next-auth/react"
 import { ActivityLogger } from "@/components/ActivityLogger"
+import { checkAndPerformMonthlyReset } from "@/lib/actions/settings"
 
 export default async function DashboardLayout({
   children,
@@ -12,6 +13,9 @@ export default async function DashboardLayout({
 }) {
   const session = await auth()
   if (!session) redirect("/login")
+  
+  // Executa verificação automática de reset mensal
+  await checkAndPerformMonthlyReset()
 
   return (
     <SessionProvider session={session}>

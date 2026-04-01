@@ -16,6 +16,7 @@ export async function GET() {
             .select("id, name, position, phone, department:Department(name)")
             .eq("companyId", session.user.companyId)
             .eq("status", "ACTIVE")
+            .eq("pagamento", "efetuado")
             .not("phone", "is", null)
             .neq("phone", "")
             .order("name", { ascending: true })

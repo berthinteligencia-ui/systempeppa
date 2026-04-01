@@ -110,13 +110,13 @@ export async function POST(req: Request) {
         })
 
         // Busca webhook URL
-        const { data: settings } = await supabaseAdmin
-            .from("Settings")
+        const { data: company } = await supabaseAdmin
+            .from("Company")
             .select("whatsappWebhookUrl")
-            .eq("companyId", session.user.companyId)
+            .eq("id", session.user.companyId)
             .maybeSingle()
 
-        const webhookUrl = settings?.whatsappWebhookUrl || DEFAULT_WEBHOOK_URL
+        const webhookUrl = company?.whatsappWebhookUrl || DEFAULT_WEBHOOK_URL
 
         if (lead.celular) {
             let phone = lead.celular.replace(/\D/g, "")

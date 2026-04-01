@@ -20,7 +20,7 @@ import { Company } from "@prisma/client"
 
 type CompanyWithCount = any // Use any for simplicity in this large component with serialized dates/decimals
 
-const emptyForm: CompanyInput = { name: "", cnpj: "", email: "", whatsapp: "", address: "", city: "", state: "" }
+const emptyForm: CompanyInput = { name: "", cnpj: "", email: "", whatsapp: "", address: "", city: "", state: "", whatsappWebhookUrl: "" }
 const emptyUser = { name: "", email: "", password: "" }
 
 function Field({ label, value, onChange, type = "text", placeholder }: { label: string; value: string; onChange: (v: string) => void; type?: string; placeholder?: string }) {
@@ -136,10 +136,19 @@ export function AdminClient({ initialCompanies }: { initialCompanies: CompanyWit
         setCreatedCreds(null)
     }
 
-    async function openEdit(c: Company) {
+    async function openEdit(c: any) {
         console.log("Opening edit for company:", c.id, c.name)
         setEditingId(c.id)
-        setForm({ name: c.name, cnpj: c.cnpj ?? "", email: c.email ?? "", whatsapp: c.whatsapp ?? "", address: c.address ?? "", city: c.city ?? "", state: c.state ?? "" })
+        setForm({
+            name: c.name,
+            cnpj: c.cnpj ?? "",
+            email: c.email ?? "",
+            whatsapp: c.whatsapp ?? "",
+            address: c.address ?? "",
+            city: c.city ?? "",
+            state: c.state ?? "",
+            whatsappWebhookUrl: c.whatsappWebhookUrl ?? ""
+        })
         setUserForm(emptyUser)
         setError(null)
         setLoadingAdmin(true)
@@ -787,6 +796,9 @@ export function AdminClient({ initialCompanies }: { initialCompanies: CompanyWit
                                 </div>
                                 <Field label="Cidade" value={form.city ?? ""} onChange={v => setForm(f => ({ ...f, city: v }))} placeholder="Cidade" />
                                 <Field label="Estado" value={form.state ?? ""} onChange={v => setForm(f => ({ ...f, state: v }))} placeholder="SP" />
+                                <div className="col-span-2 pt-2 border-t border-slate-100 mt-2">
+                                    <Field label="Webhook URL WhatsApp" value={form.whatsappWebhookUrl ?? ""} onChange={v => setForm(f => ({ ...f, whatsappWebhookUrl: v }))} placeholder="https://seu-dominio.com/api/whatsapp/webhook" />
+                                </div>
                             </div>
 
 

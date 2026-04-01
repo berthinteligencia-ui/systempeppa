@@ -23,7 +23,7 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import { registerBatchFromPayroll, getEmployeeByCpf, updateEmployeesPhone, updateEmployeeName, updateEmployeeSalary } from "@/lib/actions/employees"
+import { registerBatchFromPayroll, getEmployeeByCpf, updateEmployeesPhone, updateEmployeeName, updateEmployeeSalary, resetMonthlyStatus } from "@/lib/actions/employees"
 import {
     savePayrollAnalysis, listPayrollAnalyses, getPayrollAnalysis, deletePayrollAnalysis
 } from "@/lib/actions/payroll"
@@ -1143,6 +1143,19 @@ export function FolhaPagamentoClient({
                     )}
                     <button onClick={openHistory} className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors">
                         Histórico
+                    </button>
+                    <button 
+                        onClick={async () => {
+                            if (!confirm("Isso irá desativar todos os funcionários e resetar o status de pagamento para 'pendente'. Deseja continuar?")) return
+                            const res = await resetMonthlyStatus()
+                            if (res.success) {
+                                alert("Sistema resetado para o novo mês.")
+                                reset()
+                            }
+                        }} 
+                        className="flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-100 transition-colors"
+                    >
+                        <RotateCcw className="h-3.5 w-3.5" /> Resetar Mês
                     </button>
                 </div>
             </div>

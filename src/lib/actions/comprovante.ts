@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma"
 import { getSupabaseAdmin } from "@/lib/supabase-admin"
 import { getEmployeeByCpf } from "./employees"
 import { revalidatePath } from "next/cache"
+import { randomUUID } from "crypto"
 
 export type ComprovanteData = {
   nome: string
@@ -27,7 +28,14 @@ export async function extractComprovanteData(formData: FormData, bank?: string):
   const file = formData.get("file") as File
   if (!file) throw new Error("Arquivo não enviado")
 
-  const url = new URL("https://webhook.berthia.com.br/webhook/disparofolha")
+  const company = await prisma.company.findUnique({
+    where: { id: companyId },
+    select: { whatsappWebhookUrl: true }
+  })
+
+  // Use custom webhook if present, otherwise fallback to official Berthia OCR service
+  const webhookUrl = company?.whatsappWebhookUrl || "https://webhook.berthia.com.br/webhook/disparofolha"
+  const url = new URL(webhookUrl)
   if (bank) {
     url.searchParams.append("banco", bank)
     formData.append("banco", bank)
@@ -237,6 +245,7 @@ export async function sendMassMessage(data: { departmentId: string, month: numbe
     const employees = await prisma.employee.findMany({
         where: {
             companyId,
+            status: "ACTIVE",
             departmentId: data.departmentId === "all" ? undefined : data.departmentId,
             pagamento: {
                 equals: "efetuado",
@@ -261,8 +270,19 @@ export async function sendMassMessage(data: { departmentId: string, month: numbe
         "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
     ][data.month - 1]
 
+    let departmentName = "Todas as Unidades"
+    if (data.departmentId !== "all") {
+        const dept = await prisma.department.findUnique({
+            where: { id: data.departmentId },
+            select: { name: true }
+        })
+        if (dept) departmentName = dept.name
+    }
+
     const payload = employees.map(e => ({
+        nome: e.name,
         company: companyName,
+        unidade: departmentName,
         month: monthLabel,
         year: data.year,
         employee: e.name,
@@ -271,7 +291,14 @@ export async function sendMassMessage(data: { departmentId: string, month: numbe
         cpf: e.cpf
     }))
 
-    const response = await fetch("https://webhook.berthia.com.br/webhook/aviso", {
+    const company = await prisma.company.findUnique({
+        where: { id: companyId },
+        select: { whatsappWebhookUrl: true }
+    })
+
+    const webhookUrl = company?.whatsappWebhookUrl || "https://webhook.berthia.com.br/webhook/envio-de-mensagem"
+
+    const response = await fetch(webhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -279,6 +306,47 @@ export async function sendMassMessage(data: { departmentId: string, month: numbe
 
     if (!response.ok) {
         throw new Error("Falha ao enviar para o webhook externo.")
+    }
+
+    // Registrar envios no histórico de mensagens (mensagens_zap) usando Prisma
+    const now = new Date()
+    
+    for (const e of employees) {
+        if (!e.phone) continue
+        
+        const phoneClean = e.phone.replace(/\D/g, "")
+        if (!phoneClean) continue
+
+        // Buscar ou criar Lead para este contato usando Prisma
+        let lead = await prisma.leads.findFirst({
+            where: {
+                celular: {
+                    contains: phoneClean.slice(-8)
+                }
+            }
+        })
+
+        if (!lead) {
+            lead = await prisma.leads.create({
+                data: {
+                    nome: e.name,
+                    celular: phoneClean,
+                    createdAt: now
+                }
+            })
+        }
+
+        if (lead) {
+            await prisma.mensagensZap.create({
+                data: {
+                    leadId: lead.id,
+                    tipo: "COMPANY",
+                    conteudo: `Aviso de pagamento de ${monthLabel}/${data.year} enviado com sucesso.`,
+                    createdAt: now,
+                    funcionario: "false"
+                }
+            })
+        }
     }
 
     return { success: true, count: employees.length }

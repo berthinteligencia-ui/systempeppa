@@ -254,3 +254,20 @@ export async function getEmployeeByCpf(cpf: string) {
     .maybeSingle()
   return data
 }
+
+export async function resetMonthlyStatus() {
+  const companyId = await getCompanyId()
+  const supabase = getSupabaseAdmin()
+  const now = new Date().toISOString()
+  
+  check(await supabase.from("Employee")
+    .update({ 
+      status: "INACTIVE", 
+      pagamento: "pendente",
+      updatedAt: now 
+    })
+    .eq("companyId", companyId)
+  )
+  
+  return { success: true }
+}

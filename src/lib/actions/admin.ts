@@ -49,6 +49,7 @@ export type CompanyInput = {
     address?: string
     city?: string
     state?: string
+    whatsappWebhookUrl?: string
 }
 
 export async function listAllCompanies() {
@@ -59,6 +60,17 @@ export async function listAllCompanies() {
             },
             subscription: {
                 include: { plan: true }
+            },
+            settings: {
+                select: {
+                    id: true,
+                    companyId: true,
+                    whatsappNotifications: true,
+                    autoBackup: true,
+                    payrollReminderDays: true,
+                    createdAt: true,
+                    updatedAt: true,
+                }
             }
         },
         orderBy: { createdAt: "desc" }
@@ -67,8 +79,14 @@ export async function listAllCompanies() {
     // Serialize Dates and Decimals for Client Component
     return companies.map(c => ({
         ...c,
+        whatsappWebhookUrl: c.whatsappWebhookUrl ?? "",
         createdAt: c.createdAt.toISOString(),
         updatedAt: c.updatedAt.toISOString(),
+        settings: c.settings ? {
+            ...c.settings,
+            createdAt: c.settings.createdAt.toISOString(),
+            updatedAt: c.settings.updatedAt.toISOString(),
+        } : null,
         subscription: c.subscription ? {
             ...c.subscription,
             createdAt: c.subscription.createdAt.toISOString(),
@@ -108,12 +126,20 @@ export async function createCompany(data: CompanyInput, adminUser: { name: strin
         address: data.address || null,
         city: data.city || null,
         state: data.state || null,
+        whatsappWebhookUrl: data.whatsappWebhookUrl || null,
         active: true,
         createdAt: now,
         updatedAt: now,
     })
 
     if (companyError) throw new Error(companyError.message)
+    
+    await supabase.from("Settings").insert({
+        id: randomUUID(),
+        companyId,
+        createdAt: now,
+        updatedAt: now,
+    })
 
     const { error: userError } = await supabase.from("User").insert({
         id: userId,
@@ -152,10 +178,12 @@ export async function updateCompany(id: string, data: CompanyInput) {
         address: data.address || null,
         city: data.city || null,
         state: data.state || null,
+        whatsappWebhookUrl: data.whatsappWebhookUrl || null,
         updatedAt: new Date().toISOString(),
     }).eq("id", id).select().single()
 
     if (error) throw new Error(error.message)
+
     return updated
 }
 

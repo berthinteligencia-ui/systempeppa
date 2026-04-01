@@ -1,5 +1,5 @@
 import { auth } from "@/lib/auth"
-import { queryOne } from "@/lib/db"
+import { supabaseAdmin } from "@/lib/db"
 import { NextResponse } from "next/server"
 
 export async function GET() {
@@ -7,12 +7,14 @@ export async function GET() {
     if (!session?.user?.companyId) return new NextResponse("Unauthorized", { status: 401 })
 
     try {
-        const settings = await queryOne(
-            `SELECT "whatsappWebhookUrl" FROM "Settings" WHERE "companyId" = $1 LIMIT 1`,
-            [session.user.companyId]
-        )
+        const { data: company } = await supabaseAdmin
+            .from("Company")
+            .select("whatsappWebhookUrl")
+            .eq("id", session.user.companyId)
+            .maybeSingle()
+
         return NextResponse.json({
-            whatsappWebhookUrl: settings?.whatsappWebhookUrl || "https://webhook.berthia.com.br/webhook/folhazap"
+            whatsappWebhookUrl: company?.whatsappWebhookUrl || "https://webhook.berthia.com.br/webhook/folhazap"
         })
     } catch (err: any) {
         console.error("[SETTINGS_GET]", err.message)
