@@ -235,143 +235,129 @@ export async function getEmployeeComprovantes(cpf: string, employeeId?: string) 
 }
 
 export async function sendMassMessage(data: { departmentId: string, month: number, year: number }) {
-    const session = await auth()
-    if (!session?.user?.companyId) throw new Error("Não autorizado")
-    
-    const companyId = session.user.companyId
-    const companyName = session.user.companyName || "Empresa"
-    
-    // Fetch employees with their department info
-    const employees = await prisma.employee.findMany({
-        where: {
-            companyId,
-            status: "ACTIVE",
-            departmentId: data.departmentId === "all" ? undefined : data.departmentId,
-            pagamento: {
-                equals: "efetuado",
-                mode: "insensitive"
-            }
-        },
-        select: {
-            name: true,
-            cpf: true,
-            pagamento: true,
-            salary: true,
-            phone: true,
-            department: {
-                select: {
-                    id: true,
-                    name: true
-                }
-            }
-        }
-    })
-
-    if (employees.length === 0) {
-        return { success: false, count: 0, message: "Nenhum funcionário com pagamento efetuado nesta unidade." }
-    }
-
-    const monthLabel = [
-        "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
-        "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
-    ][data.month - 1]
-
-    // Group employees by department ID
-    const groups: Record<string, { name: string, members: typeof employees }> = {}
-    
-    for (const e of employees) {
-        const dId = e.department?.id || "unassigned"
-        const dName = e.department?.name || "Sem Unidade"
-        if (!groups[dId]) groups[dId] = { name: dName, members: [] }
-        groups[dId].members.push(e)
-    }
-
-    const company = await prisma.company.findUnique({
-        where: { id: companyId },
-        select: { whatsappWebhookUrl: true }
-    })
-
-    const webhookUrl = company?.whatsappWebhookUrl || "https://webhook.berthia.com.br/webhook/envio-de-mensagem"
-    let totalSent = 0
-
-    // Send one hit per unit
-    for (const dId in groups) {
-        const group = groups[dId]
-        const payload = {
-            unidade: group.name,
-            company: companyName,
-            month: monthLabel,
-            year: data.year,
-            funcionarios: group.members.map(e => ({
-                nome: e.name,
-                employee: e.name,
-                salary: Number(e.salary),
-                contact: e.phone || "Não informado",
-                cpf: e.cpf
-            }))
-        }
-
-        const response = await fetch(webhookUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
-        })
-
-        if (!response.ok) {
-            console.error(`[SEND_MASS_MESSAGE] Falha ao enviar para unidade ${group.name}`)
-            // Continuamos para as próximas unidades mesmo se uma falhar?
-            // Vamos assumir que sim para não interromper todo o processo.
-        } else {
-            totalSent += group.members.length
-        }
-    }
-
-    if (totalSent === 0 && employees.length > 0) {
-        throw new Error("Falha ao enviar para o webhook externo em todas as tentativas.")
-    }
-
-    // Registrar envios no histórico de mensagens (mensagens_zap) usando Prisma
-    const now = new Date()
-    
-    for (const e of employees) {
-        if (!e.phone) continue
+    try {
+        const session = await auth()
+        if (!session?.user?.companyId) return { success: false, message: "Não autorizado" }
         
-        const phoneClean = e.phone.replace(/\D/g, "")
-        if (!phoneClean) continue
-
-        // Buscar ou criar Lead para este contato usando Prisma
-        let lead = await prisma.leads.findFirst({
+        const companyId = session.user.companyId
+        const companyName = session.user.companyName || "Empresa"
+        
+        // Fetch employees with their department info
+        const employees = await prisma.employee.findMany({
             where: {
-                celular: {
-                    contains: phoneClean.slice(-8)
+                companyId,
+                status: "ACTIVE",
+                departmentId: data.departmentId === "all" ? undefined : data.departmentId,
+                pagamento: {
+                    equals: "efetuado",
+                    mode: "insensitive"
+                }
+            },
+            select: {
+                id: true,
+                name: true,
+                cpf: true,
+                pagamento: true,
+                salary: true,
+                phone: true,
+                department: {
+                    select: {
+                        id: true,
+                        name: true
+                    }
                 }
             }
         })
 
-        if (!lead) {
-            lead = await prisma.leads.create({
-                data: {
+        if (employees.length === 0) {
+            return { success: false, count: 0, message: "Nenhum funcionário com pagamento efetuado nesta unidade." }
+        }
+
+        const monthLabel = [
+            "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+            "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+        ][data.month - 1]
+
+        // Group employees by department ID
+        const groups: Record<string, { name: string, members: typeof employees }> = {}
+        for (const e of employees) {
+            const dId = e.department?.id || "unassigned"
+            const dName = e.department?.name || "Sem Unidade"
+            if (!groups[dId]) groups[dId] = { name: dName, members: [] }
+            groups[dId].members.push(e)
+        }
+
+        const company = await prisma.company.findUnique({
+            where: { id: companyId },
+            select: { whatsappWebhookUrl: true }
+        })
+
+        const webhookUrl = company?.whatsappWebhookUrl || "https://webhook.berthia.com.br/webhook/envio-de-mensagem"
+        let totalSent = 0
+
+        // Send all unit hits in PARALLEL to avoid Vercel timeouts
+        const webhookPromises = Object.keys(groups).map(async (dId) => {
+            const group = groups[dId]
+            const payload = {
+                unidade: group.name,
+                company: companyName,
+                month: monthLabel,
+                year: data.year,
+                funcionarios: group.members.map(e => ({
                     nome: e.name,
-                    celular: phoneClean,
-                    createdAt: now
-                }
+                    employee: e.name,
+                    salary: Number(e.salary),
+                    contact: e.phone || "Não informado",
+                    cpf: e.cpf
+                }))
+            }
+
+            try {
+                const response = await fetch(webhookUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                })
+                if (response.ok) return group.members.length
+            } catch (fetchErr) {
+                console.error(`[SEND_MASS_MESSAGE] Network error for unit ${group.name}:`, fetchErr)
+            }
+            return 0
+        })
+
+        const results = await Promise.all(webhookPromises)
+        totalSent = results.reduce((acc, count) => acc + count, 0)
+
+        if (totalSent === 0 && employees.length > 0) {
+            return { success: false, message: "Falha ao enviar para o webhook externo em todas as tentativas." }
+        }
+
+        // Optimization: Background/Batch logging of messages
+        const now = new Date()
+        const logData = employees
+            .filter(e => e.phone && e.phone.replace(/\D/g, ""))
+            .map(e => ({
+                conteudo: `Aviso de pagamento de ${monthLabel}/${data.year} enviado com sucesso via ${e.department?.name || 'Unidade'}.`,
+                tipo: "COMPANY",
+                createdAt: now,
+                numeroFuncionario: e.phone?.replace(/\D/g, ""),
+                funcionario: "true"
+            }))
+
+        if (logData.length > 0) {
+            // Using createMany for better performance in production
+            await prisma.mensagensZap.createMany({
+                data: logData,
+                skipDuplicates: true
             })
         }
 
-        if (lead) {
-            await prisma.mensagensZap.create({
-                data: {
-                    leadId: lead.id,
-                    tipo: "COMPANY",
-                    conteudo: `Aviso de pagamento de ${monthLabel}/${data.year} enviado com sucesso.`,
-                    createdAt: now,
-                    funcionario: "false"
-                }
-            })
-        }
+        return { success: true, count: totalSent }
+
+    } catch (err: any) {
+        console.error("[SEND_MASS_MESSAGE] Unexpected crash:", err.message)
+        return { success: false, message: "Erro interno no servidor ao processar o envio." }
     }
-
-    return { success: true, count: totalSent }
 }
 
 export async function deleteComprovante(id: string) {
