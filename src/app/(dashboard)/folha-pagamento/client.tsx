@@ -2179,11 +2179,9 @@ export function FolhaPagamentoClient({
                             
                             <div className="flex-1 px-3 space-y-1">
                                 {[
-                                    { id: "unregistered", label: "Não Cadastrados", count: errorGroups.unregistered.length, icon: UserPlus, color: "text-amber-500" },
                                     { id: "invalidCpfs", label: "CPFs Inválidos", count: errorGroups.invalidCpfs.length, icon: ShieldCheck, color: "text-red-500" },
                                     { id: "duplicates", label: "Duplicidades", count: errorGroups.duplicates.length, icon: RotateCcw, color: "text-purple-500" },
                                     { id: "nameMismatches", label: "Divergência Nome", count: errorGroups.nameMismatches.length, icon: Info, color: "text-blue-500" },
-                                    { id: "valueMismatches", label: "Divergência Valor", count: errorGroups.valueMismatches.length, icon: Receipt, color: "text-emerald-500" },
                                     { id: "extras", label: "Sem CPF (Extras)", count: errorGroups.extras.length, icon: AlertCircle, color: "text-orange-500" },
                                 ].map((tab) => (
                                     <button
