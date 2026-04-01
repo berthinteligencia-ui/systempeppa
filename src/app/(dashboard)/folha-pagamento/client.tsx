@@ -858,7 +858,31 @@ export function FolhaPagamentoClient({
         }
 
         // ── Abas de dados ─────────────────────────────────────────────────────
-        const allExportRows = viewFilter === "EXCLUIDOS" ? [] : sortedResultRows
+        // Ordenação específica para planilha: CPF inválido/duplicados → divergência de nome → extras → cadastrados → demais
+        const exportPriority = (r: AnalyzedRow): number => {
+            const isDup =
+                duplicateCpfSet.has(`${r.sheet}::${r.cpf}`) ||
+                crossAbaDuplicateSet.has(r.cpf) ||
+                duplicateNomeSet.has((r.nome || "").toLowerCase().trim())
+            
+            const isPerfectMatch = 
+                r.status === "found" && 
+                !((r as FoundRow).nameMismatch || (r as FoundRow).valueMismatch || (r as any).isInvalidCpf || isDup)
+
+            if (isPerfectMatch) return 0
+            if (r.status === "found" && (r as FoundRow).nameMismatch) return 1
+            if (r.status === "found" && (r as FoundRow).valueMismatch) return 2
+            if ((r as any).isInvalidCpf || isDup) return 3
+            if (r.status === "extra") return 4
+            if (r.status === "missing") return 5
+            return 6
+        }
+        const allExportRows = viewFilter === "EXCLUIDOS" ? [] :
+            [...sortedResultRows].sort((a, b) => {
+                const pa = exportPriority(a), pb = exportPriority(b)
+                if (pa !== pb) return pa - pb
+                return a.nome.localeCompare(b.nome)
+            })
         const sheetNames = Array.from(new Set(allExportRows.map(r => r.sheet))).sort()
 
         const usedNames = new Set<string>()
@@ -1001,15 +1025,10 @@ export function FolhaPagamentoClient({
             r.status === "found" && 
             !((r as FoundRow).nameMismatch || (r as FoundRow).valueMismatch || (r as any).isInvalidCpf || isDuplicate)
 
-        // Matches com Divergências ganham prioridade máxima para correção (Level 0-2)
-        if (r.status === "found") {
-            if ((r as any).isInvalidCpf || isDuplicate) return 0
-            if ((r as FoundRow).valueMismatch) return 1
-            if ((r as FoundRow).nameMismatch) return 2
-            if (isPerfectMatch) return 3 // Conventência Perfeita (ainda dentro do início/found)
-        }
-        
-        // Pendências (vêm depois dos "encontrados" no início)
+        if (isPerfectMatch) return 0
+        if (r.status === "found" && (r as FoundRow).nameMismatch) return 1
+        if (r.status === "found" && (r as FoundRow).valueMismatch) return 2
+        if ((r as any).isInvalidCpf || isDuplicate) return 3
         if (r.status === "extra") return 4
         if (r.status === "missing") return 5
         
@@ -1084,7 +1103,7 @@ export function FolhaPagamentoClient({
         return { unregistered, invalidCpfs, nameMismatches, valueMismatches, duplicates, extras }
     }, [result, resultRows, missing, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet])
 
-    const [activeErrorTab, setActiveErrorTab] = useState<"unregistered" | "invalidCpfs" | "duplicates" | "nameMismatches" | "valueMismatches" | "extras">("invalidCpfs")
+    const [activeErrorTab, setActiveErrorTab] = useState<"invalidCpfs" | "duplicates" | "nameMismatches" | "extras">("invalidCpfs")
 
     const showResults = phase === "result" || phase === "pending"
 
@@ -2194,11 +2213,9 @@ export function FolhaPagamentoClient({
                             
                             <div className="flex-1 px-3 space-y-1">
                                 {[
-                                    { id: "unregistered", label: "Não Cadastrados", count: errorGroups.unregistered.length, icon: UserPlus, color: "text-amber-500" },
                                     { id: "invalidCpfs", label: "CPFs Inválidos", count: errorGroups.invalidCpfs.length, icon: ShieldCheck, color: "text-red-500" },
                                     { id: "duplicates", label: "Duplicidades", count: errorGroups.duplicates.length, icon: RotateCcw, color: "text-purple-500" },
                                     { id: "nameMismatches", label: "Divergência Nome", count: errorGroups.nameMismatches.length, icon: Info, color: "text-blue-500" },
-                                    { id: "valueMismatches", label: "Divergência Valor", count: errorGroups.valueMismatches.length, icon: Receipt, color: "text-emerald-500" },
                                     { id: "extras", label: "Sem CPF (Extras)", count: errorGroups.extras.length, icon: AlertCircle, color: "text-orange-500" },
                                 ].map((tab) => (
                                     <button
@@ -2229,11 +2246,9 @@ export function FolhaPagamentoClient({
                             <div className="px-8 py-6 bg-white border-b flex items-center justify-between">
                                 <div>
                                     <h3 className="font-bold text-slate-800 text-lg">
-                                        {activeErrorTab === "unregistered" && "Funcionários não encontrados no sistema"}
                                         {activeErrorTab === "invalidCpfs" && "CPFs com formato ou dígitos inválidos"}
                                         {activeErrorTab === "duplicates" && "Registros duplicados detectados"}
                                         {activeErrorTab === "nameMismatches" && "Divergências entre planilha e sistema"}
-                                        {activeErrorTab === "valueMismatches" && "Divergências de valores (spreadsheet vs sistema)"}
                                         {activeErrorTab === "extras" && "Registros extras sem CPF identificado"}
                                     </h3>
                                     <p className="text-xs text-slate-400 mt-1 font-medium">Selecione os registros para correção ou exclusão em massa.</p>
@@ -2368,12 +2383,6 @@ export function FolhaPagamentoClient({
                                                                 {duplicateCpfSet.has(`${row.sheet}::${row.cpf}`) ? "DUPLICADO NESTA ABA" : "DUPLICADO ENTRE ABAS"}
                                                             </div>
                                                         )}
-                                                        {activeErrorTab === "valueMismatches" && (
-                                                            <div className="flex items-center gap-1 text-[9px] px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-600 border border-emerald-100 font-bold underline decoration-dotted">
-                                                                <Receipt className="h-2.5 w-2.5" />
-                                                                SISTEMA: {fmtBRL((row as FoundRow).dbSalary || 0)}
-                                                            </div>
-                                                        )}
                                                     </div>
                                                 </div>
 
@@ -2385,7 +2394,7 @@ export function FolhaPagamentoClient({
 
                                                     <div className="flex items-center gap-1.5 border-l border-slate-100 pl-4 py-1">
                                                         {activeErrorTab === "nameMismatches" && (
-                                                            <button 
+                                                            <button
                                                                 onClick={() => handleReconcileName(row as FoundRow)}
                                                                 className="h-8 px-3 rounded-lg flex items-center gap-2 bg-blue-600 text-white hover:bg-blue-700 transition-all font-black text-[9px] uppercase tracking-wider shadow-sm hover:shadow-blue-200"
                                                             >
@@ -2393,19 +2402,11 @@ export function FolhaPagamentoClient({
                                                             </button>
                                                         )}
                                                         {activeErrorTab === "duplicates" && (
-                                                            <button 
+                                                            <button
                                                                 onClick={() => handleMergeDuplicates(row.cpf!)}
                                                                 className="h-8 px-3 rounded-lg flex items-center gap-2 bg-purple-600 text-white hover:bg-purple-700 transition-all font-black text-[9px] uppercase tracking-wider shadow-sm hover:shadow-purple-200"
                                                             >
                                                                 <RotateCcw className="h-3 w-3" /> Consolidar
-                                                            </button>
-                                                        )}
-                                                        {activeErrorTab === "valueMismatches" && (
-                                                            <button 
-                                                                onClick={() => handleReconcileSalary(row as FoundRow)}
-                                                                className="h-8 px-3 rounded-lg flex items-center gap-2 bg-emerald-600 text-white hover:bg-emerald-700 transition-all font-black text-[9px] uppercase tracking-wider shadow-sm hover:shadow-emerald-200"
-                                                            >
-                                                                <CheckCircle2 className="h-3 w-3" /> Conciliar
                                                             </button>
                                                         )}
                                                         
@@ -2426,16 +2427,6 @@ export function FolhaPagamentoClient({
 
                             <div className="px-8 py-4 bg-white border-t flex justify-end gap-3">
                                 <Button variant="outline" onClick={() => setIsErrorCorrectionOpen(false)} className="rounded-xl px-6">Fechar</Button>
-                                {activeErrorTab === "unregistered" && errorGroups.unregistered.length > 0 && (
-                                    <Button 
-                                        onClick={handleRegisterAll}
-                                        disabled={registering}
-                                        className="bg-amber-500 hover:bg-amber-600 text-white rounded-xl px-6 gap-2"
-                                    >
-                                        {registering ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
-                                        Cadastrar Todos ({errorGroups.unregistered.length})
-                                    </Button>
-                                )}
                             </div>
                         </div>
                     </div>
