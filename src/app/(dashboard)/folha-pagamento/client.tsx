@@ -1056,7 +1056,7 @@ export function FolhaPagamentoClient({
     const errorGroups = useMemo(() => {
         if (!result) return { unregistered: [], invalidCpfs: [], nameMismatches: [], valueMismatches: [], duplicates: [], extras: [] }
         
-        const unregistered = missing.map(r => ({ ...r, errorType: "unregistered" as const }))
+        const unregistered = missing.map(r => ({ ...r, status: "missing" as const, errorType: "unregistered" as const }))
         const invalidCpfs = resultRows.filter(r => (r as any).isInvalidCpf).map(r => ({ ...r, errorType: "invalidCpf" as const }))
         const nameMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).nameMismatch).map(r => ({ ...r, errorType: "nameMismatch" as const }))
         const valueMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).valueMismatch).map(r => ({ ...r, errorType: "valueMismatch" as const }))
@@ -1068,7 +1068,7 @@ export function FolhaPagamentoClient({
             duplicateNomeSet.has(r.nome.toLowerCase().trim())
         ).map(r => ({ ...r, errorType: "duplicate" as const }))
         
-        const extras = (result.extras || []).map(r => ({ ...r, cpf: (r as any).cpfCnpj || "", errorType: "extra" as const }))
+        const extras = (result.extras || []).map(r => ({ ...r, status: "extra" as const, cpf: (r as any).cpfCnpj || "", errorType: "extra" as const }))
 
         return { unregistered, invalidCpfs, nameMismatches, valueMismatches, duplicates, extras }
     }, [result, missing, resultRows, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet])
