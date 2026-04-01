@@ -1044,19 +1044,17 @@ export function FolhaPagamentoClient({
 
     const totalDiversions = useMemo(() => {
         if (!result) return 0
-        return missing.length + 
-               invalidCpfCount + 
+        return invalidCpfCount + 
                nameMismatchCount + 
                valMismatchCount +
                duplicateCpfCount + 
                crossAbaDuplicateCount + 
                (result?.extras?.length || 0)
-    }, [result, resultRows, missing, invalidCpfCount, nameMismatchCount, valMismatchCount, duplicateCpfCount, crossAbaDuplicateCount])
+    }, [result, resultRows, invalidCpfCount, nameMismatchCount, valMismatchCount, duplicateCpfCount, crossAbaDuplicateCount])
 
     const errorGroups = useMemo(() => {
-        if (!result) return { unregistered: [], invalidCpfs: [], nameMismatches: [], valueMismatches: [], duplicates: [], extras: [] }
+        if (!result) return { invalidCpfs: [], nameMismatches: [], valueMismatches: [], duplicates: [], extras: [] }
         
-        const unregistered = missing.map(r => ({ ...r, status: "missing" as const, errorType: "unregistered" as const }))
         const invalidCpfs = resultRows.filter(r => (r as any).isInvalidCpf).map(r => ({ ...r, errorType: "invalidCpf" as const }))
         const nameMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).nameMismatch).map(r => ({ ...r, errorType: "nameMismatch" as const }))
         const valueMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).valueMismatch).map(r => ({ ...r, errorType: "valueMismatch" as const }))
@@ -1070,10 +1068,10 @@ export function FolhaPagamentoClient({
         
         const extras = (result.extras || []).map(r => ({ ...r, status: "extra" as const, cpf: (r as any).cpfCnpj || "", errorType: "extra" as const }))
 
-        return { unregistered, invalidCpfs, nameMismatches, valueMismatches, duplicates, extras }
-    }, [result, missing, resultRows, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet])
+        return { invalidCpfs, nameMismatches, valueMismatches, duplicates, extras }
+    }, [result, resultRows, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet])
 
-    const [activeErrorTab, setActiveErrorTab] = useState<"unregistered" | "invalidCpfs" | "duplicates" | "nameMismatches" | "valueMismatches" | "extras">("unregistered")
+    const [activeErrorTab, setActiveErrorTab] = useState<"invalidCpfs" | "duplicates" | "nameMismatches" | "valueMismatches" | "extras">("invalidCpfs")
 
     const showResults = phase === "result" || phase === "pending"
 
@@ -2266,17 +2264,6 @@ export function FolhaPagamentoClient({
                                                     <Trash2 className="h-3 w-3" /> Excluir ({selectedErrorRows.length})
                                                 </button>
 
-                                                {activeErrorTab === "unregistered" && (
-                                                    <button 
-                                                        onClick={async () => {
-                                                            const rows = errorGroups.unregistered.filter(r => selectedErrorRows.includes(`${r.sheet}::${r.cpf}`))
-                                                            if (confirm(`Cadastrar ${rows.length} novos funcionários?`)) {
-                                                                setRegistering(true)
-                                                                try {
-                                                                    await registerBatchFromPayroll(rows.map(r => ({ ...r, cpf: r.cpf.replace(/\D/g, "") })), unidade)
-                                                                    const fd = new FormData()
-                                                                    fd.append("file", file!); fd.append("mes", mes); fd.append("ano", ano); fd.append("unidade", unidade)
-                                                                    const res = await fetch("/api/folha/analyze", { method: "POST", body: fd })
                                                                     const data = await res.json()
                                                                     if (res.ok) setResult(data)
                                                                     setSelectedErrorRows([])
