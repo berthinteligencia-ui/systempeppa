@@ -1,7 +1,5 @@
 "use server"
 
-import { revalidationPath } from "next/cache" // Wait, it's revalidatePath
-
 import { revalidatePath } from "next/cache"
 import { getSupabaseAdmin, check } from "@/lib/supabase-admin"
 import { auth } from "@/lib/auth"
