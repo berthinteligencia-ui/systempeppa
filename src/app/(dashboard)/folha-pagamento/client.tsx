@@ -1038,6 +1038,7 @@ export function FolhaPagamentoClient({
 
     const invalidCpfCount = resultRows.filter(r => (r as any).isInvalidCpf).length
     const nameMismatchCount = resultRows.filter(r => r.status === "found" && (r as FoundRow).nameMismatch).length
+    const valMismatchCount = resultRows.filter(r => r.status === "found" && (r as FoundRow).valueMismatch).length
     const duplicateCpfCount = duplicateCpfSet.size
     const crossAbaDuplicateCount = crossAbaDuplicateSet.size
 
@@ -1045,16 +1046,20 @@ export function FolhaPagamentoClient({
         if (!result) return 0
         return invalidCpfCount + 
                nameMismatchCount + 
+               valMismatchCount +
                duplicateCpfCount + 
                crossAbaDuplicateCount + 
+               missing.length +
                (result?.extras?.length || 0)
-    }, [result, resultRows, invalidCpfCount, nameMismatchCount, duplicateCpfCount, crossAbaDuplicateCount])
+    }, [result, resultRows, invalidCpfCount, nameMismatchCount, valMismatchCount, duplicateCpfCount, crossAbaDuplicateCount, missing])
 
     const errorGroups = useMemo(() => {
-        if (!result) return { invalidCpfs: [], nameMismatches: [], duplicates: [], extras: [] }
+        if (!result) return { unregistered: [], invalidCpfs: [], nameMismatches: [], valueMismatches: [], duplicates: [], extras: [] }
         
+        const unregistered = missing.map(r => ({ ...r, errorType: "unregistered" as const }))
         const invalidCpfs = resultRows.filter(r => (r as any).isInvalidCpf).map(r => ({ ...r, errorType: "invalidCpf" as const }))
         const nameMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).nameMismatch).map(r => ({ ...r, errorType: "nameMismatch" as const }))
+        const valueMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).valueMismatch).map(r => ({ ...r, errorType: "valueMismatch" as const }))
         
         // Group duplicates by CPF or Name
         const duplicates: AnalyzedRow[] = resultRows.filter(r => 
@@ -1065,10 +1070,10 @@ export function FolhaPagamentoClient({
         
         const extras = (result.extras || []).map(r => ({ ...r, status: "extra" as const, cpf: (r as any).cpfCnpj || "", errorType: "extra" as const }))
 
-        return { invalidCpfs, nameMismatches, duplicates, extras }
-    }, [result, resultRows, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet])
+        return { unregistered, invalidCpfs, nameMismatches, valueMismatches, duplicates, extras }
+    }, [result, resultRows, missing, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet])
 
-    const [activeErrorTab, setActiveErrorTab] = useState<"invalidCpfs" | "duplicates" | "nameMismatches" | "extras">("invalidCpfs")
+    const [activeErrorTab, setActiveErrorTab] = useState<"unregistered" | "invalidCpfs" | "duplicates" | "nameMismatches" | "valueMismatches" | "extras">("invalidCpfs")
 
     const showResults = phase === "result" || phase === "pending"
 
@@ -1504,16 +1509,17 @@ export function FolhaPagamentoClient({
                     )}
 
                     {/* Missing CPFs and Inconsistencies banner */}
-                    {phase === "pending" && (missing.length > 0 || invalidCpfCount > 0 || nameMismatchCount > 0 || duplicateCpfCount > 0 || crossAbaDuplicateCount > 0) && (
+                    {phase === "pending" && (missing.length > 0 || invalidCpfCount > 0 || nameMismatchCount > 0 || valMismatchCount > 0 || duplicateCpfCount > 0 || crossAbaDuplicateCount > 0) && (
                         <div className="mx-5 mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
                             <div className="flex items-center gap-2 mb-3">
                                 <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
                                 <div>
-                                    <h3 className="text-sm font-bold text-amber-900">Atenção Necessária ({missing.length + invalidCpfCount + nameMismatchCount + duplicateCpfCount + crossAbaDuplicateCount})</h3>
+                                    <h3 className="text-sm font-bold text-amber-900">Atenção Necessária ({missing.length + invalidCpfCount + nameMismatchCount + valMismatchCount + duplicateCpfCount + crossAbaDuplicateCount})</h3>
                                     <p className="text-[11px] text-amber-700">
                                         {missing.length > 0 && `${missing.length} não cadastrados. `}
                                         {invalidCpfCount > 0 && `${invalidCpfCount} CPF(s) inválidos. `}
                                         {nameMismatchCount > 0 && `${nameMismatchCount} divergências de nome. `}
+                                        {valMismatchCount > 0 && `${valMismatchCount} divergências de valor. `}
                                         {duplicateCpfCount > 0 && `${duplicateCpfCount} CPF(s) dup. mesma aba. `}
                                         {crossAbaDuplicateCount > 0 && `${crossAbaDuplicateCount} CPF(s) dup. entre abas.`}
                                     </p>
@@ -2177,9 +2183,11 @@ export function FolhaPagamentoClient({
                             
                             <div className="flex-1 px-3 space-y-1">
                                 {[
+                                    { id: "unregistered", label: "Não Cadastrados", count: errorGroups.unregistered.length, icon: UserPlus, color: "text-amber-500" },
                                     { id: "invalidCpfs", label: "CPFs Inválidos", count: errorGroups.invalidCpfs.length, icon: ShieldCheck, color: "text-red-500" },
                                     { id: "duplicates", label: "Duplicidades", count: errorGroups.duplicates.length, icon: RotateCcw, color: "text-purple-500" },
                                     { id: "nameMismatches", label: "Divergência Nome", count: errorGroups.nameMismatches.length, icon: Info, color: "text-blue-500" },
+                                    { id: "valueMismatches", label: "Divergência Valor", count: errorGroups.valueMismatches.length, icon: Receipt, color: "text-emerald-500" },
                                     { id: "extras", label: "Sem CPF (Extras)", count: errorGroups.extras.length, icon: AlertCircle, color: "text-orange-500" },
                                 ].map((tab) => (
                                     <button
@@ -2210,9 +2218,11 @@ export function FolhaPagamentoClient({
                             <div className="px-8 py-6 bg-white border-b flex items-center justify-between">
                                 <div>
                                     <h3 className="font-bold text-slate-800 text-lg">
+                                        {activeErrorTab === "unregistered" && "Funcionários não encontrados no sistema"}
                                         {activeErrorTab === "invalidCpfs" && "CPFs com formato ou dígitos inválidos"}
                                         {activeErrorTab === "duplicates" && "Registros duplicados detectados"}
                                         {activeErrorTab === "nameMismatches" && "Divergências entre planilha e sistema"}
+                                        {activeErrorTab === "valueMismatches" && "Divergências de valores (spreadsheet vs sistema)"}
                                         {activeErrorTab === "extras" && "Registros extras sem CPF identificado"}
                                     </h3>
                                     <p className="text-xs text-slate-400 mt-1 font-medium">Selecione os registros para correção ou exclusão em massa.</p>
@@ -2284,12 +2294,14 @@ export function FolhaPagamentoClient({
                                         
                                         // Configurações de estilo por tipo de aba
                                         const tabStyles: Record<string, { border: string, bg: string, text: string, icon: any }> = {
+                                            unregistered: { border: "border-l-amber-500", bg: "bg-amber-50", text: "text-amber-700", icon: UserPlus },
                                             invalidCpfs: { border: "border-l-red-500", bg: "bg-red-50", text: "text-red-700", icon: ShieldCheck },
                                             duplicates: { border: "border-l-purple-500", bg: "bg-purple-50", text: "text-purple-700", icon: RotateCcw },
                                             nameMismatches: { border: "border-l-blue-500", bg: "bg-blue-50", text: "text-blue-700", icon: Info },
+                                            valueMismatches: { border: "border-l-emerald-500", bg: "bg-emerald-50", text: "text-emerald-700", icon: Receipt },
                                             extras: { border: "border-l-orange-500", bg: "bg-orange-50", text: "text-orange-700", icon: AlertCircle }
                                         }
-                                        const style = tabStyles[activeErrorTab] || tabStyles.invalidCpfs
+                                        const style = tabStyles[activeErrorTab] || tabStyles.unregistered
 
                                         return (
                                             <div 
@@ -2345,6 +2357,12 @@ export function FolhaPagamentoClient({
                                                                 {duplicateCpfSet.has(`${row.sheet}::${row.cpf}`) ? "DUPLICADO NESTA ABA" : "DUPLICADO ENTRE ABAS"}
                                                             </div>
                                                         )}
+                                                        {activeErrorTab === "valueMismatches" && (
+                                                            <div className="flex items-center gap-1 text-[9px] px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-600 border border-emerald-100 font-bold underline decoration-dotted">
+                                                                <Receipt className="h-2.5 w-2.5" />
+                                                                SISTEMA: {fmtBRL((row as FoundRow).dbSalary || 0)}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 </div>
 
@@ -2371,6 +2389,14 @@ export function FolhaPagamentoClient({
                                                                 <RotateCcw className="h-3 w-3" /> Consolidar
                                                             </button>
                                                         )}
+                                                        {activeErrorTab === "valueMismatches" && (
+                                                            <button 
+                                                                onClick={() => handleReconcileSalary(row as FoundRow)}
+                                                                className="h-8 px-3 rounded-lg flex items-center gap-2 bg-emerald-600 text-white hover:bg-emerald-700 transition-all font-black text-[9px] uppercase tracking-wider shadow-sm hover:shadow-emerald-200"
+                                                            >
+                                                                <CheckCircle2 className="h-3 w-3" /> Conciliar
+                                                            </button>
+                                                        )}
                                                         
                                                         <button 
                                                             onClick={() => handleDeleteRow(row)}
@@ -2389,6 +2415,16 @@ export function FolhaPagamentoClient({
 
                             <div className="px-8 py-4 bg-white border-t flex justify-end gap-3">
                                 <Button variant="outline" onClick={() => setIsErrorCorrectionOpen(false)} className="rounded-xl px-6">Fechar</Button>
+                                {activeErrorTab === "unregistered" && errorGroups.unregistered.length > 0 && (
+                                    <Button 
+                                        onClick={handleRegisterAll}
+                                        disabled={registering}
+                                        className="bg-amber-500 hover:bg-amber-600 text-white rounded-xl px-6 gap-2"
+                                    >
+                                        {registering ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+                                        Cadastrar Todos ({errorGroups.unregistered.length})
+                                    </Button>
+                                )}
                             </div>
                         </div>
                     </div>
