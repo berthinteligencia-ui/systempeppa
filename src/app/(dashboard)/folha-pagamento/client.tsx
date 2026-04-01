@@ -967,8 +967,8 @@ export function FolhaPagamentoClient({
         const nomeCounts = new Map<string, number>()
         
         resultRows.forEach(r => {
-            const nKey = r.nome.toLowerCase().trim()
-            nomeCounts.set(nKey, (nomeCounts.get(nKey) ?? 0) + 1)
+            const nKey = (r.nome || "").toLowerCase().trim()
+            if (nKey) nomeCounts.set(nKey, (nomeCounts.get(nKey) ?? 0) + 1)
 
             if (!r.cpf || r.cpf === "—") return
             const key = `${r.sheet}::${r.cpf}`
@@ -992,31 +992,28 @@ export function FolhaPagamentoClient({
     //           1 = não cadastrado (missing sem outra inconsistência)
     //           2 = cadastrado sem problemas → base
     const rowPriority = useCallback((r: AnalyzedRow): number => {
-        // Level 0: Perfeito (Encontrado sem inconsistências nem duplicidades)
         const isDuplicate = 
             duplicateCpfSet.has(`${r.sheet}::${r.cpf}`) || 
             crossAbaDuplicateSet.has(r.cpf) || 
-            duplicateNomeSet.has(r.nome.toLowerCase().trim())
+            duplicateNomeSet.has((r.nome || "").toLowerCase().trim())
         
-        const hasNoMismatches = 
+        const isPerfectMatch = 
             r.status === "found" && 
             !((r as FoundRow).nameMismatch || (r as FoundRow).valueMismatch || (r as any).isInvalidCpf || isDuplicate)
 
-        if (hasNoMismatches) return 0
-        
-        // Níveis de divergência para "convergências encontradas" (Found)
+        // Matches com Divergências ganham prioridade máxima para correção (Level 0-2)
         if (r.status === "found") {
-            if ((r as FoundRow).nameMismatch) return 1
-            if ((r as FoundRow).valueMismatch) return 2
-            if ((r as any).isInvalidCpf) return 3
-            if (isDuplicate) return 4
+            if ((r as any).isInvalidCpf || isDuplicate) return 0
+            if ((r as FoundRow).valueMismatch) return 1
+            if ((r as FoundRow).nameMismatch) return 2
+            if (isPerfectMatch) return 3 // Conventência Perfeita (ainda dentro do início/found)
         }
         
-        // Pendências críticas (não encontrados ou sem CPF)
+        // Pendências (vêm depois dos "encontrados" no início)
+        if (r.status === "extra") return 4
         if (r.status === "missing") return 5
-        if (r.status === "extra") return 6
         
-        return 7
+        return 6
     }, [duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet])
 
     const sortedResultRows = useMemo(() => {
