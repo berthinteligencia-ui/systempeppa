@@ -858,7 +858,7 @@ export function FolhaPagamentoClient({
         }
 
         // ── Abas de dados ─────────────────────────────────────────────────────
-        const allExportRows = viewFilter === "EXCLUIDOS" ? [] : resultRows
+        const allExportRows = viewFilter === "EXCLUIDOS" ? [] : sortedResultRows
         const sheetNames = Array.from(new Set(allExportRows.map(r => r.sheet))).sort()
 
         const usedNames = new Set<string>()
@@ -992,17 +992,31 @@ export function FolhaPagamentoClient({
     //           1 = não cadastrado (missing sem outra inconsistência)
     //           2 = cadastrado sem problemas → base
     const rowPriority = useCallback((r: AnalyzedRow): number => {
-        const hasInconsistency =
-            !!(r as any).isInvalidCpf ||
-            (r.status === "found" && !!(r as FoundRow).nameMismatch) ||
-            (r.status === "found" && !!(r as FoundRow).valueMismatch) ||
-            duplicateCpfSet.has(`${r.sheet}::${r.cpf}`) ||
-            crossAbaDuplicateSet.has(r.cpf) ||
-            duplicateNomeSet.has(r.nome.toLowerCase().trim()) ||
-            r.status === "extra"
-        if (hasInconsistency) return 0
-        if (r.status === "missing") return 1
-        return 2
+        // Level 0: Perfeito (Encontrado sem inconsistências nem duplicidades)
+        const isDuplicate = 
+            duplicateCpfSet.has(`${r.sheet}::${r.cpf}`) || 
+            crossAbaDuplicateSet.has(r.cpf) || 
+            duplicateNomeSet.has(r.nome.toLowerCase().trim())
+        
+        const hasNoMismatches = 
+            r.status === "found" && 
+            !((r as FoundRow).nameMismatch || (r as FoundRow).valueMismatch || (r as any).isInvalidCpf || isDuplicate)
+
+        if (hasNoMismatches) return 0
+        
+        // Níveis de divergência para "convergências encontradas" (Found)
+        if (r.status === "found") {
+            if ((r as FoundRow).nameMismatch) return 1
+            if ((r as FoundRow).valueMismatch) return 2
+            if ((r as any).isInvalidCpf) return 3
+            if (isDuplicate) return 4
+        }
+        
+        // Pendências críticas (não encontrados ou sem CPF)
+        if (r.status === "missing") return 5
+        if (r.status === "extra") return 6
+        
+        return 7
     }, [duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet])
 
     const sortedResultRows = useMemo(() => {
