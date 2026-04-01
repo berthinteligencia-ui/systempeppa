@@ -447,7 +447,7 @@ export async function POST(req: NextRequest) {
         const { data: dbEmployees, error: dbError } = cpfs.length > 0
             ? await supabase
                 .from("Employee")
-                .select("id, cpf, name, phone, position, bankName, bankAgency, bankAccount, pixKey")
+                .select("id, cpf, name, salary, phone, position, bankName, bankAgency, bankAccount, pixKey")
                 .eq("companyId", companyId)
                 .in("cpf", cpfs)
             : { data: [], error: null }
@@ -464,15 +464,21 @@ export async function POST(req: NextRequest) {
             .map((r: PayrollRow) => {
                 const e = dbMap.get(r.cpf)!;
                 const dbName = toTitleCase(e.name)
-                // Name mismatch check: normalize both and compare
+                const dbSalary = Number(e.salary || 0)
+                
+                // Name mismatch check
                 const normSheet = r.nome.toLowerCase().replace(/\s+/g, " ").trim()
                 const normDb = dbName.toLowerCase().replace(/\s+/g, " ").trim()
                 const nameMismatch = normSheet !== normDb && !normDb.includes(normSheet) && !normSheet.includes(normDb)
+
+                // Value mismatch check
+                const valueMismatch = Math.abs(r.valor - dbSalary) > 0.01
 
                 return {
                     id: e.id,
                     nome: r.nome,
                     dbName: dbName,
+                    dbSalary: dbSalary,
                     cpf: r.cpf,
                     valor: r.valor,
                     sheet: r.sheet,
@@ -483,7 +489,8 @@ export async function POST(req: NextRequest) {
                     bankAccount: e.bankAccount || r.bankAccount,
                     pix: e.pixKey || r.pix,
                     isInvalidCpf: r.isInvalidCpf,
-                    nameMismatch
+                    nameMismatch,
+                    valueMismatch
                 }
             })
 

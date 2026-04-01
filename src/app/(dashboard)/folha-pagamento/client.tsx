@@ -7,7 +7,7 @@ import {
     FileSpreadsheet, CheckCircle2, X, Calendar, Building2, FileUp,
     AlertTriangle, UserPlus, Users, ChevronRight, ChevronDown, RotateCcw, Loader2, ShieldCheck,
     Trash2, Edit, Phone, Receipt, Maximize2, CirclePlus, Plus, Sparkles, Info, BellRing, Lightbulb,
-    AlertCircle,
+    AlertCircle, Hash,
 } from "lucide-react"
 import * as XLSX from "xlsx"
 import type * as ExcelJSTypes from "exceljs"
@@ -23,7 +23,7 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import { registerBatchFromPayroll, getEmployeeByCpf, updateEmployeesPhone } from "@/lib/actions/employees"
+import { registerBatchFromPayroll, getEmployeeByCpf, updateEmployeesPhone, updateEmployeeName, updateEmployeeSalary } from "@/lib/actions/employees"
 import {
     savePayrollAnalysis, listPayrollAnalyses, getPayrollAnalysis, deletePayrollAnalysis
 } from "@/lib/actions/payroll"
@@ -34,7 +34,7 @@ import { updateNotaFiscalStatus } from "@/lib/actions/nfs"
 type Department = { id: string; name: string }
 type NfRow = { id: string; numero: string; emitente: string; valor: number | string; dataEmissao: Date | string; status: string }
 
-type FoundRow = { id: string; nome: string; cpf: string; valor: number; sheet: string; telefone?: string; cargo?: string; bankName?: string; bankAgency?: string; bankAccount?: string; pix?: string; isInvalidCpf?: boolean; nameMismatch?: boolean; dbName?: string }
+type FoundRow = { id: string; nome: string; cpf: string; valor: number; sheet: string; telefone?: string; cargo?: string; bankName?: string; bankAgency?: string; bankAccount?: string; pix?: string; isInvalidCpf?: boolean; nameMismatch?: boolean; valueMismatch?: boolean; dbName?: string; dbSalary?: number }
 type MissingRow = { cpf: string; nome: string; valor: number; sheet: string; telefone?: string; cargo?: string; bankName?: string; bankAgency?: string; bankAccount?: string; pix?: string; isInvalidCpf?: boolean }
 type ExtraRow = { nome: string; cpfCnpj: string; valor: number; sheet: string; telefone?: string; cargo?: string; bankName?: string; bankAgency?: string; bankAccount?: string; pix?: string }
 type SheetSummary = { sheet: string; count: number; total: number }
@@ -86,6 +86,13 @@ function fmtFile(b: number) {
 function fmtDate(d: Date | string) {
     const dt = new Date(d)
     return dt.toLocaleDateString("pt-BR")
+}
+function getInitials(name: string) {
+    if (!name) return "??"
+    const parts = name.trim().split(" ")
+    if (parts.length === 0) return "??"
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
 }
 
 // ─── Bank name normalization ──────────────────────────────────────────────────
@@ -205,6 +212,8 @@ export function FolhaPagamentoClient({
     const [excludedRows, setExcludedRows] = useState<ExcludedRow[]>([])
     const [pendingExclude, setPendingExclude] = useState<{ row: AnalyzedRow; autoReason: string } | null>(null)
     const [excludeReasonInput, setExcludeReasonInput] = useState("")
+    const [isErrorCorrectionOpen, setIsErrorCorrectionOpen] = useState(false)
+    const [selectedErrorRows, setSelectedErrorRows] = useState<string[]>([])
 
     const searchParams = useSearchParams()
     const router = useRouter()
@@ -585,6 +594,46 @@ export function FolhaPagamentoClient({
         } finally { setIsSaving(false) }
     }
 
+    async function handleReconcileName(row: FoundRow) {
+        if (!confirm(`Deseja atualizar o nome de "${row.dbName}" para "${row.nome}" no sistema?`)) return
+        try {
+            await updateEmployeeName(row.id, row.nome)
+            // Update local state without full reload
+            if (result) {
+                const newResult = { ...result }
+                const idx = newResult.found.findIndex(r => r.id === row.id)
+                if (idx !== -1) {
+                    newResult.found[idx].dbName = row.nome
+                    newResult.found[idx].nameMismatch = false
+                }
+                setResult(newResult)
+            }
+            alert("Nome atualizado com sucesso!")
+        } catch (err: any) {
+            alert("Erro ao atualizar nome: " + err.message)
+        }
+    }
+
+    async function handleReconcileSalary(row: FoundRow) {
+        if (!confirm(`Deseja atualizar o salário de "${row.nome}" de ${fmtBRL(row.dbSalary || 0)} para ${fmtBRL(row.valor)} no sistema?`)) return
+        try {
+            await updateEmployeeSalary(row.id, row.valor)
+            // Update local state
+            if (result) {
+                const newResult = { ...result }
+                const idx = newResult.found.findIndex(r => r.id === row.id)
+                if (idx !== -1) {
+                    newResult.found[idx].dbSalary = row.valor
+                    newResult.found[idx].valueMismatch = false
+                }
+                setResult(newResult)
+            }
+            alert("Salário atualizado com sucesso!")
+        } catch (err: any) {
+            alert("Erro ao atualizar salário: " + err.message)
+        }
+    }
+
     function applyAiActions(actions: any[]): number {
         if (!result) return 0
         let count = 0
@@ -946,6 +995,7 @@ export function FolhaPagamentoClient({
         const hasInconsistency =
             !!(r as any).isInvalidCpf ||
             (r.status === "found" && !!(r as FoundRow).nameMismatch) ||
+            (r.status === "found" && !!(r as FoundRow).valueMismatch) ||
             duplicateCpfSet.has(`${r.sheet}::${r.cpf}`) ||
             crossAbaDuplicateSet.has(r.cpf) ||
             duplicateNomeSet.has(r.nome.toLowerCase().trim()) ||
@@ -988,6 +1038,7 @@ export function FolhaPagamentoClient({
 
     const invalidCpfCount = resultRows.filter(r => (r as any).isInvalidCpf).length
     const nameMismatchCount = resultRows.filter(r => r.status === "found" && (r as FoundRow).nameMismatch).length
+    const valMismatchCount = resultRows.filter(r => r.status === "found" && (r as FoundRow).valueMismatch).length
     const duplicateCpfCount = duplicateCpfSet.size
     const crossAbaDuplicateCount = crossAbaDuplicateSet.size
 
@@ -996,10 +1047,33 @@ export function FolhaPagamentoClient({
         return missing.length + 
                invalidCpfCount + 
                nameMismatchCount + 
+               valMismatchCount +
                duplicateCpfCount + 
                crossAbaDuplicateCount + 
                (result?.extras?.length || 0)
-    }, [result, missing, invalidCpfCount, nameMismatchCount, duplicateCpfCount, crossAbaDuplicateCount])
+    }, [result, resultRows, missing, invalidCpfCount, nameMismatchCount, valMismatchCount, duplicateCpfCount, crossAbaDuplicateCount])
+
+    const errorGroups = useMemo(() => {
+        if (!result) return { unregistered: [], invalidCpfs: [], nameMismatches: [], valueMismatches: [], duplicates: [], extras: [] }
+        
+        const unregistered = missing.map(r => ({ ...r, errorType: "unregistered" as const }))
+        const invalidCpfs = resultRows.filter(r => (r as any).isInvalidCpf).map(r => ({ ...r, errorType: "invalidCpf" as const }))
+        const nameMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).nameMismatch).map(r => ({ ...r, errorType: "nameMismatch" as const }))
+        const valueMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).valueMismatch).map(r => ({ ...r, errorType: "valueMismatch" as const }))
+        
+        // Group duplicates by CPF or Name
+        const duplicates: AnalyzedRow[] = resultRows.filter(r => 
+            duplicateCpfSet.has(`${r.sheet}::${r.cpf}`) || 
+            crossAbaDuplicateSet.has(r.cpf) || 
+            duplicateNomeSet.has(r.nome.toLowerCase().trim())
+        ).map(r => ({ ...r, errorType: "duplicate" as const }))
+        
+        const extras = (result.extras || []).map(r => ({ ...r, cpf: (r as any).cpfCnpj || "", errorType: "extra" as const }))
+
+        return { unregistered, invalidCpfs, nameMismatches, valueMismatches, duplicates, extras }
+    }, [result, missing, resultRows, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet])
+
+    const [activeErrorTab, setActiveErrorTab] = useState<"unregistered" | "invalidCpfs" | "duplicates" | "nameMismatches" | "valueMismatches" | "extras">("unregistered")
 
     const showResults = phase === "result" || phase === "pending"
 
@@ -1435,16 +1509,17 @@ export function FolhaPagamentoClient({
                     )}
 
                     {/* Missing CPFs and Inconsistencies banner */}
-                    {phase === "pending" && (missing.length > 0 || invalidCpfCount > 0 || nameMismatchCount > 0 || duplicateCpfCount > 0 || crossAbaDuplicateCount > 0) && (
+                    {phase === "pending" && (missing.length > 0 || invalidCpfCount > 0 || nameMismatchCount > 0 || valMismatchCount > 0 || duplicateCpfCount > 0 || crossAbaDuplicateCount > 0) && (
                         <div className="mx-5 mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
                             <div className="flex items-center gap-2 mb-3">
                                 <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
                                 <div>
-                                    <h3 className="text-sm font-bold text-amber-900">Atenção Necessária ({missing.length + invalidCpfCount + nameMismatchCount + duplicateCpfCount + crossAbaDuplicateCount})</h3>
+                                    <h3 className="text-sm font-bold text-amber-900">Atenção Necessária ({missing.length + invalidCpfCount + nameMismatchCount + valMismatchCount + duplicateCpfCount + crossAbaDuplicateCount})</h3>
                                     <p className="text-[11px] text-amber-700">
                                         {missing.length > 0 && `${missing.length} não cadastrados. `}
                                         {invalidCpfCount > 0 && `${invalidCpfCount} CPF(s) inválidos. `}
                                         {nameMismatchCount > 0 && `${nameMismatchCount} divergências de nome. `}
+                                        {valMismatchCount > 0 && `${valMismatchCount} divergências de valor. `}
                                         {duplicateCpfCount > 0 && `${duplicateCpfCount} CPF(s) dup. mesma aba. `}
                                         {crossAbaDuplicateCount > 0 && `${crossAbaDuplicateCount} CPF(s) dup. entre abas.`}
                                     </p>
@@ -1455,6 +1530,10 @@ export function FolhaPagamentoClient({
                                     className="flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-600 disabled:opacity-60 transition-colors">
                                     {registering ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
                                     Cadastrar Todos
+                                </button>
+                                <button onClick={() => setIsErrorCorrectionOpen(true)} disabled={registering}
+                                    className="flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-100/50 px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-200 disabled:opacity-60 transition-colors">
+                                    <Edit className="h-3.5 w-3.5" /> Corrigir Erros
                                 </button>
                                 <button onClick={handleIgnoreAndContinue} disabled={registering}
                                     className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-60 transition-colors">
@@ -2088,6 +2167,289 @@ export function FolhaPagamentoClient({
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setIsHistoryOpen(false)}>Fechar</Button>
                     </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* ─── Error Correction Dialog ─── */}
+            <Dialog open={isErrorCorrectionOpen} onOpenChange={setIsErrorCorrectionOpen}>
+                <DialogContent size="xl" className="p-0 h-[85vh] overflow-hidden bg-slate-50 border-none shadow-2xl block">
+                    <div className="flex h-full w-full">
+                        {/* Sidebar Tabs */}
+                        <div className="w-64 bg-white border-r flex flex-col pt-6">
+                            <DialogHeader className="px-6 mb-8 pt-0">
+                                <DialogTitle className="text-lg font-bold text-slate-800">Correção de Erros</DialogTitle>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Total de {totalDiversions} pendências</p>
+                            </DialogHeader>
+                            
+                            <div className="flex-1 px-3 space-y-1">
+                                {[
+                                    { id: "unregistered", label: "Não Cadastrados", count: errorGroups.unregistered.length, icon: UserPlus, color: "text-amber-500" },
+                                    { id: "invalidCpfs", label: "CPFs Inválidos", count: errorGroups.invalidCpfs.length, icon: ShieldCheck, color: "text-red-500" },
+                                    { id: "duplicates", label: "Duplicidades", count: errorGroups.duplicates.length, icon: RotateCcw, color: "text-purple-500" },
+                                    { id: "nameMismatches", label: "Divergência Nome", count: errorGroups.nameMismatches.length, icon: Info, color: "text-blue-500" },
+                                    { id: "valueMismatches", label: "Divergência Valor", count: errorGroups.valueMismatches.length, icon: Receipt, color: "text-emerald-500" },
+                                    { id: "extras", label: "Sem CPF (Extras)", count: errorGroups.extras.length, icon: AlertCircle, color: "text-orange-500" },
+                                ].map((tab) => (
+                                    <button
+                                        key={tab.id}
+                                        onClick={() => setActiveErrorTab(tab.id as any)}
+                                        disabled={tab.count === 0}
+                                        className={cn(
+                                            "w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all group",
+                                            activeErrorTab === tab.id ? "bg-blue-50 text-blue-700 shadow-sm" : "text-slate-500 hover:bg-slate-50",
+                                            tab.count === 0 && "opacity-30 cursor-not-allowed"
+                                        )}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <tab.icon className={cn("h-4 w-4", activeErrorTab === tab.id ? "text-blue-600" : tab.color)} />
+                                            <span className="text-xs font-semibold">{tab.label}</span>
+                                        </div>
+                                        <span className={cn(
+                                            "text-[10px] font-black px-1.5 py-0.5 rounded-full",
+                                            activeErrorTab === tab.id ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500"
+                                        )}>{tab.count}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Content Area */}
+                        <div className="flex-1 flex flex-col min-w-0 bg-slate-50">
+                            <div className="px-8 py-6 bg-white border-b flex items-center justify-between">
+                                <div>
+                                    <h3 className="font-bold text-slate-800 text-lg">
+                                        {activeErrorTab === "unregistered" && "Funcionários não encontrados no sistema"}
+                                        {activeErrorTab === "invalidCpfs" && "CPFs com formato ou dígitos inválidos"}
+                                        {activeErrorTab === "duplicates" && "Registros duplicados detectados"}
+                                        {activeErrorTab === "nameMismatches" && "Divergências entre planilha e sistema"}
+                                        {activeErrorTab === "valueMismatches" && "Divergências de valores (spreadsheet vs sistema)"}
+                                        {activeErrorTab === "extras" && "Registros extras sem CPF identificado"}
+                                    </h3>
+                                    <p className="text-xs text-slate-400 mt-1 font-medium">Selecione os registros para correção ou exclusão em massa.</p>
+                                </div>
+                                <button onClick={() => setIsErrorCorrectionOpen(false)} className="h-10 w-10 rounded-full hover:bg-slate-100 flex items-center justify-center transition-colors">
+                                    <X className="h-5 w-5 text-slate-400" />
+                                </button>
+                            </div>
+
+                            <div className="flex-1 overflow-y-auto px-8 py-6 space-y-4">
+                                {/* Bulk Actions Header */}
+                                <div className="flex items-center justify-between mb-4 bg-white p-3 rounded-xl border border-slate-200">
+                                    <div className="flex items-center gap-3">
+                                        <input 
+                                            type="checkbox" 
+                                            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                            checked={selectedErrorRows.length === errorGroups[activeErrorTab].length && errorGroups[activeErrorTab].length > 0}
+                                            onChange={(e) => {
+                                                if (e.target.checked) {
+                                                    setSelectedErrorRows(errorGroups[activeErrorTab].map(r => `${r.sheet}::${r.cpf || (r as any).nome}`))
+                                                } else {
+                                                    setSelectedErrorRows([])
+                                                }
+                                            }}
+                                        />
+                                        <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Selecionar todos os {errorGroups[activeErrorTab].length}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        {selectedErrorRows.length > 0 && (
+                                            <>
+                                                <button 
+                                                    onClick={() => {
+                                                        const rows = errorGroups[activeErrorTab].filter(r => selectedErrorRows.includes(`${r.sheet}::${r.cpf || (r as any).nome}`))
+                                                        if (confirm(`Remover ${rows.length} registros selecionados?`)) {
+                                                            rows.forEach(r => doExcludeRow(r, "Remoção em lote via ferramenta de correção"))
+                                                            setSelectedErrorRows([])
+                                                        }
+                                                    }}
+                                                    className="flex items-center gap-1.5 bg-red-50 text-red-700 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider hover:bg-red-100 transition-colors"
+                                                >
+                                                    <Trash2 className="h-3 w-3" /> Excluir ({selectedErrorRows.length})
+                                                </button>
+
+                                                {activeErrorTab === "unregistered" && (
+                                                    <button 
+                                                        onClick={async () => {
+                                                            const rows = errorGroups.unregistered.filter(r => selectedErrorRows.includes(`${r.sheet}::${r.cpf}`))
+                                                            if (confirm(`Cadastrar ${rows.length} novos funcionários?`)) {
+                                                                setRegistering(true)
+                                                                try {
+                                                                    await registerBatchFromPayroll(rows.map(r => ({ ...r, cpf: r.cpf.replace(/\D/g, "") })), unidade)
+                                                                    const fd = new FormData()
+                                                                    fd.append("file", file!); fd.append("mes", mes); fd.append("ano", ano); fd.append("unidade", unidade)
+                                                                    const res = await fetch("/api/folha/analyze", { method: "POST", body: fd })
+                                                                    const data = await res.json()
+                                                                    if (res.ok) setResult(data)
+                                                                    setSelectedErrorRows([])
+                                                                } finally { setRegistering(false) }
+                                                            }
+                                                        }}
+                                                        className="flex items-center gap-1.5 bg-blue-600 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider hover:bg-blue-700 transition-colors"
+                                                    >
+                                                        <UserPlus className="h-3 w-3" /> Cadastrar Selecionados
+                                                    </button>
+                                                )}
+
+                                                {activeErrorTab === "duplicates" && (
+                                                    <button 
+                                                        onClick={() => {
+                                                            const rows = errorGroups.duplicates.filter(r => selectedErrorRows.includes(`${r.sheet}::${r.cpf}`))
+                                                            const cpfs = Array.from(new Set(rows.map(r => r.cpf).filter(Boolean)))
+                                                            if (confirm(`Mesclar e somar valores para ${cpfs.length} CPFs selecionados?`)) {
+                                                                cpfs.forEach(cpf => handleMergeDuplicates(cpf!))
+                                                                setSelectedErrorRows([])
+                                                            }
+                                                        }}
+                                                        className="flex items-center gap-1.5 bg-purple-600 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider hover:bg-purple-700 transition-colors"
+                                                    >
+                                                        <RotateCcw className="h-3 w-3" /> Consolidar Selecionados
+                                                    </button>
+                                                )}
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    {errorGroups[activeErrorTab].map((row, idx) => {
+                                        const rowId = `${row.sheet}::${row.cpf || (row as any).nome}`
+                                        const isSelected = selectedErrorRows.includes(rowId)
+                                        
+                                        // Configurações de estilo por tipo de aba
+                                        const tabStyles: Record<string, { border: string, bg: string, text: string, icon: any }> = {
+                                            unregistered: { border: "border-l-amber-500", bg: "bg-amber-50", text: "text-amber-700", icon: UserPlus },
+                                            invalidCpfs: { border: "border-l-red-500", bg: "bg-red-50", text: "text-red-700", icon: ShieldCheck },
+                                            duplicates: { border: "border-l-purple-500", bg: "bg-purple-50", text: "text-purple-700", icon: RotateCcw },
+                                            nameMismatches: { border: "border-l-blue-500", bg: "bg-blue-50", text: "text-blue-700", icon: Info },
+                                            valueMismatches: { border: "border-l-emerald-500", bg: "bg-emerald-50", text: "text-emerald-700", icon: Receipt },
+                                            extras: { border: "border-l-orange-500", bg: "bg-orange-50", text: "text-orange-700", icon: AlertCircle }
+                                        }
+                                        const style = tabStyles[activeErrorTab] || tabStyles.unregistered
+
+                                        return (
+                                            <div 
+                                                key={idx}
+                                                className={cn(
+                                                    "flex items-center gap-4 p-4 rounded-xl bg-white border border-l-4 transition-all hover:shadow-md hover:translate-x-1 group relative",
+                                                    style.border,
+                                                    isSelected ? "border-blue-400 ring-4 ring-blue-50 bg-blue-50/30" : "border-slate-100 shadow-sm"
+                                                )}
+                                            >
+                                                <div className="flex items-center gap-3">
+                                                    <input 
+                                                        type="checkbox" 
+                                                        className="h-4 w-4 rounded-md border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                                        checked={isSelected}
+                                                        onChange={(e) => {
+                                                            if (e.target.checked) setSelectedErrorRows(prev => [...prev, rowId])
+                                                            else setSelectedErrorRows(prev => prev.filter(id => id !== rowId))
+                                                        }}
+                                                    />
+                                                    
+                                                    {/* Avatar / Iniciais */}
+                                                    <div className={cn("h-10 w-10 rounded-full flex items-center justify-center text-xs font-black shrink-0 shadow-inner", style.bg, style.text)}>
+                                                        {getInitials(row.nome)}
+                                                    </div>
+                                                </div>
+                                                
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        <p className="font-extrabold text-slate-800 text-sm truncate uppercase tracking-tight">{row.nome}</p>
+                                                        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200 text-[9px] font-bold text-slate-500 uppercase tracking-tighter">
+                                                            <FileSpreadsheet className="h-2.5 w-2.5" />
+                                                            {row.sheet}
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <div className="flex items-center gap-3 mt-1 underline-offset-2">
+                                                        <div className="flex items-center gap-1 text-[10px] font-mono text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100">
+                                                            <Hash className="h-2.5 w-2.5" />
+                                                            {fmtCpf(row.cpf || "")}
+                                                        </div>
+                                                        
+                                                        {/* Alertas de Divergência integrados */}
+                                                        {activeErrorTab === "nameMismatches" && (
+                                                            <div className="flex items-center gap-1 text-[9px] px-2 py-0.5 rounded-md bg-blue-50 text-blue-600 border border-blue-100 font-bold animate-in fade-in slide-in-from-left-1">
+                                                                <Info className="h-2.5 w-2.5" />
+                                                                SISTEMA: {(row as FoundRow).dbName}
+                                                            </div>
+                                                        )}
+                                                        {activeErrorTab === "duplicates" && (
+                                                            <div className="flex items-center gap-1 text-[9px] px-2 py-0.5 rounded-md bg-purple-50 text-purple-600 border border-purple-100 font-bold">
+                                                                <RotateCcw className="h-2.5 w-2.5" />
+                                                                {duplicateCpfSet.has(`${row.sheet}::${row.cpf}`) ? "DUPLICADO NESTA ABA" : "DUPLICADO ENTRE ABAS"}
+                                                            </div>
+                                                        )}
+                                                        {activeErrorTab === "valueMismatches" && (
+                                                            <div className="flex items-center gap-1 text-[9px] px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-600 border border-emerald-100 font-bold underline decoration-dotted">
+                                                                <Receipt className="h-2.5 w-2.5" />
+                                                                SISTEMA: {fmtBRL((row as FoundRow).dbSalary || 0)}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex items-center gap-6">
+                                                    <div className="text-right">
+                                                        <p className="text-sm font-black text-slate-800 tabular-nums">{fmtBRL(row.valor)}</p>
+                                                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-0.5 opacity-60">Valor Planilha</p>
+                                                    </div>
+
+                                                    <div className="flex items-center gap-1.5 border-l border-slate-100 pl-4 py-1">
+                                                        {activeErrorTab === "nameMismatches" && (
+                                                            <button 
+                                                                onClick={() => handleReconcileName(row as FoundRow)}
+                                                                className="h-8 px-3 rounded-lg flex items-center gap-2 bg-blue-600 text-white hover:bg-blue-700 transition-all font-black text-[9px] uppercase tracking-wider shadow-sm hover:shadow-blue-200"
+                                                            >
+                                                                <CheckCircle2 className="h-3 w-3" /> Conciliar
+                                                            </button>
+                                                        )}
+                                                        {activeErrorTab === "duplicates" && (
+                                                            <button 
+                                                                onClick={() => handleMergeDuplicates(row.cpf!)}
+                                                                className="h-8 px-3 rounded-lg flex items-center gap-2 bg-purple-600 text-white hover:bg-purple-700 transition-all font-black text-[9px] uppercase tracking-wider shadow-sm hover:shadow-purple-200"
+                                                            >
+                                                                <RotateCcw className="h-3 w-3" /> Consolidar
+                                                            </button>
+                                                        )}
+                                                        {activeErrorTab === "valueMismatches" && (
+                                                            <button 
+                                                                onClick={() => handleReconcileSalary(row as FoundRow)}
+                                                                className="h-8 px-3 rounded-lg flex items-center gap-2 bg-emerald-600 text-white hover:bg-emerald-700 transition-all font-black text-[9px] uppercase tracking-wider shadow-sm hover:shadow-emerald-200"
+                                                            >
+                                                                <CheckCircle2 className="h-3 w-3" /> Conciliar
+                                                            </button>
+                                                        )}
+                                                        
+                                                        <button 
+                                                            onClick={() => handleDeleteRow(row)}
+                                                            className="h-8 w-8 rounded-lg flex items-center justify-center text-slate-300 hover:text-red-600 hover:bg-red-50 hover:border-red-100 border border-transparent transition-all"
+                                                            title="Excluir Registro"
+                                                        >
+                                                            <Trash2 className="h-3.5 w-3.5" />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+
+                            <div className="px-8 py-4 bg-white border-t flex justify-end gap-3">
+                                <Button variant="outline" onClick={() => setIsErrorCorrectionOpen(false)} className="rounded-xl px-6">Fechar</Button>
+                                {activeErrorTab === "unregistered" && errorGroups.unregistered.length > 0 && (
+                                    <Button 
+                                        onClick={handleRegisterAll}
+                                        disabled={registering}
+                                        className="bg-amber-500 hover:bg-amber-600 text-white rounded-xl px-6 gap-2"
+                                    >
+                                        {registering ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+                                        Cadastrar Todos ({errorGroups.unregistered.length})
+                                    </Button>
+                                )}
+                            </div>
+                        </div>
+                    </div>
                 </DialogContent>
             </Dialog>
         </div>

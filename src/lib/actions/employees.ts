@@ -1,5 +1,7 @@
 "use server"
 
+import { revalidationPath } from "next/cache" // Wait, it's revalidatePath
+
 import { revalidatePath } from "next/cache"
 import { getSupabaseAdmin, check } from "@/lib/supabase-admin"
 import { auth } from "@/lib/auth"
@@ -121,6 +123,22 @@ export async function registerBatchFromPayroll(
   ))
   revalidatePath("/funcionarios")
   revalidatePath("/folha-pagamento")
+}
+
+export async function updateEmployeeName(id: string, name: string) {
+  const companyId = await getCompanyId()
+  const supabase = getSupabaseAdmin()
+  check(await supabase.from("Employee").update({ name, updatedAt: new Date().toISOString() })
+    .eq("id", id).eq("companyId", companyId))
+  revalidatePath("/funcionarios")
+}
+
+export async function updateEmployeeSalary(id: string, salary: number) {
+  const companyId = await getCompanyId()
+  const supabase = getSupabaseAdmin()
+  check(await supabase.from("Employee").update({ salary, updatedAt: new Date().toISOString() })
+    .eq("id", id).eq("companyId", companyId))
+  revalidatePath("/funcionarios")
 }
 
 export async function updateEmployeesPhone(updates: { id: string; phone: string }[]) {
