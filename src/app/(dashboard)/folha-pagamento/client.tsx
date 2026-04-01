@@ -1038,7 +1038,6 @@ export function FolhaPagamentoClient({
 
     const invalidCpfCount = resultRows.filter(r => (r as any).isInvalidCpf).length
     const nameMismatchCount = resultRows.filter(r => r.status === "found" && (r as FoundRow).nameMismatch).length
-    const valMismatchCount = resultRows.filter(r => r.status === "found" && (r as FoundRow).valueMismatch).length
     const duplicateCpfCount = duplicateCpfSet.size
     const crossAbaDuplicateCount = crossAbaDuplicateSet.size
 
@@ -1505,17 +1504,16 @@ export function FolhaPagamentoClient({
                     )}
 
                     {/* Missing CPFs and Inconsistencies banner */}
-                    {phase === "pending" && (missing.length > 0 || invalidCpfCount > 0 || nameMismatchCount > 0 || valMismatchCount > 0 || duplicateCpfCount > 0 || crossAbaDuplicateCount > 0) && (
+                    {phase === "pending" && (missing.length > 0 || invalidCpfCount > 0 || nameMismatchCount > 0 || duplicateCpfCount > 0 || crossAbaDuplicateCount > 0) && (
                         <div className="mx-5 mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
                             <div className="flex items-center gap-2 mb-3">
                                 <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
                                 <div>
-                                    <h3 className="text-sm font-bold text-amber-900">Atenção Necessária ({missing.length + invalidCpfCount + nameMismatchCount + valMismatchCount + duplicateCpfCount + crossAbaDuplicateCount})</h3>
+                                    <h3 className="text-sm font-bold text-amber-900">Atenção Necessária ({missing.length + invalidCpfCount + nameMismatchCount + duplicateCpfCount + crossAbaDuplicateCount})</h3>
                                     <p className="text-[11px] text-amber-700">
                                         {missing.length > 0 && `${missing.length} não cadastrados. `}
                                         {invalidCpfCount > 0 && `${invalidCpfCount} CPF(s) inválidos. `}
                                         {nameMismatchCount > 0 && `${nameMismatchCount} divergências de nome. `}
-                                        {valMismatchCount > 0 && `${valMismatchCount} divergências de valor. `}
                                         {duplicateCpfCount > 0 && `${duplicateCpfCount} CPF(s) dup. mesma aba. `}
                                         {crossAbaDuplicateCount > 0 && `${crossAbaDuplicateCount} CPF(s) dup. entre abas.`}
                                     </p>
@@ -2292,7 +2290,7 @@ export function FolhaPagamentoClient({
                                             nameMismatches: { border: "border-l-blue-500", bg: "bg-blue-50", text: "text-blue-700", icon: Info },
                                             extras: { border: "border-l-orange-500", bg: "bg-orange-50", text: "text-orange-700", icon: AlertCircle }
                                         }
-                                        const style = tabStyles[activeErrorTab] || tabStyles.unregistered
+                                        const style = tabStyles[activeErrorTab] || tabStyles.invalidCpfs
 
                                         return (
                                             <div 
