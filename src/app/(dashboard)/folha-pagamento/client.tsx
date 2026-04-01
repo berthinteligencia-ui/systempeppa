@@ -1056,10 +1056,10 @@ export function FolhaPagamentoClient({
     const errorGroups = useMemo(() => {
         if (!result) return { unregistered: [], invalidCpfs: [], nameMismatches: [], valueMismatches: [], duplicates: [], extras: [] }
         
-        const unregistered = missing.map(r => ({ ...r, errorType: "unregistered" as const }))
+        const unregistered = missing.map(r => ({ ...r, status: "missing" as const, errorType: "unregistered" as const }))
         const invalidCpfs = resultRows.filter(r => (r as any).isInvalidCpf).map(r => ({ ...r, errorType: "invalidCpf" as const }))
-        const nameMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).nameMismatch).map(r => ({ ...r, errorType: "nameMismatch" as const }))
-        const valueMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).valueMismatch).map(r => ({ ...r, errorType: "valueMismatch" as const }))
+        const nameMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).nameMismatch).map(r => ({ ...r, status: "found" as const, errorType: "nameMismatch" as const }))
+        const valueMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).valueMismatch).map(r => ({ ...r, status: "found" as const, errorType: "valueMismatch" as const }))
         
         // Group duplicates by CPF or Name
         const duplicates: AnalyzedRow[] = resultRows.filter(r => 
@@ -2257,7 +2257,7 @@ export function FolhaPagamentoClient({
                                                     onClick={() => {
                                                         const rows = errorGroups[activeErrorTab].filter(r => selectedErrorRows.includes(`${r.sheet}::${r.cpf || (r as any).nome}`))
                                                         if (confirm(`Remover ${rows.length} registros selecionados?`)) {
-                                                            rows.forEach(r => doExcludeRow(r, "Remoção em lote via ferramenta de correção"))
+                                                            rows.forEach(r => doExcludeRow(r as any, "Remoção em lote via ferramenta de correção"))
                                                             setSelectedErrorRows([])
                                                         }
                                                     }}
