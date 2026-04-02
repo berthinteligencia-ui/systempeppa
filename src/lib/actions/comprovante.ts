@@ -238,38 +238,28 @@ export async function sendMassMessage(data: { departmentId: string, month: numbe
     try {
         const session = await auth()
         if (!session?.user?.companyId) return { success: false, message: "Não autorizado" }
-        
+
         const companyId = session.user.companyId
         const companyName = session.user.companyName || "Empresa"
-        
-        // Fetch employees with their department info
-        const employees = await prisma.employee.findMany({
-            where: {
-                companyId,
-                status: "ACTIVE",
-                departmentId: data.departmentId === "all" ? undefined : data.departmentId,
-                pagamento: {
-                    equals: "efetuado",
-                    mode: "insensitive"
-                }
-            },
-            select: {
-                id: true,
-                name: true,
-                cpf: true,
-                pagamento: true,
-                salary: true,
-                phone: true,
-                department: {
-                    select: {
-                        id: true,
-                        name: true
-                    }
-                }
-            }
-        })
+        const supabase = getSupabaseAdmin()
 
-        if (employees.length === 0) {
+        // Busca funcionários ativos com pagamento efetuado via Supabase
+        let empQuery = supabase
+            .from("Employee")
+            .select("id, name, cpf, salary, phone, departmentId, Department(id, name)")
+            .eq("companyId", companyId)
+            .eq("status", "ACTIVE")
+            .ilike("pagamento", "efetuado")
+
+        if (data.departmentId !== "all") {
+            empQuery = empQuery.eq("departmentId", data.departmentId)
+        }
+
+        const { data: employees, error: empError } = await empQuery
+
+        if (empError) throw new Error(empError.message)
+
+        if (!employees || employees.length === 0) {
             return { success: false, count: 0, message: "Nenhum funcionário com pagamento efetuado nesta unidade." }
         }
 
@@ -278,26 +268,28 @@ export async function sendMassMessage(data: { departmentId: string, month: numbe
             "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
         ][data.month - 1]
 
-        // Group employees by department ID
-        const groups: Record<string, { name: string, members: typeof employees }> = {}
+        // Busca webhook da empresa
+        const { data: company } = await supabase
+            .from("Company")
+            .select("whatsappWebhookUrl")
+            .eq("id", companyId)
+            .single()
+
+        const webhookUrl = company?.whatsappWebhookUrl || "https://webhook.berthia.com.br/webhook/envio-de-mensagem"
+
+        // Agrupa por unidade
+        type EmpRow = typeof employees[number]
+        const groups: Record<string, { name: string; members: EmpRow[] }> = {}
         for (const e of employees) {
-            const dId = e.department?.id || "unassigned"
-            const dName = e.department?.name || "Sem Unidade"
+            const dept = (e as any).Department
+            const dId = dept?.id || "unassigned"
+            const dName = dept?.name || "Sem Unidade"
             if (!groups[dId]) groups[dId] = { name: dName, members: [] }
             groups[dId].members.push(e)
         }
 
-        const company = await prisma.company.findUnique({
-            where: { id: companyId },
-            select: { whatsappWebhookUrl: true }
-        })
-
-        const webhookUrl = company?.whatsappWebhookUrl || "https://webhook.berthia.com.br/webhook/envio-de-mensagem"
-        let totalSent = 0
-
-        // Send all unit hits in PARALLEL to avoid Vercel timeouts
-        const webhookPromises = Object.keys(groups).map(async (dId) => {
-            const group = groups[dId]
+        // Envia um payload por unidade
+        const webhookPromises = Object.values(groups).map(async (group) => {
             const payload = {
                 unidade: group.name,
                 company: companyName,
@@ -308,10 +300,9 @@ export async function sendMassMessage(data: { departmentId: string, month: numbe
                     employee: e.name,
                     salary: Number(e.salary),
                     contact: e.phone || "Não informado",
-                    cpf: e.cpf
+                    cpf: e.cpf,
                 }))
             }
-
             try {
                 const response = await fetch(webhookUrl, {
                     method: "POST",
@@ -320,43 +311,23 @@ export async function sendMassMessage(data: { departmentId: string, month: numbe
                 })
                 if (response.ok) return group.members.length
             } catch (fetchErr) {
-                console.error(`[SEND_MASS_MESSAGE] Network error for unit ${group.name}:`, fetchErr)
+                console.error(`[SEND_MASS_MESSAGE] Erro ao enviar unidade ${group.name}:`, fetchErr)
             }
             return 0
         })
 
         const results = await Promise.all(webhookPromises)
-        totalSent = results.reduce((acc, count) => acc + count, 0)
+        const totalSent = results.reduce((acc, n) => acc + n, 0)
 
-        if (totalSent === 0 && employees.length > 0) {
-            return { success: false, message: "Falha ao enviar para o webhook externo em todas as tentativas." }
-        }
-
-        // Optimization: Background/Batch logging of messages
-        const now = new Date()
-        const logData = employees
-            .filter(e => e.phone && e.phone.replace(/\D/g, ""))
-            .map(e => ({
-                conteudo: `Aviso de pagamento de ${monthLabel}/${data.year} enviado com sucesso via ${e.department?.name || 'Unidade'}.`,
-                tipo: "COMPANY",
-                createdAt: now,
-                numeroFuncionario: e.phone?.replace(/\D/g, ""),
-                funcionario: "true"
-            }))
-
-        if (logData.length > 0) {
-            // Using createMany for better performance in production
-            await prisma.mensagensZap.createMany({
-                data: logData,
-                skipDuplicates: true
-            })
+        if (totalSent === 0) {
+            return { success: false, message: "Falha ao enviar para o webhook externo." }
         }
 
         return { success: true, count: totalSent }
 
     } catch (err: any) {
-        console.error("[SEND_MASS_MESSAGE] Unexpected crash:", err.message)
-        return { success: false, message: `Erro no servidor: ${err.message}` } 
+        console.error("[SEND_MASS_MESSAGE] Erro:", err.message)
+        return { success: false, message: `Erro no servidor: ${err.message}` }
     }
 }
 
