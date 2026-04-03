@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { LayoutDashboard, MessageSquare, Settings } from "lucide-react"
+import { supabase } from "@/lib/supabase"
 import { WhatsAppSidebar } from "./WhatsAppSidebar"
 import { WhatsAppChatWindow } from "./WhatsAppChatWindow"
 import { WhatsAppCRMPanel } from "./WhatsAppCRMPanel"
@@ -32,8 +33,16 @@ export function WhatsAppContainer() {
 
     useEffect(() => {
         fetchConversations()
-        const timer = setInterval(fetchConversations, 5000)
-        return () => clearInterval(timer)
+
+        // Realtime: atualiza lista de conversas a cada nova mensagem
+        const channel = supabase
+            .channel("container-conversations")
+            .on("postgres_changes", { event: "INSERT", schema: "public", table: "mensagens_zap" }, () => {
+                fetchConversations()
+            })
+            .subscribe()
+
+        return () => { supabase.removeChannel(channel) }
     }, [])
 
     // Conversa selecionada vinda diretamente da lista já carregada

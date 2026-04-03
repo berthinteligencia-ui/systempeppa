@@ -51,53 +51,61 @@ export async function GET() {
             if (n) empByPhone[n] = e
         }
 
-        // 4. Agrupa mensagens por contato (numero_funcionario ou lead_id)
+        // 4. Agrupa mensagens por telefone normalizado (últimos 10 dígitos)
+        //    Garante que o mesmo contato apareça como UMA única conversa
         const grouped: Record<string, any[]> = {}
         for (const msg of messages ?? []) {
-            const key = msg.numero_funcionario || msg.lead_id || msg.id
+            const lead = msg.lead_id ? leadsMap[msg.lead_id] : null
+            const rawPhone = msg.numero_funcionario || lead?.celular || ""
+            const key = normPhone(rawPhone) || msg.lead_id || msg.id
             if (!grouped[key]) grouped[key] = []
             grouped[key].push(msg)
         }
 
-        // 5. Monta resultado
-        const result = Object.entries(grouped).map(([key, msgs]) => {
-            const latest = msgs[0]
-            const lead = latest.lead_id ? leadsMap[latest.lead_id] : null
+        // 5. Monta resultado — uma entrada por contato, ordenada pela mensagem mais recente
+        const result = Object.entries(grouped)
+            .map(([key, msgs]) => {
+                // Ordena para garantir que latest seja de fato o mais recente
+                const sorted = [...msgs].sort((a, b) =>
+                    new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+                )
+                const latest = sorted[0]
+                const lead = latest.lead_id ? leadsMap[latest.lead_id] : null
 
-            // Tenta encontrar funcionário pelo numero_funcionario ou celular do lead
-            const contactPhone = normPhone(latest.numero_funcionario) || normPhone(lead?.celular)
-            const emp = contactPhone ? empByPhone[contactPhone] : null
+                const contactPhone = normPhone(latest.numero_funcionario) || normPhone(lead?.celular) || key
+                const emp = empByPhone[contactPhone] ?? null
 
-            return {
-                id: key,
-                active: true,
-                updatedAt: latest.created_at,
-                companyId,
-                employeeId: emp?.id ?? null,
-                isEmployee: !!emp,
-                employee: {
-                    id: emp?.id ?? null,
-                    name: emp?.name ?? lead?.nome ?? latest.numero_funcionario ?? "—",
-                    position: emp?.position ?? null,
-                    phone: emp?.phone ?? lead?.celular ?? latest.numero_funcionario,
-                    email: emp?.email ?? null,
-                    cpf: emp?.cpf ?? null,
-                    salary: emp?.salary ? Number(emp.salary) : null,
-                    pagamento: emp?.pagamento ?? null,
-                    hireDate: emp?.hireDate ?? null,
-                    bankName: emp?.bankName ?? null,
-                    bankAgency: emp?.bankAgency ?? null,
-                    bankAccount: emp?.bankAccount ?? null,
-                    department: (emp?.Department as any)?.name ?? null,
-                },
-                messages: [{
-                    id: latest.id,
-                    content: latest.conteudo,
-                    createdAt: latest.created_at,
-                    senderType: latest.tipo === "lead" ? "EMPLOYEE" : "COMPANY",
-                }],
-            }
-        })
+                return {
+                    id: key,
+                    active: true,
+                    updatedAt: latest.created_at,
+                    companyId,
+                    employeeId: emp?.id ?? null,
+                    isEmployee: !!emp,
+                    employee: {
+                        id: emp?.id ?? null,
+                        name: emp?.name ?? lead?.nome ?? key,
+                        position: emp?.position ?? null,
+                        phone: emp?.phone ?? lead?.celular ?? key,
+                        email: emp?.email ?? null,
+                        cpf: emp?.cpf ?? null,
+                        salary: emp?.salary ? Number(emp.salary) : null,
+                        pagamento: emp?.pagamento ?? null,
+                        hireDate: emp?.hireDate ?? null,
+                        bankName: emp?.bankName ?? null,
+                        bankAgency: emp?.bankAgency ?? null,
+                        bankAccount: emp?.bankAccount ?? null,
+                        department: (emp?.Department as any)?.name ?? null,
+                    },
+                    messages: [{
+                        id: latest.id,
+                        content: latest.conteudo,
+                        createdAt: latest.created_at,
+                        senderType: latest.tipo === "lead" ? "EMPLOYEE" : "COMPANY",
+                    }],
+                }
+            })
+            .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
 
         return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } })
     } catch (err: any) {

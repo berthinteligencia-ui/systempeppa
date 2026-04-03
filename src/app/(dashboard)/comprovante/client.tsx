@@ -114,7 +114,7 @@ export function ComprovanteClient({ departments, fechamentos, comprovantes, comp
             try {
                 const formData = new FormData()
                 formData.append("file", rawFile)
-                const records = await extractComprovanteData(formData, bank)
+                const records = await extractComprovanteData(formData, bank, card === "lote" ? "relatorio" : "comprovante")
                 const buffer  = await rawFile.arrayBuffer()
                 await saveComprovantes({
                     records: records.map(r => ({ ...r, fileName: rawFile.name })),

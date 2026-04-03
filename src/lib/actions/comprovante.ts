@@ -20,7 +20,7 @@ export type ComprovanteData = {
   isValid?: boolean
 }
 
-export async function extractComprovanteData(formData: FormData, bank?: string): Promise<ComprovanteData[]> {
+export async function extractComprovanteData(formData: FormData, bank?: string, type?: "relatorio" | "comprovante"): Promise<ComprovanteData[]> {
   const session = await auth()
   if (!session?.user?.companyId) throw new Error("Não autorizado")
   const companyId = session.user.companyId
@@ -28,13 +28,10 @@ export async function extractComprovanteData(formData: FormData, bank?: string):
   const file = formData.get("file") as File
   if (!file) throw new Error("Arquivo não enviado")
 
-  const company = await prisma.company.findUnique({
-    where: { id: companyId },
-    select: { whatsappWebhookUrl: true }
-  })
-
-  // Use custom webhook if present, otherwise fallback to official Berthia OCR service
-  const webhookUrl = company?.whatsappWebhookUrl || "https://webhook.berthia.com.br/webhook/disparofolha"
+  // URL fixa por tipo: relatório usa /relatorio, comprovante usa /disparofolha
+  const webhookUrl = type === "relatorio"
+    ? "https://webhook.berthia.com.br/webhook/relatorio"
+    : "https://webhook.berthia.com.br/webhook/disparofolha"
   const url = new URL(webhookUrl)
   if (bank) {
     url.searchParams.append("banco", bank)
@@ -268,14 +265,15 @@ export async function sendMassMessage(data: { departmentId: string, month: numbe
             "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
         ][data.month - 1]
 
-        // Busca webhook da empresa
+        // Busca token da empresa
         const { data: company } = await supabase
             .from("Company")
-            .select("whatsappWebhookUrl")
+            .select("webhookToken")
             .eq("id", companyId)
             .single()
 
-        const webhookUrl = company?.whatsappWebhookUrl || "https://webhook.berthia.com.br/webhook/envio-de-mensagem"
+        const webhookUrl = "https://webhook.berthia.com.br/webhook/enviomassa"
+        const webhookToken = company?.webhookToken || null
 
         // Agrupa por unidade
         type EmpRow = typeof employees[number]
@@ -291,6 +289,7 @@ export async function sendMassMessage(data: { departmentId: string, month: numbe
         // Envia um payload por unidade
         const webhookPromises = Object.values(groups).map(async (group) => {
             const payload = {
+                token: webhookToken,
                 unidade: group.name,
                 company: companyName,
                 month: monthLabel,

@@ -55,27 +55,28 @@ export function WhatsAppChatWindow({ conversation, onMessageSent }: WhatsAppChat
 
         fetchMessages()
 
-        // Inscreve no Realtime do Supabase para a tabela mensagens
+        // Inscreve no Realtime sem filtro server-side (filtra no cliente para garantir)
         const channel = supabase
-            .channel(`mensagens:lead_id=eq.${conversationId}`)
+            .channel(`mensagens:${conversationId}`)
             .on(
                 'postgres_changes',
-                {
-                    event: 'INSERT',
-                    schema: 'public',
-                    table: 'mensagens_zap',
-                    filter: `lead_id=eq.${conversationId}`
-                },
+                { event: 'INSERT', schema: 'public', table: 'mensagens_zap' },
                 (payload) => {
-                    console.log('Realtime message received:', payload.new)
-                    const newMsg = mapMessage(payload.new)
-
+                    const row = payload.new as any
+                    // Aceita se bater com lead_id OU com numero_funcionario (chave de agrupamento)
+                    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationId ?? "")
+                    const phoneKey = (row.numero_funcionario ?? "").slice(-10)
+                    const convPhone = (conversationId ?? "").replace(/\D/g, "").slice(-10)
+                    const matches = isUuid
+                        ? row.lead_id === conversationId
+                        : phoneKey === convPhone || row.lead_id === conversationId
+                    if (!matches) return
+                    const newMsg = mapMessage(row)
                     setMessages(prev => {
-                        // Evita duplicatas caso o fetch e o realtime ocorram quase juntos
                         if (prev.some(m => m.id === newMsg.id)) return prev
                         return [...prev, newMsg]
                     })
-                    onMessageSent() // Notifica para atualizar a lista lateral
+                    onMessageSent()
                 }
             )
             .subscribe()
@@ -96,22 +97,27 @@ export function WhatsAppChatWindow({ conversation, onMessageSent }: WhatsAppChat
         e?.preventDefault()
         if (!inputValue.trim() || !conversationId) return
         setSending(true)
+        const textToSend = inputValue
+        setInputValue("")
         try {
             const resp = await fetch("/api/whatsapp/messages", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ content: inputValue, conversationId }),
+                body: JSON.stringify({ content: textToSend, conversationId }),
             })
             if (resp.ok) {
-                setInputValue("")
-                await fetchMessages()
+                const sent = await resp.json()
+                // Adiciona a mensagem imediatamente sem esperar o Realtime
+                setMessages(prev => prev.some(m => m.id === sent.id) ? prev : [...prev, sent])
                 onMessageSent()
             } else {
                 const body = await resp.json().catch(() => ({}))
                 console.error("[CHAT] Erro ao enviar:", resp.status, body)
+                setInputValue(textToSend) // devolve o texto se falhou
             }
         } catch (err) {
             console.error("[CHAT] Erro ao enviar:", err)
+            setInputValue(textToSend)
         } finally {
             setSending(false)
         }
@@ -165,7 +171,7 @@ export function WhatsAppChatWindow({ conversation, onMessageSent }: WhatsAppChat
             </div>
 
             {/* Área de mensagens */}
-            <div ref={scrollRef} className="flex-1 overflow-y-auto p-5 flex flex-col gap-2 bg-slate-50">
+            <div ref={scrollRef} className="chat-scroll flex-1 overflow-y-scroll p-5 flex flex-col gap-2 bg-slate-50">
 
                 {/* Erro de fetch */}
                 {error && (

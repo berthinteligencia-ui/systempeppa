@@ -50,6 +50,7 @@ export type CompanyInput = {
     city?: string
     state?: string
     whatsappWebhookUrl?: string
+    webhookToken?: string
 }
 
 export async function listAllCompanies() {
@@ -127,6 +128,7 @@ export async function createCompany(data: CompanyInput, adminUser: { name: strin
         city: data.city || null,
         state: data.state || null,
         whatsappWebhookUrl: data.whatsappWebhookUrl || null,
+        webhookToken: data.webhookToken || null,
         active: true,
         createdAt: now,
         updatedAt: now,
@@ -179,6 +181,7 @@ export async function updateCompany(id: string, data: CompanyInput) {
         city: data.city || null,
         state: data.state || null,
         whatsappWebhookUrl: data.whatsappWebhookUrl || null,
+        webhookToken: data.webhookToken || null,
         updatedAt: new Date().toISOString(),
     }).eq("id", id).select().single()
 

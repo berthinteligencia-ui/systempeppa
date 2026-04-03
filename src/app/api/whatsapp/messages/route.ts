@@ -5,7 +5,7 @@ import { supabaseAdmin } from "@/lib/db"
 import { NextResponse } from "next/server"
 import { randomUUID } from "crypto"
 
-const DEFAULT_WEBHOOK_URL = "https://webhook.berthia.com.br/webhook/folhazap"
+const CRM_WEBHOOK_URL = "https://webhook.berthia.com.br/webhook/enviacrmzap"
 
 const normPhone = (p: string | null | undefined) => (p ?? "").replace(/\D/g, "").slice(-10)
 
@@ -95,37 +95,68 @@ export async function POST(req: Request) {
             if (isUuid) {
                 const { data } = await supabaseAdmin.from("leads").select("id, celular, nome").eq("id", conversationId).maybeSingle()
                 lead = data
+            } else {
+                // Se não é UUID, assume que é telefone (numero_funcionario)
+                const phoneClean = normPhone(conversationId)
+                if (phoneClean) {
+                    const { data: existingLead } = await supabaseAdmin
+                        .from("leads")
+                        .select("id, celular, nome")
+                        .filter("celular", "ilike", `%${phoneClean.slice(-8)}%`)
+                        .limit(1)
+                        .maybeSingle()
+
+                    lead = existingLead
+                    if (!lead) {
+                        // Cria lead se não existir
+                        const leadId = randomUUID()
+                        await supabaseAdmin.from("leads").insert({
+                            id: leadId,
+                            nome: conversationId,
+                            celular: conversationId,
+                            created_at: now
+                        })
+                        lead = { id: leadId, celular: conversationId, nome: conversationId }
+                    }
+                }
             }
         }
 
         if (!lead) return new NextResponse("Lead not found", { status: 404 })
 
+        // Normaliza o telefone do lead para numero_funcionario (chave de agrupamento das conversas)
+        const phoneNorm = lead.celular ? lead.celular.replace(/\D/g, "").slice(-10) : null
+
         const messageId = randomUUID()
         await supabaseAdmin.from("mensagens_zap").insert({
             id: messageId,
             lead_id: lead.id,
+            numero_funcionario: phoneNorm || null,
             tipo: "user",
             conteudo: content,
             created_at: now,
         })
 
-        // Busca webhook URL
-        const { data: company } = await supabaseAdmin
-            .from("Company")
-            .select("whatsappWebhookUrl")
-            .eq("id", session.user.companyId)
-            .maybeSingle()
-
-        const webhookUrl = company?.whatsappWebhookUrl || DEFAULT_WEBHOOK_URL
-
         if (lead.celular) {
             let phone = lead.celular.replace(/\D/g, "")
             if (phone.length <= 11) phone = "55" + phone
+
+            const { data: company } = await supabaseAdmin
+                .from("Company")
+                .select("webhookToken")
+                .eq("id", session.user.companyId)
+                .single()
+
             try {
-                await fetch(webhookUrl, {
+                await fetch(CRM_WEBHOOK_URL, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ lead_id: lead.id, celular: phone, mensagem: content }),
+                    body: JSON.stringify({
+                        token: company?.webhookToken || null,
+                        lead_id: lead.id,
+                        celular: phone,
+                        mensagem: content,
+                    }),
                 })
             } catch (e: any) { console.error("[MESSAGES_POST] Webhook erro:", e.message) }
         }

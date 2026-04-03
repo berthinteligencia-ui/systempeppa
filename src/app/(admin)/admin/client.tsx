@@ -20,7 +20,7 @@ import { Company } from "@prisma/client"
 
 type CompanyWithCount = any // Use any for simplicity in this large component with serialized dates/decimals
 
-const emptyForm: CompanyInput = { name: "", cnpj: "", email: "", whatsapp: "", address: "", city: "", state: "", whatsappWebhookUrl: "" }
+const emptyForm: CompanyInput = { name: "", cnpj: "", email: "", whatsapp: "", address: "", city: "", state: "", whatsappWebhookUrl: "", webhookToken: "" }
 const emptyUser = { name: "", email: "", password: "" }
 
 function Field({ label, value, onChange, type = "text", placeholder }: { label: string; value: string; onChange: (v: string) => void; type?: string; placeholder?: string }) {
@@ -147,7 +147,8 @@ export function AdminClient({ initialCompanies }: { initialCompanies: CompanyWit
             address: c.address ?? "",
             city: c.city ?? "",
             state: c.state ?? "",
-            whatsappWebhookUrl: c.whatsappWebhookUrl ?? ""
+            whatsappWebhookUrl: c.whatsappWebhookUrl ?? "",
+            webhookToken: c.webhookToken ?? ""
         })
         setUserForm(emptyUser)
         setError(null)
@@ -535,6 +536,12 @@ export function AdminClient({ initialCompanies }: { initialCompanies: CompanyWit
                                     {c.email && <p>✉ {c.email}</p>}
                                     {c.whatsapp && <p>📱 {c.whatsapp}</p>}
                                     {c.city && <p>📍 {c.city}{c.state ? `, ${c.state}` : ""}</p>}
+                                    <div className="pt-1">
+                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Token</p>
+                                        <p className="font-mono text-[11px] text-slate-600 break-all select-all">
+                                            {c.webhookToken || <span className="italic text-slate-300">não definido</span>}
+                                        </p>
+                                    </div>
                                 </div>
 
                                 {/* Stats */}
@@ -798,6 +805,9 @@ export function AdminClient({ initialCompanies }: { initialCompanies: CompanyWit
                                 <Field label="Estado" value={form.state ?? ""} onChange={v => setForm(f => ({ ...f, state: v }))} placeholder="SP" />
                                 <div className="col-span-2 pt-2 border-t border-slate-100 mt-2">
                                     <Field label="Webhook URL WhatsApp" value={form.whatsappWebhookUrl ?? ""} onChange={v => setForm(f => ({ ...f, whatsappWebhookUrl: v }))} placeholder="https://seu-dominio.com/api/whatsapp/webhook" />
+                                </div>
+                                <div className="col-span-2">
+                                    <Field label="Token de Autenticação" value={form.webhookToken ?? ""} onChange={v => setForm(f => ({ ...f, webhookToken: v }))} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
                                 </div>
                             </div>
 

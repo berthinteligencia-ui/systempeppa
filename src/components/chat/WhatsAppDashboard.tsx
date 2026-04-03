@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { Users, MessageSquare, Clock, Activity, ArrowUpRight, TrendingUp } from "lucide-react"
+import { supabase } from "@/lib/supabase"
 
 type Stats = {
     totalLeads: number
@@ -57,8 +58,16 @@ export function WhatsAppDashboard({ onSelect }: { onSelect: (id: string) => void
         }
 
         fetchStats()
-        const timer = setInterval(fetchStats, 5000)
-        return () => clearInterval(timer)
+
+        // Realtime: atualiza métricas a cada nova mensagem
+        const channel = supabase
+            .channel("dashboard-stats")
+            .on("postgres_changes", { event: "INSERT", schema: "public", table: "mensagens_zap" }, () => {
+                fetchStats()
+            })
+            .subscribe()
+
+        return () => { supabase.removeChannel(channel) }
     }, [])
 
     const cards = [
@@ -139,8 +148,16 @@ function RecentConversations({ onSelect }: { onSelect: (id: string) => void }) {
         }
 
         fetchConvs()
-        const timer = setInterval(fetchConvs, 5000)
-        return () => clearInterval(timer)
+
+        // Realtime: atualiza lista de conversas a cada nova mensagem
+        const channel = supabase
+            .channel("dashboard-conversations")
+            .on("postgres_changes", { event: "INSERT", schema: "public", table: "mensagens_zap" }, () => {
+                fetchConvs()
+            })
+            .subscribe()
+
+        return () => { supabase.removeChannel(channel) }
     }, [])
 
     if (loading) return (

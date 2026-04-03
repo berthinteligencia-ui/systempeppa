@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
@@ -9,21 +9,21 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-
 model Account {
   id                String  @id @default(cuid())
   userId            String
   type              String
   provider          String
   providerAccountId String
-  refresh_token     String? @db.Text
-  access_token      String? @db.Text
+  refresh_token     String?
+  access_token      String?
   expires_at        Int?
   token_type        String?
   scope             String?
-  id_token          String? @db.Text
+  id_token          String?
   session_state     String?
   user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@unique([provider, providerAccountId])
 }
 
@@ -39,34 +39,36 @@ model VerificationToken {
   identifier String
   token      String   @unique
   expires    DateTime
+
   @@unique([identifier, token])
 }
 
 model Company {
-  id              String            @id @default(cuid())
-  name            String
-  cnpj            String?           @unique
-  logo            String?
-  whatsapp        String?
-  email           String?
-  address         String?
-  city            String?
-  state           String?
-  active          Boolean           @default(true)
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
-  users           User[]
-  employees       Employee[]
-  departments     Department[]
-  payrollAnalyses PayrollAnalysis[]
-  settings        Settings?
-  conversations   Conversation[]
-  backups         Backup[]
-  notasFiscais    NotaFiscal[]
-  subscription    Subscription?
-  invoices        Invoice[]
-  comprovantes    Comprovante[]
+  id                 String            @id @default(cuid())
+  name               String
+  cnpj               String?           @unique
+  logo               String?
+  active             Boolean           @default(true)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  address            String?
+  city               String?
+  email              String?
+  state              String?
+  whatsapp           String?
   whatsappWebhookUrl String?
+  webhookToken       String?
+  backups            Backup[]
+  comprovantes       Comprovante[]
+  conversations      Conversation[]
+  departments        Department[]
+  employees          Employee[]
+  invoices           Invoice[]
+  notasFiscais       NotaFiscal[]
+  payrollAnalyses    PayrollAnalysis[]
+  settings           Settings?
+  subscription       Subscription?
+  users              User[]
 }
 
 model Plan {
@@ -75,30 +77,29 @@ model Plan {
   description      String?
   basePrice        Decimal        @db.Decimal(10, 2)
   pricePerEmployee Decimal        @db.Decimal(10, 2)
-  billingType      String         @default("PER_EMPLOYEE") // PER_EMPLOYEE or FIXED
   active           Boolean        @default(true)
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
+  billingType      String         @default("PER_EMPLOYEE")
   subscriptions    Subscription[]
 }
 
 model Subscription {
   id                     String   @id @default(cuid())
   companyId              String   @unique
-  company                Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   planId                 String
-  plan                   Plan     @relation(fields: [planId], references: [id])
   customBasePrice        Decimal? @db.Decimal(10, 2)
   customPricePerEmployee Decimal? @db.Decimal(10, 2)
   active                 Boolean  @default(true)
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
+  company                Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  plan                   Plan     @relation(fields: [planId], references: [id])
 }
 
 model Invoice {
   id                   String   @id @default(cuid())
   companyId            String
-  company              Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   amount               Decimal  @db.Decimal(10, 2)
   employeeCount        Int
   basePriceUsed        Decimal  @db.Decimal(10, 2)
@@ -109,6 +110,7 @@ model Invoice {
   dueDate              DateTime
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
+  company              Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@unique([companyId, month, year])
 }
@@ -116,47 +118,40 @@ model Invoice {
 model Settings {
   id                    String   @id @default(cuid())
   companyId             String   @unique
-  company               Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   whatsappNotifications Boolean  @default(false)
   autoBackup            Boolean  @default(false)
   payrollReminderDays   Int      @default(5)
-  lastResetMonth        Int?
-  lastResetYear         Int?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
+  lastResetMonth        Int?
+  lastResetYear         Int?
+  company               Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
 }
 
 model User {
-  id        String    @id @default(cuid())
-  name      String
-  email     String    @unique
-  password  String
-  role      Role      @default(RH)
-  active    Boolean   @default(true)
-  mustChangePassword Boolean @default(false)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  companyId String
-  company   Company   @relation(fields: [companyId], references: [id])
-  accounts  Account[]
-  sessions  Session[]
-}
-
-enum Role {
-  ADMIN
-  RH
-  GESTOR
-  FUNCIONARIO
+  id                 String    @id @default(cuid())
+  name               String
+  email              String    @unique
+  password           String
+  role               Role      @default(RH)
+  active             Boolean   @default(true)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  companyId          String
+  mustChangePassword Boolean   @default(false)
+  accounts           Account[]
+  sessions           Session[]
+  company            Company   @relation(fields: [companyId], references: [id])
 }
 
 model Department {
   id              String            @id @default(cuid())
   name            String
-  cnpj            String?
-  active          Boolean           @default(true)
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
   companyId       String
+  cnpj            String?
+  active          Boolean           @default(true)
   company         Company           @relation(fields: [companyId], references: [id])
   employees       Employee[]
   payrollAnalyses PayrollAnalysis[]
@@ -170,27 +165,21 @@ model Employee {
   phone         String?
   position      String
   salary        Decimal        @db.Decimal(10, 2)
-  bankName      String?
-  bankAgency    String?
-  bankAccount   String?
-  pixKey        String?
   hireDate      DateTime
   status        EmployeeStatus @default(ACTIVE)
-  pagamento     String         @default("pendente")
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   companyId     String
-  company       Company        @relation(fields: [companyId], references: [id])
   departmentId  String?
-  department    Department?    @relation(fields: [departmentId], references: [id])
-  conversations Conversation[]
+  pagamento     String         @default("pendente")
+  bankAccount   String?
+  bankAgency    String?
+  bankName      String?
+  pixKey        String?
   comprovantes  Comprovante[]
-}
-
-enum EmployeeStatus {
-  ACTIVE
-  INACTIVE
-  ON_LEAVE
+  conversations Conversation[]
+  company       Company        @relation(fields: [companyId], references: [id])
+  department    Department?    @relation(fields: [departmentId], references: [id])
 }
 
 model Bank {
@@ -203,43 +192,40 @@ model Bank {
 }
 
 model PayrollAnalysis {
-  id           String      @id @default(cuid())
+  id           String        @id @default(cuid())
   month        Int
   year         Int
   departmentId String?
-  department   Department? @relation(fields: [departmentId], references: [id])
   companyId    String
-  company      Company     @relation(fields: [companyId], references: [id])
   data         Json
-  total        Decimal     @db.Decimal(10, 2)
-  status       String      @default("OPEN")
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  total        Decimal       @db.Decimal(10, 2)
+  status       String        @default("OPEN")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
   comprovantes Comprovante[]
+  company      Company       @relation(fields: [companyId], references: [id])
+  department   Department?   @relation(fields: [departmentId], references: [id])
+
   @@unique([month, year, departmentId, companyId], name: "month_year_unit_company")
 }
 
 model Comprovante {
-  id            String          @id @default(cuid())
-  fileName      String
-  employeeName  String
-  cpf           String
-  situacao      String
-  amount        Decimal?        @db.Decimal(10, 2)
-  extractedAt   DateTime        @default(now())
-  generatedAt   String?
-  fileUrl       String?
-  originCnpj    String?
-
-  // Relations
-  companyId     String
-  company       Company         @relation(fields: [companyId], references: [id])
-
-  employeeId    String?
-  employee      Employee?       @relation(fields: [employeeId], references: [id])
-
-  fechamentoId  String?
-  fechamento    PayrollAnalysis? @relation(fields: [fechamentoId], references: [id])
+  id           String           @id @default(cuid())
+  fileName     String
+  employeeName String
+  cpf          String
+  situacao     String
+  amount       Decimal?         @db.Decimal(10, 2)
+  extractedAt  DateTime         @default(now())
+  companyId    String
+  employeeId   String?
+  fechamentoId String?
+  fileUrl      String?
+  originCnpj   String?
+  generatedAt  String?
+  company      Company          @relation(fields: [companyId], references: [id])
+  employee     Employee?        @relation(fields: [employeeId], references: [id])
+  fechamento   PayrollAnalysis? @relation(fields: [fechamentoId], references: [id])
 }
 
 model Conversation {
@@ -248,37 +234,34 @@ model Conversation {
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
   companyId  String
-  company    Company   @relation(fields: [companyId], references: [id])
   employeeId String
+  company    Company   @relation(fields: [companyId], references: [id])
   employee   Employee  @relation(fields: [employeeId], references: [id])
   messages   Message[]
+
   @@unique([companyId, employeeId])
 }
 
 model Message {
   id             String       @id @default(cuid())
-  content        String       @db.Text
+  content        String
   senderId       String
   senderType     SenderType
   read           Boolean      @default(false)
   createdAt      DateTime     @default(now())
   conversationId String
+  webhook        String?
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 }
 
-enum SenderType {
-  COMPANY
-  EMPLOYEE
-}
-
 model Backup {
-  id         String   @id @default(cuid())
-  fileName   String
-  fileSize   Int
-  status     String   @default("SUCCESS")
-  createdAt  DateTime @default(now())
-  companyId  String
-  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  id        String   @id @default(cuid())
+  fileName  String
+  fileSize  Int
+  status    String   @default("SUCCESS")
+  createdAt DateTime @default(now())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
 }
 
 model NotaFiscal {
@@ -290,9 +273,9 @@ model NotaFiscal {
   descricao   String?
   status      NfStatus @default(PENDENTE)
   companyId   String
-  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
 }
 
 model Leads {
@@ -308,12 +291,12 @@ model Leads {
 model MensagensZap {
   id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   leadId            String?   @map("lead_id") @db.Uuid
-  lead              Leads?    @relation(fields: [leadId], references: [id], onDelete: Cascade)
   conteudo          String?
   tipo              String?
   createdAt         DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
   numeroFuncionario String?   @map("numero_funcionario")
   funcionario       String?   @default("false")
+  lead              Leads?    @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
   @@map("mensagens_zap")
 }
@@ -331,6 +314,24 @@ model ActivityLogs {
   createdAt DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@map("activity_logs")
+}
+
+enum Role {
+  ADMIN
+  RH
+  GESTOR
+  FUNCIONARIO
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+  ON_LEAVE
+}
+
+enum SenderType {
+  COMPANY
+  EMPLOYEE
 }
 
 enum NfStatus {
