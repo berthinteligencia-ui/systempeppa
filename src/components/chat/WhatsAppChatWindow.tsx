@@ -46,7 +46,7 @@ export function WhatsAppChatWindow({ conversation, onMessageSent }: WhatsAppChat
         }
     }
 
-    // Inicia ouvintes de Realtime e busca mensagens iniciais
+    // Inicia ouvintes de Realtime + polling de fallback
     useEffect(() => {
         setMessages([])
         setError(null)
@@ -55,7 +55,7 @@ export function WhatsAppChatWindow({ conversation, onMessageSent }: WhatsAppChat
 
         fetchMessages()
 
-        // Inscreve no Realtime sem filtro server-side (filtra no cliente para garantir)
+        // Realtime: tenta receber INSERTs em tempo real
         const channel = supabase
             .channel(`mensagens:${conversationId}`)
             .on(
@@ -80,8 +80,12 @@ export function WhatsAppChatWindow({ conversation, onMessageSent }: WhatsAppChat
             )
             .subscribe()
 
+        // Polling de fallback: re-busca a cada 4s para garantir sincronismo
+        const interval = setInterval(fetchMessages, 4000)
+
         return () => {
             supabase.removeChannel(channel)
+            clearInterval(interval)
         }
     }, [conversationId])
 
@@ -194,19 +198,19 @@ export function WhatsAppChatWindow({ conversation, onMessageSent }: WhatsAppChat
                     <div
                         key={msg.id}
                         className={cn(
-                            "max-w-[68%] px-3.5 py-2.5 rounded-2xl text-sm shadow-sm relative",
+                            "max-w-[68%] px-3.5 pt-2.5 pb-1.5 rounded-2xl text-sm shadow-sm flex flex-col gap-1",
                             msg.senderType === "COMPANY"
                                 ? "self-end bg-[#1a3c6e] text-white rounded-br-sm"
                                 : "self-start bg-white text-slate-800 rounded-bl-sm border border-slate-100"
                         )}
                     >
-                        <p className="leading-relaxed pr-10">{msg.content}</p>
+                        <p className="leading-relaxed">{msg.content}</p>
                         <span className={cn(
-                            "absolute bottom-2 right-3 text-[10px]",
+                            "text-[10px] self-end flex items-center gap-0.5",
                             msg.senderType === "COMPANY" ? "text-blue-200" : "text-slate-400"
                         )}>
                             {new Date(msg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                            {msg.senderType === "COMPANY" && <span className="ml-1">✓✓</span>}
+                            {msg.senderType === "COMPANY" && <span>✓✓</span>}
                         </span>
                     </div>
                 ))}
