@@ -63,13 +63,12 @@ export function WhatsAppChatWindow({ conversation, onMessageSent }: WhatsAppChat
                 { event: 'INSERT', schema: 'public', table: 'mensagens_zap' },
                 (payload) => {
                     const row = payload.new as any
-                    // Aceita se bater com lead_id OU com numero_funcionario (chave de agrupamento)
                     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationId ?? "")
-                    const phoneKey = (row.numero_funcionario ?? "").slice(-10)
-                    const convPhone = (conversationId ?? "").replace(/\D/g, "").slice(-10)
+                    const suffix = (conversationId ?? "").replace(/\D/g, "").slice(-8)
+                    const rowPhone = (row.numero_funcionario ?? "").replace(/@.*$/, "").replace(/\D/g, "")
                     const matches = isUuid
                         ? row.lead_id === conversationId
-                        : phoneKey === convPhone || row.lead_id === conversationId
+                        : rowPhone.endsWith(suffix) || row.lead_id === conversationId
                     if (!matches) return
                     const newMsg = mapMessage(row)
                     setMessages(prev => {

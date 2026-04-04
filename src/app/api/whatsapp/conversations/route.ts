@@ -18,6 +18,7 @@ export async function GET() {
             .from("mensagens_zap")
             .select("id, lead_id, conteudo, tipo, created_at, numero_funcionario")
             .order("created_at", { ascending: false })
+            .limit(500)
 
         if (msgError) throw new Error(msgError.message)
 
@@ -40,9 +41,9 @@ export async function GET() {
 
         const empList = employees ?? []
 
-        // Normaliza telefone: remove não-dígitos, pega últimos 10 dígitos
+        // Normaliza telefone: remove não-dígitos e sufixo WhatsApp, pega últimos 8 dígitos
         const normPhone = (p: string | null | undefined) =>
-            (p ?? "").replace(/\D/g, "").slice(-10)
+            (p ?? "").replace(/@.*$/, "").replace(/\D/g, "").slice(-8)
 
         // Monta mapa: telefone normalizado → employee
         const empByPhone: Record<string, any> = {}

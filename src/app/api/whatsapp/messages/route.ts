@@ -7,7 +7,7 @@ import { randomUUID } from "crypto"
 
 const CRM_WEBHOOK_URL = "https://webhook.berthia.com.br/webhook/enviacrmzap"
 
-const normPhone = (p: string | null | undefined) => (p ?? "").replace(/\D/g, "").slice(-10)
+const normPhone = (p: string | null | undefined) => (p ?? "").replace(/@.*$/, "").replace(/\D/g, "").slice(-8)
 
 export async function GET(req: Request) {
     const session = await auth()
@@ -20,21 +20,52 @@ export async function GET(req: Request) {
     try {
         const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationId)
 
-        let query = supabaseAdmin
-            .from("mensagens_zap")
-            .select("id, conteudo, tipo, created_at, lead_id, numero_funcionario")
-            .order("created_at", { ascending: true })
+        let rows: any[] = []
 
         if (isUuid) {
-            query = query.eq("lead_id", conversationId)
+            // Busca direto pelo lead_id
+            const { data, error } = await supabaseAdmin
+                .from("mensagens_zap")
+                .select("id, conteudo, tipo, created_at, lead_id, numero_funcionario")
+                .eq("lead_id", conversationId)
+                .order("created_at", { ascending: true })
+            if (error) throw new Error(error.message)
+            rows = data ?? []
         } else {
-            query = query.eq("numero_funcionario", conversationId)
+            // conversationId é telefone normalizado (últimos 8 dígitos)
+            const suffix = conversationId.replace(/\D/g, "").slice(-8)
+
+            const [byPhone, leadLookup] = await Promise.all([
+                supabaseAdmin
+                    .from("mensagens_zap")
+                    .select("id, conteudo, tipo, created_at, lead_id, numero_funcionario")
+                    .ilike("numero_funcionario", `%${suffix}%`)
+                    .order("created_at", { ascending: true }),
+                supabaseAdmin
+                    .from("leads")
+                    .select("id")
+                    .ilike("celular", `%${suffix}%`)
+                    .limit(10),
+            ])
+
+            const leadIds = (leadLookup.data ?? []).map((l: any) => l.id)
+
+            // Um único IN query em vez de N queries sequenciais
+            const byLead = leadIds.length > 0
+                ? await supabaseAdmin
+                    .from("mensagens_zap")
+                    .select("id, conteudo, tipo, created_at, lead_id, numero_funcionario")
+                    .in("lead_id", leadIds)
+                : { data: [] }
+
+            const seen = new Set<string>()
+            for (const r of [...(byPhone.data ?? []), ...(byLead.data ?? [])]) {
+                if (!seen.has(r.id)) { seen.add(r.id); rows.push(r) }
+            }
+            rows.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
         }
 
-        const { data, error } = await query
-        if (error) throw new Error(error.message)
-
-        const messages = (data ?? []).map(m => ({
+        const messages = rows.map(m => ({
             id: m.id,
             content: m.conteudo,
             senderType: m.tipo === "lead" ? "EMPLOYEE" : "COMPANY",
