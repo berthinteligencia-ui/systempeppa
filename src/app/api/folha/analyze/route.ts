@@ -236,6 +236,100 @@ function detectColumns(
     // Cargo is detected ONLY by header name (passes 1). No content scan.
     // cargoIdx is already set (or -1) from the 1st pass above.
 
+    // ── 6th pass: validação cruzada — verifica se o conteúdo de cada coluna detectada
+    //    realmente condiz com o tipo esperado. Se não, libera a coluna e reatribui.
+    const sample = rows.slice(0, 50)
+    const nonEmpty = (col: number) => sample.filter(r => String(r[headers[col]] ?? "").trim() !== "")
+
+    function scoreValor(col: number): number {
+        const cells = nonEmpty(col)
+        if (cells.length === 0) return 0
+        const hits = cells.filter(r => {
+            const raw = String(r[headers[col]] ?? "").trim()
+            const n = parseValue(raw)
+            return n > 0 || /R\$/i.test(raw) || /\d+,\d{2}/.test(raw)
+        }).length
+        return hits / cells.length
+    }
+
+    function scoreTelefone(col: number): number {
+        const cells = nonEmpty(col)
+        if (cells.length === 0) return 0
+        const hits = cells.filter(r => {
+            const digits = String(r[headers[col]] ?? "").replace(/\D/g, "")
+            return digits.length >= 8 && digits.length <= 15
+        }).length
+        return hits / cells.length
+    }
+
+    function scoreCpf(col: number): number {
+        const cells = nonEmpty(col)
+        if (cells.length === 0) return 0
+        const hits = cells.filter(r => looksLikeCpf(r[headers[col]])).length
+        return hits / cells.length
+    }
+
+    function scoreNome(col: number): number {
+        const cells = nonEmpty(col)
+        if (cells.length === 0) return 0
+        const hits = cells.filter(r => {
+            const v = String(r[headers[col]] ?? "").trim()
+            return v.length > 3 && isNaN(Number(v.replace(/[.,]/g, ""))) && /[a-zA-ZÀ-ú]/.test(v)
+        }).length
+        return hits / cells.length
+    }
+
+    // Detecta se uma coluna foi atribuída ao tipo errado comparando scores
+    const THRESHOLD = 0.4 // mínimo para ser considerado "correto"
+
+    // Valida CPF
+    if (cpfIdx !== -1 && scoreCpf(cpfIdx) < THRESHOLD) {
+        // O conteúdo não parece CPF — libera e tenta redetectar
+        const old = cpfIdx; cpfIdx = -1
+        for (let col = 0; col < headers.length; col++) {
+            if ([nomeIdx, valorIdx, telefoneIdx, old].includes(col)) continue
+            if (scoreCpf(col) >= THRESHOLD) { cpfIdx = col; break }
+        }
+    }
+
+    // Valida Nome
+    if (nomeIdx !== -1 && scoreNome(nomeIdx) < THRESHOLD) {
+        const old = nomeIdx; nomeIdx = -1
+        for (let col = 0; col < headers.length; col++) {
+            if ([cpfIdx, valorIdx, telefoneIdx, old].includes(col)) continue
+            if (scoreNome(col) >= THRESHOLD) { nomeIdx = col; break }
+        }
+    }
+
+    // Valida Valor
+    if (valorIdx !== -1 && scoreValor(valorIdx) < THRESHOLD) {
+        const old = valorIdx; valorIdx = -1
+        for (let col = headers.length - 1; col >= 0; col--) {
+            if ([cpfIdx, nomeIdx, telefoneIdx, old].includes(col)) continue
+            if (scoreValor(col) >= THRESHOLD) { valorIdx = col; break }
+        }
+    }
+
+    // Valida Telefone — se o conteúdo parece valor monetário, reatribui como valor
+    if (telefoneIdx !== -1 && scoreTelefone(telefoneIdx) < THRESHOLD) {
+        const old = telefoneIdx; telefoneIdx = -1
+        // Verifica se é valor monetário mal-atribuído
+        if (valorIdx === -1 && scoreValor(old) >= THRESHOLD) {
+            valorIdx = old
+        } else {
+            for (let col = 0; col < headers.length; col++) {
+                if ([cpfIdx, nomeIdx, valorIdx, old].includes(col)) continue
+                if (scoreTelefone(col) >= THRESHOLD) { telefoneIdx = col; break }
+            }
+        }
+    }
+
+    // Valida Valor — se parece telefone e não há telefoneIdx, troca
+    if (valorIdx !== -1 && scoreValor(valorIdx) < THRESHOLD && scoreTelefone(valorIdx) >= THRESHOLD) {
+        if (telefoneIdx === -1) telefoneIdx = valorIdx
+        valorIdx = -1
+    }
+
     return { cpfIdx, nomeIdx, valorIdx, telefoneIdx, cargoIdx, bancoIdx, agenciaIdx, contaIdx, pixIdx }
 }
 
@@ -493,6 +587,22 @@ export async function POST(req: NextRequest) {
                     valueMismatch
                 }
             })
+
+        // Auto-reconcile: atualiza salário no banco quando difere da planilha
+        const salaryMismatches = found.filter(r => r.valueMismatch)
+        if (salaryMismatches.length > 0) {
+            await Promise.all(
+                salaryMismatches.map(r =>
+                    supabase.from("employees").update({ salary: String(r.valor) }).eq("id", r.id)
+                )
+            )
+            for (const r of found) {
+                if (r.valueMismatch) {
+                    r.valueMismatch = false
+                    r.dbSalary = r.valor
+                }
+            }
+        }
 
         const missing = finalRows
             .filter((r: PayrollRow) => !dbMap.has(r.cpf))

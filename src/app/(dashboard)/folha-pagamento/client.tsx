@@ -7,7 +7,7 @@ import {
     FileSpreadsheet, CheckCircle2, X, Calendar, Building2, FileUp,
     AlertTriangle, UserPlus, Users, ChevronRight, ChevronDown, RotateCcw, Loader2, ShieldCheck,
     Trash2, Edit, Phone, Receipt, Maximize2, CirclePlus, Plus, Sparkles, Info, BellRing, Lightbulb,
-    AlertCircle, Hash,
+    AlertCircle, Hash, Copy,
 } from "lucide-react"
 import * as XLSX from "xlsx"
 import type * as ExcelJSTypes from "exceljs"
@@ -1821,10 +1821,31 @@ export function FolhaPagamentoClient({
                             ]
                             return (
                                 <div key={sheetInfo.sheet} className="rounded-lg border p-3 space-y-3">
-                                    <p className="text-sm font-semibold flex items-center gap-1.5">
-                                        <FileSpreadsheet className="h-3.5 w-3.5 text-blue-500" />
-                                        Aba: <span className="text-blue-600">{sheetInfo.sheet}</span>
-                                    </p>
+                                    <div className="flex items-center justify-between gap-2">
+                                        <p className="text-sm font-semibold flex items-center gap-1.5">
+                                            <FileSpreadsheet className="h-3.5 w-3.5 text-blue-500" />
+                                            Aba: <span className="text-blue-600">{sheetInfo.sheet}</span>
+                                        </p>
+                                        {(debugInfo ?? []).length > 1 && (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const sourceMapping = correctionDraft[sheetInfo.sheet] ?? {}
+                                                    setCorrectionDraft(prev => {
+                                                        const next = { ...prev }
+                                                        for (const s of (debugInfo ?? [])) {
+                                                            if (s.sheet === sheetInfo.sheet) continue
+                                                            next[s.sheet] = { ...sourceMapping }
+                                                        }
+                                                        return next
+                                                    })
+                                                }}
+                                                className="flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-600 hover:bg-blue-100 transition-colors whitespace-nowrap"
+                                            >
+                                                <Copy className="h-3 w-3" /> Replicar para todas as abas
+                                            </button>
+                                        )}
+                                    </div>
                                     <div className="grid grid-cols-2 gap-x-4 gap-y-2">
                                         {FIELDS.map(({ key, label, critical }) => (
                                             <div key={key} className="space-y-0.5">
