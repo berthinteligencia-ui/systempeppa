@@ -1624,7 +1624,7 @@ export function FolhaPagamentoClient({
                     )}
 
                     {/* Missing CPFs and Inconsistencies banner */}
-                    {phase === "pending" && (missing.length > 0 || invalidCpfCount > 0 || nameMismatchCount > 0 || valMismatchCount > 0 || duplicateCpfCount > 0 || crossAbaDuplicateCount > 0) && (
+                    {phase === "pending" && (missing.length > 0 || invalidCpfCount > 0 || nameMismatchCount > 0 || valMismatchCount > 0 || duplicateCpfCount > 0 || crossAbaDuplicateCount > 0 || missingBankCount > 0 || (result?.extras?.length || 0) > 0) && (
                         <div className="mx-5 mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
                             <div className="flex items-center gap-2 mb-3">
                                 <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
@@ -1642,11 +1642,13 @@ export function FolhaPagamentoClient({
                                 </div>
                             </div>
                             <div className="flex gap-2">
-                                <button onClick={handleRegisterAll} disabled={registering}
-                                    className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60 transition-colors">
-                                    {registering ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
-                                    Cadastrar Todos
-                                </button>
+                                {missing.length > 0 && (
+                                    <button onClick={handleRegisterAll} disabled={registering}
+                                        className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60 transition-colors">
+                                        {registering ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
+                                        Cadastrar Todos
+                                    </button>
+                                )}
                                 {missingBankCount > 0 && (
                                     <button 
                                         onClick={() => {
