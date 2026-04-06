@@ -224,7 +224,7 @@ model Comprovante {
   originCnpj   String?
   generatedAt  String?
   company      Company          @relation(fields: [companyId], references: [id])
-  employee     Employee?        @relation(fields: [employeeId], references: [id])
+  employee     Employee?        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   fechamento   PayrollAnalysis? @relation(fields: [fechamentoId], references: [id])
 }
 
@@ -236,7 +236,7 @@ model Conversation {
   companyId  String
   employeeId String
   company    Company   @relation(fields: [companyId], references: [id])
-  employee   Employee  @relation(fields: [employeeId], references: [id])
+  employee   Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   messages   Message[]
 
   @@unique([companyId, employeeId])
