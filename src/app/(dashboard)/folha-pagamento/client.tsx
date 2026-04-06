@@ -884,6 +884,22 @@ export function FolhaPagamentoClient({
     async function handleExportExcel() {
         if (!result) return
 
+        // ── Exportação específica Banco Mentore ───────────────────────────────
+        if (viewFilter === "MENTORE") {
+            const aoa: any[][] = [["Nome do empregado", "CPF", "Valor"]]
+            filteredRows.forEach(r => {
+                const rawCpf = (r.cpf || "").replace(/\D/g, "")
+                const formattedValor = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(r.valor)
+                aoa.push([r.nome, rawCpf, formattedValor])
+            })
+            const ws = XLSX.utils.aoa_to_sheet(aoa)
+            ws["!cols"] = [{ wch: 45 }, { wch: 20 }, { wch: 15 }]
+            const wb = XLSX.utils.book_new()
+            XLSX.utils.book_append_sheet(wb, ws, "Mentore")
+            XLSX.writeFile(wb, `folha-mentore-${mes}-${ano}.xlsx`)
+            return
+        }
+
         // ── Exportação específica Banco do Brasil (mantém xlsx simples) ───────
         if (viewFilter === "BANCO DO BRASIL") {
             const aoa: any[][] = [["CPF", "Agência com DV", "Conta com DV", "Valor"]]
