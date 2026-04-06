@@ -1142,17 +1142,6 @@ export function FolhaPagamentoClient({
     const duplicateCpfCount = resultRows.filter(r => duplicateCpfSet.has(`${r.sheet}::${r.cpf}`)).length
     const crossAbaDuplicateCount = resultRows.filter(r => crossAbaDuplicateSet.has(r.cpf)).length
 
-    const totalDiversions = useMemo(() => {
-        if (!result) return 0
-        return errorGroups.unregistered.length +
-               errorGroups.invalidCpfs.length + 
-               errorGroups.nameMismatches.length + 
-               errorGroups.valueMismatches.length +
-               errorGroups.duplicates.length + 
-               errorGroups.extras.length +
-               errorGroups.missingBanks.length
-    }, [errorGroups])
-
     const errorGroups = useMemo(() => {
         if (!result) return { unregistered: [], invalidCpfs: [], nameMismatches: [], valueMismatches: [], duplicates: [], extras: [], missingBanks: [] }
         
@@ -1173,6 +1162,17 @@ export function FolhaPagamentoClient({
 
         return { unregistered, invalidCpfs, nameMismatches, valueMismatches, duplicates, extras, missingBanks }
     }, [result, resultRows, missing, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet, missingBankCount])
+
+    const totalDiversions = useMemo(() => {
+        if (!result) return 0
+        return errorGroups.unregistered.length +
+               errorGroups.invalidCpfs.length + 
+               errorGroups.nameMismatches.length + 
+               errorGroups.valueMismatches.length +
+               errorGroups.duplicates.length + 
+               errorGroups.extras.length +
+               errorGroups.missingBanks.length
+    }, [errorGroups])
 
     const [activeErrorTab, setActiveErrorTab] = useState<"unregistered" | "invalidCpfs" | "duplicates" | "nameMismatches" | "extras" | "missingBanks">("unregistered")
 
