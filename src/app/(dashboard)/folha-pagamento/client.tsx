@@ -1158,7 +1158,7 @@ export function FolhaPagamentoClient({
         return { unregistered, invalidCpfs, nameMismatches, valueMismatches, duplicates, extras, missingBanks }
     }, [result, resultRows, missing, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet, missingBankCount])
 
-    const [activeErrorTab, setActiveErrorTab] = useState<"invalidCpfs" | "duplicates" | "nameMismatches" | "extras">("invalidCpfs")
+    const [activeErrorTab, setActiveErrorTab] = useState<"invalidCpfs" | "duplicates" | "nameMismatches" | "extras" | "missingBanks">("invalidCpfs")
 
     const showResults = phase === "result" || phase === "pending"
 
