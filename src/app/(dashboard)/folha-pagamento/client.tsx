@@ -1175,7 +1175,7 @@ export function FolhaPagamentoClient({
         return { unregistered, invalidCpfs, nameMismatches, valueMismatches, duplicates, extras, missingBanks }
     }, [result, resultRows, missing, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet, missingBankCount])
 
-    const [activeErrorTab, setActiveErrorTab] = useState<"invalidCpfs" | "duplicates" | "nameMismatches" | "extras" | "missingBanks">("invalidCpfs")
+    const [activeErrorTab, setActiveErrorTab] = useState<"unregistered" | "invalidCpfs" | "duplicates" | "nameMismatches" | "extras" | "missingBanks">("unregistered")
 
     const showResults = phase === "result" || phase === "pending"
 
@@ -1652,9 +1652,8 @@ export function FolhaPagamentoClient({
                                 {missingBankCount > 0 && (
                                     <button 
                                         onClick={() => {
-                                            setBankUpdateTarget("ALL")
-                                            setBankUpdateForm({ bankName: "", bankAgency: "", bankAccount: "", pixKey: "" })
-                                            setIsBankUpdateOpen(true)
+                                            setActiveErrorTab("missingBanks")
+                                            setIsErrorCorrectionOpen(true)
                                         }}
                                         className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 transition-colors"
                                     >
@@ -1664,8 +1663,9 @@ export function FolhaPagamentoClient({
                                 <button onClick={() => {
                                         // Abre na aba com mais erros
                                         const tabs = [
+                                            { id: "unregistered", count: missing.length },
                                             { id: "invalidCpfs", count: invalidCpfCount },
-                                            { id: "duplicates", count: duplicateCpfCount + crossAbaDuplicateCount },
+                                            { id: "duplicates", count: errorGroups.duplicates.length },
                                             { id: "nameMismatches", count: nameMismatchCount },
                                             { id: "extras", count: result?.extras?.length || 0 },
                                             { id: "missingBanks", count: missingBankCount },
@@ -2373,6 +2373,7 @@ export function FolhaPagamentoClient({
                             
                             <div className="flex-1 px-3 space-y-1">
                                 {[
+                                    { id: "unregistered", label: "Não Cadastrados", count: errorGroups.unregistered.length, icon: UserPlus, color: "text-amber-500" },
                                     { id: "invalidCpfs", label: "CPFs Inválidos", count: errorGroups.invalidCpfs.length, icon: ShieldCheck, color: "text-red-500" },
                                     { id: "duplicates", label: "Duplicidades", count: errorGroups.duplicates.length, icon: RotateCcw, color: "text-purple-500" },
                                     { id: "nameMismatches", label: "Divergência Nome", count: errorGroups.nameMismatches.length, icon: Info, color: "text-blue-500" },
