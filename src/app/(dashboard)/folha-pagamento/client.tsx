@@ -1144,15 +1144,14 @@ export function FolhaPagamentoClient({
 
     const totalDiversions = useMemo(() => {
         if (!result) return 0
-        return invalidCpfCount + 
-               nameMismatchCount + 
-               valMismatchCount +
-               duplicateCpfCount + 
-               crossAbaDuplicateCount + 
-               missing.length +
-               (result?.extras?.length || 0) +
-               missingBankCount
-    }, [result, resultRows, invalidCpfCount, nameMismatchCount, valMismatchCount, duplicateCpfCount, crossAbaDuplicateCount, missing, missingBankCount])
+        return errorGroups.unregistered.length +
+               errorGroups.invalidCpfs.length + 
+               errorGroups.nameMismatches.length + 
+               errorGroups.valueMismatches.length +
+               errorGroups.duplicates.length + 
+               errorGroups.extras.length +
+               errorGroups.missingBanks.length
+    }, [errorGroups])
 
     const errorGroups = useMemo(() => {
         if (!result) return { unregistered: [], invalidCpfs: [], nameMismatches: [], valueMismatches: [], duplicates: [], extras: [], missingBanks: [] }
@@ -1624,12 +1623,12 @@ export function FolhaPagamentoClient({
                     )}
 
                     {/* Missing CPFs and Inconsistencies banner */}
-                    {phase === "pending" && (missing.length > 0 || invalidCpfCount > 0 || nameMismatchCount > 0 || valMismatchCount > 0 || duplicateCpfCount > 0 || crossAbaDuplicateCount > 0 || missingBankCount > 0 || (result?.extras?.length || 0) > 0) && (
+                    {showResults && totalDiversions > 0 && (
                         <div className="mx-5 mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
                             <div className="flex items-center gap-2 mb-3">
                                 <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
                                 <div>
-                                    <h3 className="text-sm font-bold text-amber-900">Atenção Necessária ({missing.length + invalidCpfCount + nameMismatchCount + valMismatchCount + duplicateCpfCount + crossAbaDuplicateCount + missingBankCount})</h3>
+                                    <h3 className="text-sm font-bold text-amber-900">Atenção Necessária ({totalDiversions})</h3>
                                     <p className="text-[11px] text-amber-700">
                                         {missing.length > 0 && `${missing.length} não cadastrados. `}
                                         {invalidCpfCount > 0 && `${invalidCpfCount} CPF(s) inválidos. `}
