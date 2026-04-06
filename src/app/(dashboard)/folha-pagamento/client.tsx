@@ -1075,7 +1075,7 @@ export function FolhaPagamentoClient({
         
         const isPerfectMatch = 
             r.status === "found" && 
-            !((r as FoundRow).nameMismatch || (r as FoundRow).valueMismatch || (r as any).isInvalidCpf || isDuplicate)
+            !((r as FoundRow).nameMismatch || (r as FoundRow).valueMismatch || (r as any).isInvalidCpf || (r as any).isMissingBank || isDuplicate)
 
         if (isPerfectMatch) return 0
         if (r.status === "found" && (r as FoundRow).nameMismatch) return 1

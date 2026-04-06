@@ -591,8 +591,10 @@ export async function POST(req: NextRequest) {
                     bankAccount: e.bankAccount || r.bankAccount,
                     pix: e.pixKey || r.pix,
                     isInvalidCpf: r.isInvalidCpf,
-                    isMissingBank: !normalizeBankName(e.bankName || r.bankName) || 
-                        (normalizeBankName(e.bankName || r.bankName) !== "MENTORE" && (!e.bankAgency && !r.bankAgency || !e.bankAccount && !r.bankAccount)),
+                    isMissingBank: (function(b, a, c) {
+                        const isMpt = b === "MENTORE" || b === "PIX"
+                        return !b || b === "Não informado" || (!isMpt && (!a || !c))
+                    })(normalizeBankName(e.bankName || r.bankName), e.bankAgency || r.bankAgency, e.bankAccount || r.bankAccount),
                     nameMismatch,
                     valueMismatch,
                     departmentId: e.departmentId
