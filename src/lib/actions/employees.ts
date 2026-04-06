@@ -284,6 +284,9 @@ export async function updateEmployeesBankBatch(
   const companyId = await getCompanyId()
   const supabase = getSupabaseAdmin()
   const now = new Date().toISOString()
+  const isMentoreOrPix = data.bankName === "MENTORE" || data.bankName === "PIX";
+  const agency = isMentoreOrPix ? null : (data.bankAgency || null);
+  const account = isMentoreOrPix ? null : (data.bankAccount || null);
 
   await Promise.all(
     ids.map((id) =>
@@ -291,8 +294,8 @@ export async function updateEmployeesBankBatch(
         .from("Employee")
         .update({
           bankName: data.bankName,
-          bankAgency: data.bankName === "MENTORE" ? null : (data.bankAgency || null),
-          bankAccount: data.bankName === "MENTORE" ? null : (data.bankAccount || null),
+          bankAgency: agency,
+          bankAccount: account,
           pixKey: data.pixKey || null,
           updatedAt: now,
         })

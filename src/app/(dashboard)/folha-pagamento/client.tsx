@@ -135,6 +135,7 @@ const BANK_PATTERNS: [RegExp, string][] = [
     [/votorantim|^655$/i,                                          "Banco Votorantim"],
     [/daycoval|^707$/i,                                            "Banco Daycoval"],
     [/mentore/i,                                                   "MENTORE"],
+    [/pix/i,                                                       "PIX"],
 ]
 
 function normalizeBankName(raw: string | undefined | null): string {
@@ -317,6 +318,50 @@ export function FolhaPagamentoClient({
         } catch (e: any) {
             setError(e?.message ?? "Falha na conexão. Tente novamente.")
             setPhase("form")
+        }
+    }
+
+    async function handleBankUpdate() {
+        if (!bankUpdateForm.bankName) { alert("Selecione o banco"); return }
+        const isMentoreOrPix = bankUpdateForm.bankName === "MENTORE" || bankUpdateForm.bankName === "PIX";
+        if (!isMentoreOrPix) {
+            if (!bankUpdateForm.bankAgency || !bankUpdateForm.bankAccount) {
+                alert("Agência e Conta são obrigatórios para este banco")
+                return
+            }
+        }
+        if (bankUpdateForm.bankName === "PIX" && !bankUpdateForm.pixKey) {
+            alert("Chave PIX é obrigatória para a opção PIX")
+            return
+        }
+
+        setIsUpdatingBank(true)
+        try {
+            let ids: string[] = []
+            if (bankUpdateTarget === "ALL") {
+                ids = resultRows
+                    .filter(r => (r as any).isMissingBank && r.status === "found")
+                    .map(r => (r as FoundRow).id)
+            } else {
+                ids = [bankUpdateTarget]
+            }
+
+            if (ids.length === 0) {
+                alert("Nenhum funcionário selecionado para atualizar.")
+                setIsBankUpdateOpen(false)
+                return
+            }
+
+            await updateEmployeesBankBatch(ids, bankUpdateForm)
+            alert("Dados bancários atualizados com sucesso!")
+            setIsBankUpdateOpen(false)
+            
+            // Re-analyze
+            if (file) confirmAndAnalyze()
+        } catch (e: any) {
+            alert("Erro ao atualizar: " + e?.message)
+        } finally {
+            setIsUpdatingBank(false)
         }
     }
 
@@ -1074,6 +1119,11 @@ export function FolhaPagamentoClient({
     }, [viewFilter, sortedResultRows, excludedRows, selectedSheet, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet])
 
     const missingBankCount = resultRows.filter(r => (r as any).isMissingBank).length
+    const invalidCpfCount = resultRows.filter(r => (r as any).isInvalidCpf).length
+    const nameMismatchCount = resultRows.filter(r => r.status === "found" && (r as FoundRow).nameMismatch).length
+    const valMismatchCount = resultRows.filter(r => r.status === "found" && (r as FoundRow).valueMismatch).length
+    const duplicateCpfCount = resultRows.filter(r => duplicateCpfSet.has(`${r.sheet}::${r.cpf}`)).length
+    const crossAbaDuplicateCount = resultRows.filter(r => crossAbaDuplicateSet.has(r.cpf)).length
 
     const totalDiversions = useMemo(() => {
         if (!result) return 0
@@ -1562,7 +1612,7 @@ export function FolhaPagamentoClient({
                             <div className="flex items-center gap-2 mb-3">
                                 <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
                                 <div>
-                                    <h3 className="text-sm font-bold text-amber-900">Atenção Necessária ({missing.length + invalidCpfCount + nameMismatchCount + valMismatchCount + duplicateCpfCount + crossAbaDuplicateCount})</h3>
+                                    <h3 className="text-sm font-bold text-amber-900">Atenção Necessária ({missing.length + invalidCpfCount + nameMismatchCount + valMismatchCount + duplicateCpfCount + crossAbaDuplicateCount + missingBankCount})</h3>
                                     <p className="text-[11px] text-amber-700">
                                         {missing.length > 0 && `${missing.length} não cadastrados. `}
                                         {invalidCpfCount > 0 && `${invalidCpfCount} CPF(s) inválidos. `}
@@ -2559,7 +2609,7 @@ function BankUpdateDialog({
     loading: boolean;
     target: "ALL" | string;
 }) {
-    const isMentore = form.bankName === "MENTORE"
+    const isMentoreOrPix = form.bankName === "MENTORE" || form.bankName === "PIX"
     
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -2572,7 +2622,7 @@ function BankUpdateDialog({
                 </DialogHeader>
                 <div className="space-y-4 py-4">
                     <div className="space-y-2">
-                        <Label className="text-xs font-bold uppercase tracking-wider text-slate-400">Banco</Label>
+                        <Label className="text-xs font-bold uppercase tracking-wider text-slate-400">Banco / Forma de Pagamento</Label>
                         <Select 
                             value={form.bankName} 
                             onValueChange={v => setForm(f => ({ ...f, bankName: v }))}
@@ -2581,7 +2631,8 @@ function BankUpdateDialog({
                                 <SelectValue placeholder="Selecione o banco..." />
                             </SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="MENTORE">MENTORE (Sem Agência/Conta)</SelectItem>
+                                <SelectItem value="PIX">🔵 PAGAR VIA PIX (Sem Agência/Conta)</SelectItem>
+                                <SelectItem value="MENTORE">🟢 MENTORE (Sem Agência/Conta)</SelectItem>
                                 <SelectItem value="Bradesco">Bradesco</SelectItem>
                                 <SelectItem value="Banco do Brasil">Banco do Brasil</SelectItem>
                                 <SelectItem value="Itaú">Itaú</SelectItem>
@@ -2596,7 +2647,7 @@ function BankUpdateDialog({
                         </Select>
                     </div>
                     
-                    {!isMentore && (
+                    {!isMentoreOrPix && (
                         <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-1 duration-200">
                             <div className="space-y-2">
                                 <Label className="text-xs font-bold uppercase tracking-wider text-slate-400">Agência</Label>
@@ -2620,7 +2671,7 @@ function BankUpdateDialog({
                     )}
                     
                     <div className="space-y-2">
-                        <Label className="text-xs font-bold uppercase tracking-wider text-slate-400">Chave PIX (Opcional)</Label>
+                        <Label className="text-xs font-bold uppercase tracking-wider text-slate-400">Chave PIX {form.bankName === "PIX" ? "(Obrigatório)" : "(Opcional)"}</Label>
                         <Input 
                             placeholder="CPF, E-mail, Celular ou Aleatória" 
                             className="h-11 rounded-xl"
@@ -2629,13 +2680,13 @@ function BankUpdateDialog({
                         />
                     </div>
 
-                    {isMentore && (
+                    {isMentoreOrPix && (
                         <div className="rounded-2xl bg-emerald-50 border border-emerald-100 p-4 flex items-start gap-3 shadow-sm shadow-emerald-100/50">
                             <div className="h-8 w-8 rounded-full bg-white flex items-center justify-center shrink-0 shadow-sm">
                                 <Sparkles className="h-4 w-4 text-emerald-500" />
                             </div>
                             <p className="text-[11px] text-emerald-800 leading-relaxed">
-                                Para o banco <strong className="text-emerald-950 px-1 py-0.5 bg-emerald-100 rounded">MENTORE</strong>, os campos de <span className="font-bold">Agência</span> e <span className="font-bold">Conta</span> não são necessários e serão ignorados.
+                                Para a forma de pagamento <strong className="text-emerald-950 px-1 py-0.5 bg-emerald-100 rounded">{form.bankName}</strong>, os campos de <span className="font-bold">Agência</span> e <span className="font-bold">Conta</span> não são necessários e serão ignorados.
                             </p>
                         </div>
                     )}
@@ -2644,7 +2695,7 @@ function BankUpdateDialog({
                     <Button variant="outline" onClick={() => onOpenChange(false)} className="rounded-xl h-11 px-6 font-bold text-xs uppercase tracking-widest text-slate-400">Cancelar</Button>
                     <Button 
                         onClick={onConfirm} 
-                        disabled={loading || !form.bankName || (!isMentore && (!form.bankAgency || !form.bankAccount))}
+                        disabled={loading || !form.bankName || (!isMentoreOrPix && (!form.bankAgency || !form.bankAccount)) || (form.bankName === "PIX" && !form.pixKey)}
                         className="bg-emerald-600 hover:bg-emerald-700 rounded-xl h-11 px-8 font-black text-xs uppercase tracking-widest text-white shadow-lg shadow-emerald-200 transition-all active:scale-95"
                     >
                         {loading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}

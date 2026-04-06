@@ -40,6 +40,7 @@ const BANK_PATTERNS: [RegExp, string][] = [
     [/votorantim|^655$/i,                                          "Banco Votorantim"],
     [/daycoval|^707$/i,                                            "Banco Daycoval"],
     [/mentore/i,                                                   "MENTORE"],
+    [/pix/i,                                                       "PIX"],
 ]
 
 function normalizeBankName(raw: string | undefined | null): string | undefined {
@@ -488,8 +489,8 @@ export async function POST(req: NextRequest) {
                 const isInvalidCpf = !isValidCpf(cpf)
                 
                 // Bank contingency logic
-                const isMissingBank = !bankName || bankName === "Não informado" || 
-                    (bankName !== "MENTORE" && (!bankAgency || !bankAccount))
+                const isMentoreOrPix = bankName === "MENTORE" || bankName === "PIX";
+                const isMissingBank = !bankName || bankName === "Não informado" || (!isMentoreOrPix && (!bankAgency || !bankAccount));
 
                 // Skip truly empty rows
                 if (!cpf && !nomeRaw && valor === 0) continue
