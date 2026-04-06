@@ -345,6 +345,7 @@ export async function POST(req: NextRequest) {
 
         const form = await req.formData()
         const file = form.get("file") as File | null
+        const unidadeId = form.get("unidade") as string | null
         if (!file) return NextResponse.json({ error: "Arquivo não enviado" }, { status: 400 })
 
         // Column hints: { "SheetName": { cpf?: "COL", nome?: "COL", valor?: "COL", ... }, "*": {...} }
@@ -541,7 +542,7 @@ export async function POST(req: NextRequest) {
         const { data: dbEmployees, error: dbError } = cpfs.length > 0
             ? await supabase
                 .from("Employee")
-                .select("id, cpf, name, salary, phone, position, bankName, bankAgency, bankAccount, pixKey")
+                .select("id, cpf, name, salary, phone, position, bankName, bankAgency, bankAccount, pixKey, departmentId")
                 .eq("companyId", companyId)
                 .in("cpf", cpfs)
             : { data: [], error: null }
@@ -584,23 +585,26 @@ export async function POST(req: NextRequest) {
                     pix: e.pixKey || r.pix,
                     isInvalidCpf: r.isInvalidCpf,
                     nameMismatch,
-                    valueMismatch
+                    valueMismatch,
+                    departmentId: e.departmentId
                 }
             })
 
-        // Auto-reconcile: atualiza salário no banco quando difere da planilha
-        const salaryMismatches = found.filter(r => r.valueMismatch)
-        if (salaryMismatches.length > 0) {
+        // Auto-reconcile and Reactivate: atualiza status, salário e unidade no banco
+        if (found.length > 0) {
             await Promise.all(
-                salaryMismatches.map(r =>
-                    supabase.from("employees").update({ salary: String(r.valor) }).eq("id", r.id)
+                found.map(r =>
+                    supabase.from("Employee").update({ 
+                        status: "ACTIVE",
+                        salary: String(r.valor),
+                        departmentId: unidadeId || r.departmentId,
+                        updatedAt: new Date().toISOString()
+                    }).eq("id", r.id)
                 )
             )
             for (const r of found) {
-                if (r.valueMismatch) {
-                    r.valueMismatch = false
-                    r.dbSalary = r.valor
-                }
+                r.valueMismatch = false
+                r.dbSalary = r.valor
             }
         }
 
