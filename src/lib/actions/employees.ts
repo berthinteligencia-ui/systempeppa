@@ -271,3 +271,37 @@ export async function resetMonthlyStatus() {
   
   return { success: true }
 }
+
+export async function updateEmployeesBankBatch(
+  ids: string[],
+  data: {
+    bankName: string
+    bankAgency?: string
+    bankAccount?: string
+    pixKey?: string
+  }
+) {
+  const companyId = await getCompanyId()
+  const supabase = getSupabaseAdmin()
+  const now = new Date().toISOString()
+
+  await Promise.all(
+    ids.map((id) =>
+      supabase
+        .from("Employee")
+        .update({
+          bankName: data.bankName,
+          bankAgency: data.bankName === "MENTORE" ? null : (data.bankAgency || null),
+          bankAccount: data.bankName === "MENTORE" ? null : (data.bankAccount || null),
+          pixKey: data.pixKey || null,
+          updatedAt: now,
+        })
+        .eq("id", id)
+        .eq("companyId", companyId)
+    )
+  )
+
+  revalidatePath("/funcionarios")
+  revalidatePath("/folha-pagamento")
+  return { success: true }
+}

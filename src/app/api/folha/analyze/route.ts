@@ -35,10 +35,11 @@ const BANK_PATTERNS: [RegExp, string][] = [
     [/creditas/i,                                             "Creditas"],
     [/banco.?pan|\bpan\b|^623$/i,                             "Banco Pan"],
     [/modal|^746$/i,                                          "Banco Modal"],
-    [/c2.?bank/i,                                             "C2 Bank"],
-    [/^380$|limebank/i,                                       "PicPay Bank"],
-    [/votorantim|^655$/i,                                     "Banco Votorantim"],
-    [/daycoval|^707$/i,                                       "Banco Daycoval"],
+    [/c2.?bank/i,                                                  "C2 Bank"],
+    [/^380$|limebank/i,                                            "PicPay Bank"],
+    [/votorantim|^655$/i,                                          "Banco Votorantim"],
+    [/daycoval|^707$/i,                                            "Banco Daycoval"],
+    [/mentore/i,                                                   "MENTORE"],
 ]
 
 function normalizeBankName(raw: string | undefined | null): string | undefined {
@@ -367,6 +368,7 @@ export async function POST(req: NextRequest) {
             bankAccount?: string;
             pix?: string;
             isInvalidCpf?: boolean;
+            isMissingBank?: boolean;
         }
         const allRows: PayrollRow[] = []
         const extraRows: any[] = []
@@ -484,15 +486,19 @@ export async function POST(req: NextRequest) {
                 const pix = pixIdx !== -1 ? String(row[headers[pixIdx]] ?? "").trim() : undefined
 
                 const isInvalidCpf = !isValidCpf(cpf)
+                
+                // Bank contingency logic
+                const isMissingBank = !bankName || bankName === "Não informado" || 
+                    (bankName !== "MENTORE" && (!bankAgency || !bankAccount))
 
                 // Skip truly empty rows
                 if (!cpf && !nomeRaw && valor === 0) continue
 
                 // Categorize
                 if (cpf && cpf !== "00000000000") {
-                    allRows.push({ cpf, nome, valor, sheet: sheetName, telefone, cargo, bankName, bankAgency, bankAccount, pix, isInvalidCpf })
+                    allRows.push({ cpf, nome, valor, sheet: sheetName, telefone, cargo, bankName, bankAgency, bankAccount, pix, isInvalidCpf, isMissingBank })
                 } else if (nomeRaw && valor > 0) {
-                    extraRows.push({ nome, cpfCnpj: cpfRaw || "—", valor, sheet: sheetName, telefone, cargo, bankName, bankAgency, bankAccount, pix })
+                    extraRows.push({ nome, cpfCnpj: cpfRaw || "—", valor, sheet: sheetName, telefone, cargo, bankName, bankAgency, bankAccount, pix, isMissingBank })
                 } else {
                     continue
                 }
@@ -584,6 +590,8 @@ export async function POST(req: NextRequest) {
                     bankAccount: e.bankAccount || r.bankAccount,
                     pix: e.pixKey || r.pix,
                     isInvalidCpf: r.isInvalidCpf,
+                    isMissingBank: !normalizeBankName(e.bankName || r.bankName) || 
+                        (normalizeBankName(e.bankName || r.bankName) !== "MENTORE" && (!e.bankAgency && !r.bankAgency || !e.bankAccount && !r.bankAccount)),
                     nameMismatch,
                     valueMismatch,
                     departmentId: e.departmentId
@@ -621,7 +629,8 @@ export async function POST(req: NextRequest) {
                 bankAgency: r.bankAgency,
                 bankAccount: r.bankAccount,
                 pix: r.pix,
-                isInvalidCpf: r.isInvalidCpf
+                isInvalidCpf: r.isInvalidCpf,
+                isMissingBank: r.isMissingBank
             }))
 
         // Employees found in DB but missing phone there, yet spreadsheet has a phone (dedup by CPF)

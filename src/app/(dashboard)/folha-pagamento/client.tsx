@@ -23,7 +23,7 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import { registerBatchFromPayroll, getEmployeeByCpf, updateEmployeesPhone, updateEmployeeName, updateEmployeeSalary, resetMonthlyStatus } from "@/lib/actions/employees"
+import { registerBatchFromPayroll, getEmployeeByCpf, updateEmployeesPhone, updateEmployeeName, updateEmployeeSalary, resetMonthlyStatus, updateEmployeesBankBatch } from "@/lib/actions/employees"
 import {
     savePayrollAnalysis, listPayrollAnalyses, getPayrollAnalysis, deletePayrollAnalysis
 } from "@/lib/actions/payroll"
@@ -34,9 +34,9 @@ import { updateNotaFiscalStatus } from "@/lib/actions/nfs"
 type Department = { id: string; name: string }
 type NfRow = { id: string; numero: string; emitente: string; valor: number | string; dataEmissao: Date | string; status: string }
 
-type FoundRow = { id: string; nome: string; cpf: string; valor: number; sheet: string; telefone?: string; cargo?: string; bankName?: string; bankAgency?: string; bankAccount?: string; pix?: string; isInvalidCpf?: boolean; nameMismatch?: boolean; valueMismatch?: boolean; dbName?: string; dbSalary?: number }
-type MissingRow = { cpf: string; nome: string; valor: number; sheet: string; telefone?: string; cargo?: string; bankName?: string; bankAgency?: string; bankAccount?: string; pix?: string; isInvalidCpf?: boolean }
-type ExtraRow = { nome: string; cpfCnpj: string; valor: number; sheet: string; telefone?: string; cargo?: string; bankName?: string; bankAgency?: string; bankAccount?: string; pix?: string }
+type FoundRow = { id: string; nome: string; cpf: string; valor: number; sheet: string; telefone?: string; cargo?: string; bankName?: string; bankAgency?: string; bankAccount?: string; pix?: string; isInvalidCpf?: boolean; isMissingBank?: boolean; nameMismatch?: boolean; valueMismatch?: boolean; dbName?: string; dbSalary?: number; departmentId?: string }
+type MissingRow = { cpf: string; nome: string; valor: number; sheet: string; telefone?: string; cargo?: string; bankName?: string; bankAgency?: string; bankAccount?: string; pix?: string; isInvalidCpf?: boolean; isMissingBank?: boolean }
+type ExtraRow = { nome: string; cpfCnpj: string; valor: number; sheet: string; telefone?: string; cargo?: string; bankName?: string; bankAgency?: string; bankAccount?: string; pix?: string; isMissingBank?: boolean }
 type SheetSummary = { sheet: string; count: number; total: number }
 type PhoneUpdateRow = { id: string; nome: string; cpf: string; phoneInSheet: string }
 type AnalysisResult = { found: FoundRow[]; missing: MissingRow[]; extras: ExtraRow[]; total: number; sheetSummary: SheetSummary[]; duplicates?: string[]; crossAbaDuplicates?: string[]; phoneUpdates?: PhoneUpdateRow[]; sheetsNeedingMapping?: SheetNeedingMapping[] }
@@ -134,6 +134,7 @@ const BANK_PATTERNS: [RegExp, string][] = [
     [/^380$|limebank/i,                                            "PicPay Bank"],
     [/votorantim|^655$/i,                                          "Banco Votorantim"],
     [/daycoval|^707$/i,                                            "Banco Daycoval"],
+    [/mentore/i,                                                   "MENTORE"],
 ]
 
 function normalizeBankName(raw: string | undefined | null): string {
@@ -214,6 +215,12 @@ export function FolhaPagamentoClient({
     const [excludeReasonInput, setExcludeReasonInput] = useState("")
     const [isErrorCorrectionOpen, setIsErrorCorrectionOpen] = useState(false)
     const [selectedErrorRows, setSelectedErrorRows] = useState<string[]>([])
+    
+    // Bank Update
+    const [isBankUpdateOpen, setIsBankUpdateOpen] = useState(false)
+    const [bankUpdateTarget, setBankUpdateTarget] = useState<"ALL" | string>("ALL")
+    const [isUpdatingBank, setIsUpdatingBank] = useState(false)
+    const [bankUpdateForm, setBankUpdateForm] = useState({ bankName: "", bankAgency: "", bankAccount: "", pixKey: "" })
 
     const searchParams = useSearchParams()
     const router = useRouter()
@@ -1066,11 +1073,7 @@ export function FolhaPagamentoClient({
         return selectedSheet ? base.filter(r => r.sheet === selectedSheet) : base
     }, [viewFilter, sortedResultRows, excludedRows, selectedSheet, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet])
 
-    const invalidCpfCount = resultRows.filter(r => (r as any).isInvalidCpf).length
-    const nameMismatchCount = resultRows.filter(r => r.status === "found" && (r as FoundRow).nameMismatch).length
-    const valMismatchCount = resultRows.filter(r => r.status === "found" && (r as FoundRow).valueMismatch).length
-    const duplicateCpfCount = duplicateCpfSet.size
-    const crossAbaDuplicateCount = crossAbaDuplicateSet.size
+    const missingBankCount = resultRows.filter(r => (r as any).isMissingBank).length
 
     const totalDiversions = useMemo(() => {
         if (!result) return 0
@@ -1080,16 +1083,18 @@ export function FolhaPagamentoClient({
                duplicateCpfCount + 
                crossAbaDuplicateCount + 
                missing.length +
-               (result?.extras?.length || 0)
-    }, [result, resultRows, invalidCpfCount, nameMismatchCount, valMismatchCount, duplicateCpfCount, crossAbaDuplicateCount, missing])
+               (result?.extras?.length || 0) +
+               missingBankCount
+    }, [result, resultRows, invalidCpfCount, nameMismatchCount, valMismatchCount, duplicateCpfCount, crossAbaDuplicateCount, missing, missingBankCount])
 
     const errorGroups = useMemo(() => {
-        if (!result) return { unregistered: [], invalidCpfs: [], nameMismatches: [], valueMismatches: [], duplicates: [], extras: [] }
+        if (!result) return { unregistered: [], invalidCpfs: [], nameMismatches: [], valueMismatches: [], duplicates: [], extras: [], missingBanks: [] }
         
         const unregistered = missing.map(r => ({ ...r, status: "missing" as const, errorType: "unregistered" as const }))
         const invalidCpfs = resultRows.filter(r => (r as any).isInvalidCpf).map(r => ({ ...r, errorType: "invalidCpf" as const } as any))
         const nameMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).nameMismatch).map(r => ({ ...r, status: "found" as const, errorType: "nameMismatch" as const } as any))
         const valueMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).valueMismatch).map(r => ({ ...r, status: "found" as const, errorType: "valueMismatch" as const } as any))
+        const missingBanks = resultRows.filter(r => (r as any).isMissingBank).map(r => ({ ...r, errorType: "missingBank" as const } as any))
         
         // Group duplicates by CPF or Name
         const duplicates = resultRows.filter(r => 
@@ -1100,8 +1105,8 @@ export function FolhaPagamentoClient({
         
         const extras = (result.extras || []).map(r => ({ ...r, status: "extra" as const, cpf: (r as any).cpfCnpj || "", errorType: "extra" as const } as any))
 
-        return { unregistered, invalidCpfs, nameMismatches, valueMismatches, duplicates, extras }
-    }, [result, resultRows, missing, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet])
+        return { unregistered, invalidCpfs, nameMismatches, valueMismatches, duplicates, extras, missingBanks }
+    }, [result, resultRows, missing, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet, missingBankCount])
 
     const [activeErrorTab, setActiveErrorTab] = useState<"invalidCpfs" | "duplicates" | "nameMismatches" | "extras">("invalidCpfs")
 
@@ -1564,16 +1569,29 @@ export function FolhaPagamentoClient({
                                         {nameMismatchCount > 0 && `${nameMismatchCount} divergências de nome. `}
                                         {valMismatchCount > 0 && `${valMismatchCount} divergências de valor. `}
                                         {duplicateCpfCount > 0 && `${duplicateCpfCount} CPF(s) dup. mesma aba. `}
-                                        {crossAbaDuplicateCount > 0 && `${crossAbaDuplicateCount} CPF(s) dup. entre abas.`}
+                                        {crossAbaDuplicateCount > 0 && `${crossAbaDuplicateCount} CPF(s) dup. entre abas. `}
+                                        {missingBankCount > 0 && `${missingBankCount} com dados bancários ausentes.`}
                                     </p>
                                 </div>
                             </div>
                             <div className="flex gap-2">
                                 <button onClick={handleRegisterAll} disabled={registering}
-                                    className="flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-600 disabled:opacity-60 transition-colors">
+                                    className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60 transition-colors">
                                     {registering ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
                                     Cadastrar Todos
                                 </button>
+                                {missingBankCount > 0 && (
+                                    <button 
+                                        onClick={() => {
+                                            setBankUpdateTarget("ALL")
+                                            setBankUpdateForm({ bankName: "", bankAgency: "", bankAccount: "", pixKey: "" })
+                                            setIsBankUpdateOpen(true)
+                                        }}
+                                        className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 transition-colors"
+                                    >
+                                        <Building2 className="h-3.5 w-3.5" /> Corrigir Bancos
+                                    </button>
+                                )}
                                 <button onClick={() => setIsErrorCorrectionOpen(true)} disabled={registering}
                                     className="flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-100/50 px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-200 disabled:opacity-60 transition-colors">
                                     <Edit className="h-3.5 w-3.5" /> Corrigir Erros
@@ -2251,6 +2269,7 @@ export function FolhaPagamentoClient({
                                     { id: "duplicates", label: "Duplicidades", count: errorGroups.duplicates.length, icon: RotateCcw, color: "text-purple-500" },
                                     { id: "nameMismatches", label: "Divergência Nome", count: errorGroups.nameMismatches.length, icon: Info, color: "text-blue-500" },
                                     { id: "extras", label: "Sem CPF (Extras)", count: errorGroups.extras.length, icon: AlertCircle, color: "text-orange-500" },
+                                    { id: "missingBanks", label: "Dados Bancários", count: errorGroups.missingBanks.length, icon: Building2, color: "text-emerald-500" },
                                 ].map((tab) => (
                                     <button
                                         key={tab.id}
@@ -2284,6 +2303,7 @@ export function FolhaPagamentoClient({
                                         {activeErrorTab === "duplicates" && "Registros duplicados detectados"}
                                         {activeErrorTab === "nameMismatches" && "Divergências entre planilha e sistema"}
                                         {activeErrorTab === "extras" && "Registros extras sem CPF identificado"}
+                                        {activeErrorTab === "missingBanks" && "Funcionários com dados bancários incompletos"}
                                     </h3>
                                     <p className="text-xs text-slate-400 mt-1 font-medium">Selecione os registros para correção ou exclusão em massa.</p>
                                 </div>
@@ -2444,6 +2464,24 @@ export function FolhaPagamentoClient({
                                                             </button>
                                                         )}
                                                         
+                                                        {activeErrorTab === "missingBanks" && (
+                                                            <button
+                                                                onClick={() => {
+                                                                    setBankUpdateTarget(row.id!)
+                                                                    setBankUpdateForm({
+                                                                        bankName: row.bankName || "",
+                                                                        bankAgency: row.bankAgency || "",
+                                                                        bankAccount: row.bankAccount || "",
+                                                                        pixKey: row.pix || ""
+                                                                    })
+                                                                    setIsBankUpdateOpen(true)
+                                                                }}
+                                                                className="h-8 px-3 rounded-lg flex items-center gap-2 bg-emerald-600 text-white hover:bg-emerald-700 transition-all font-black text-[9px] uppercase tracking-wider shadow-sm hover:shadow-emerald-200"
+                                                            >
+                                                                <Building2 className="h-3 w-3" /> Corrigir Banco
+                                                            </button>
+                                                        )}
+                                                        
                                                         <button 
                                                             onClick={() => handleDeleteRow(row)}
                                                             className="h-8 w-8 rounded-lg flex items-center justify-center text-slate-300 hover:text-red-600 hover:bg-red-50 hover:border-red-100 border border-transparent transition-all"
@@ -2466,6 +2504,15 @@ export function FolhaPagamentoClient({
                     </div>
                 </DialogContent>
             </Dialog>
+            <BankUpdateDialog 
+                open={isBankUpdateOpen}
+                onOpenChange={setIsBankUpdateOpen}
+                onConfirm={handleBankUpdate}
+                form={bankUpdateForm}
+                setForm={setBankUpdateForm}
+                loading={isUpdatingBank}
+                target={bankUpdateTarget}
+            />
         </div>
     )
 }
@@ -2492,5 +2539,119 @@ function SelectField({
                 </svg>
             </span>
         </div>
+    )
+}
+
+function BankUpdateDialog({ 
+    open, 
+    onOpenChange, 
+    onConfirm, 
+    form, 
+    setForm, 
+    loading,
+    target
+}: { 
+    open: boolean; 
+    onOpenChange: (o: boolean) => void; 
+    onConfirm: () => void;
+    form: { bankName: string; bankAgency: string; bankAccount: string; pixKey: string };
+    setForm: React.Dispatch<React.SetStateAction<{ bankName: string; bankAgency: string; bankAccount: string; pixKey: string }>>;
+    loading: boolean;
+    target: "ALL" | string;
+}) {
+    const isMentore = form.bankName === "MENTORE"
+    
+    return (
+        <Dialog open={open} onOpenChange={onOpenChange}>
+            <DialogContent className="max-w-md">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2 text-lg font-bold">
+                        <Building2 className="h-5 w-5 text-emerald-500" /> 
+                        {target === "ALL" ? "Atualizar Banco (Todos)" : "Atualizar Banco"}
+                    </DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                    <div className="space-y-2">
+                        <Label className="text-xs font-bold uppercase tracking-wider text-slate-400">Banco</Label>
+                        <Select 
+                            value={form.bankName} 
+                            onValueChange={v => setForm(f => ({ ...f, bankName: v }))}
+                        >
+                            <SelectTrigger className="h-11 rounded-xl">
+                                <SelectValue placeholder="Selecione o banco..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="MENTORE">MENTORE (Sem Agência/Conta)</SelectItem>
+                                <SelectItem value="Bradesco">Bradesco</SelectItem>
+                                <SelectItem value="Banco do Brasil">Banco do Brasil</SelectItem>
+                                <SelectItem value="Itaú">Itaú</SelectItem>
+                                <SelectItem value="Santander">Santander</SelectItem>
+                                <SelectItem value="Caixa Econômica Federal">Caixa Econômica Federal</SelectItem>
+                                <SelectItem value="Nubank">Nubank</SelectItem>
+                                <SelectItem value="Banco Inter">Banco Inter</SelectItem>
+                                <SelectItem value="PicPay">PicPay</SelectItem>
+                                <SelectItem value="Mercado Pago">Mercado Pago</SelectItem>
+                                <SelectItem value="PagBank">PagBank</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    
+                    {!isMentore && (
+                        <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                            <div className="space-y-2">
+                                <Label className="text-xs font-bold uppercase tracking-wider text-slate-400">Agência</Label>
+                                <Input 
+                                    placeholder="0000" 
+                                    className="h-11 rounded-xl"
+                                    value={form.bankAgency} 
+                                    onChange={e => setForm(f => ({ ...f, bankAgency: e.target.value }))} 
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label className="text-xs font-bold uppercase tracking-wider text-slate-400">Conta</Label>
+                                <Input 
+                                    placeholder="00000-0" 
+                                    className="h-11 rounded-xl"
+                                    value={form.bankAccount} 
+                                    onChange={e => setForm(f => ({ ...f, bankAccount: e.target.value }))} 
+                                />
+                            </div>
+                        </div>
+                    )}
+                    
+                    <div className="space-y-2">
+                        <Label className="text-xs font-bold uppercase tracking-wider text-slate-400">Chave PIX (Opcional)</Label>
+                        <Input 
+                            placeholder="CPF, E-mail, Celular ou Aleatória" 
+                            className="h-11 rounded-xl"
+                            value={form.pixKey} 
+                            onChange={e => setForm(f => ({ ...f, pixKey: e.target.value }))} 
+                        />
+                    </div>
+
+                    {isMentore && (
+                        <div className="rounded-2xl bg-emerald-50 border border-emerald-100 p-4 flex items-start gap-3 shadow-sm shadow-emerald-100/50">
+                            <div className="h-8 w-8 rounded-full bg-white flex items-center justify-center shrink-0 shadow-sm">
+                                <Sparkles className="h-4 w-4 text-emerald-500" />
+                            </div>
+                            <p className="text-[11px] text-emerald-800 leading-relaxed">
+                                Para o banco <strong className="text-emerald-950 px-1 py-0.5 bg-emerald-100 rounded">MENTORE</strong>, os campos de <span className="font-bold">Agência</span> e <span className="font-bold">Conta</span> não são necessários e serão ignorados.
+                            </p>
+                        </div>
+                    )}
+                </div>
+                <DialogFooter className="gap-3 pt-2">
+                    <Button variant="outline" onClick={() => onOpenChange(false)} className="rounded-xl h-11 px-6 font-bold text-xs uppercase tracking-widest text-slate-400">Cancelar</Button>
+                    <Button 
+                        onClick={onConfirm} 
+                        disabled={loading || !form.bankName || (!isMentore && (!form.bankAgency || !form.bankAccount))}
+                        className="bg-emerald-600 hover:bg-emerald-700 rounded-xl h-11 px-8 font-black text-xs uppercase tracking-widest text-white shadow-lg shadow-emerald-200 transition-all active:scale-95"
+                    >
+                        {loading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                        {target === "ALL" ? "Atualizar Todos" : "Confirmar Alteração"}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     )
 }
