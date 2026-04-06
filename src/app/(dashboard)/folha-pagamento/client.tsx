@@ -342,6 +342,9 @@ export function FolhaPagamentoClient({
                 ids = resultRows
                     .filter(r => (r as any).isMissingBank && r.status === "found")
                     .map(r => (r as FoundRow).id)
+            } else if (bankUpdateTarget === "SELECTED") {
+                ids = (window as any).__selectedBankIds ?? []
+                delete (window as any).__selectedBankIds
             } else {
                 ids = [bankUpdateTarget]
             }
@@ -353,11 +356,25 @@ export function FolhaPagamentoClient({
             }
 
             await updateEmployeesBankBatch(ids, bankUpdateForm)
-            alert("Dados bancários atualizados com sucesso!")
+
+            // Atualiza estado local sem re-analisar
+            if (result) {
+                const idSet = new Set(ids)
+                const newFound = result.found.map(r => {
+                    if (!idSet.has(r.id)) return r
+                    return {
+                        ...r,
+                        bankName: bankUpdateForm.bankName,
+                        bankAgency: bankUpdateForm.bankAgency,
+                        bankAccount: bankUpdateForm.bankAccount,
+                        pix: bankUpdateForm.pixKey || r.pix,
+                        isMissingBank: false,
+                    }
+                })
+                setResult({ ...result, found: newFound })
+            }
+            setSelectedErrorRows([])
             setIsBankUpdateOpen(false)
-            
-            // Re-analyze
-            if (file) confirmAndAnalyze()
         } catch (e: any) {
             alert("Erro ao atualizar: " + e?.message)
         } finally {
@@ -1642,7 +1659,19 @@ export function FolhaPagamentoClient({
                                         <Building2 className="h-3.5 w-3.5" /> Corrigir Bancos
                                     </button>
                                 )}
-                                <button onClick={() => setIsErrorCorrectionOpen(true)} disabled={registering}
+                                <button onClick={() => {
+                                        // Abre na aba com mais erros
+                                        const tabs = [
+                                            { id: "invalidCpfs", count: invalidCpfCount },
+                                            { id: "duplicates", count: duplicateCpfCount + crossAbaDuplicateCount },
+                                            { id: "nameMismatches", count: nameMismatchCount },
+                                            { id: "extras", count: result?.extras?.length || 0 },
+                                            { id: "missingBanks", count: missingBankCount },
+                                        ] as const
+                                        const first = tabs.find(t => t.count > 0)
+                                        if (first) setActiveErrorTab(first.id)
+                                        setIsErrorCorrectionOpen(true)
+                                    }} disabled={registering}
                                     className="flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-100/50 px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-200 disabled:opacity-60 transition-colors">
                                     <Edit className="h-3.5 w-3.5" /> Corrigir Erros
                                 </button>
@@ -1679,13 +1708,16 @@ export function FolhaPagamentoClient({
                                             const isDupSameAba = duplicateCpfSet.has(`${row.sheet}::${row.cpf}`);
                                             const isDupCrossAba = !isDupSameAba && crossAbaDuplicateSet.has(row.cpf);
                                             const hasNameIssue = !!(row as any).isInvalidCpf || (row.status === "found" && (row as FoundRow).nameMismatch);
+                                            const hasMissingBank = !!(row as any).isMissingBank;
                                             const rowBg = isDupSameAba
                                                 ? "bg-purple-50/70 hover:bg-purple-100/70"
                                                 : isDupCrossAba
                                                     ? "bg-indigo-50/70 hover:bg-indigo-100/70"
                                                     : hasNameIssue
                                                         ? "bg-amber-50/70 hover:bg-amber-100/70"
-                                                        : "hover:bg-slate-50";
+                                                        : hasMissingBank
+                                                            ? "bg-orange-50/60 hover:bg-orange-100/60"
+                                                            : "hover:bg-slate-50";
                                             return (
                                                 <tr key={i} className={`transition-colors ${rowBg}`}>
                                                 <td className="px-5 py-3">
@@ -1767,10 +1799,34 @@ export function FolhaPagamentoClient({
                                                 )}
                                                 <td className="px-5 py-3 text-right font-bold text-slate-800">{fmtBRL(row.valor)}</td>
                                                 <td className="px-5 py-3">
-                                                    {row.status === "found"
-                                                        ? <CheckCircle2 className="h-5 w-5 text-green-500" />
-                                                        : <AlertTriangle className="h-5 w-5 text-amber-400" />
-                                                    }
+                                                    <div 
+                                                        className={cn("transition-transform hover:scale-110", (hasMissingBank || row.status !== "found" || hasNameIssue || isDupSameAba || isDupCrossAba) ? "cursor-pointer" : "opacity-50")}
+                                                        onClick={() => {
+                                                            if (hasMissingBank) {
+                                                                setActiveErrorTab("missingBanks")
+                                                                setIsErrorCorrectionOpen(true)
+                                                            } else if (hasNameIssue) {
+                                                                setActiveErrorTab((row as any).isInvalidCpf ? "invalidCpfs" : "nameMismatches")
+                                                                setIsErrorCorrectionOpen(true)
+                                                            } else if (isDupSameAba || isDupCrossAba) {
+                                                                setActiveErrorTab("duplicates")
+                                                                setIsErrorCorrectionOpen(true)
+                                                            } else if (row.status === "extra") {
+                                                                setActiveErrorTab("extras")
+                                                                setIsErrorCorrectionOpen(true)
+                                                            } else if (row.status === "missing") {
+                                                                // Open register all or just highlight errors
+                                                                setIsErrorCorrectionOpen(true)
+                                                            }
+                                                        }}
+                                                    >
+                                                        {row.status === "found" && !hasMissingBank
+                                                            ? <CheckCircle2 className="h-5 w-5 text-green-500" />
+                                                            : row.status === "found" && hasMissingBank
+                                                                ? <span title="Dados bancários ausentes"><AlertTriangle className="h-5 w-5 text-orange-400" /></span>
+                                                                : <AlertTriangle className="h-5 w-5 text-amber-400" />
+                                                        }
+                                                    </div>
                                                 </td>
                                                 <td className="px-5 py-3 text-right">
                                                     <div className="flex items-center justify-end gap-1">
@@ -2398,7 +2454,7 @@ export function FolhaPagamentoClient({
 
 
                                                 {activeErrorTab === "duplicates" && (
-                                                    <button 
+                                                    <button
                                                         onClick={() => {
                                                             const rows = errorGroups.duplicates.filter(r => selectedErrorRows.includes(`${r.sheet}::${r.cpf}`))
                                                             const cpfs = Array.from(new Set(rows.map(r => r.cpf).filter(Boolean)))
@@ -2410,6 +2466,23 @@ export function FolhaPagamentoClient({
                                                         className="flex items-center gap-1.5 bg-purple-600 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider hover:bg-purple-700 transition-colors"
                                                     >
                                                         <RotateCcw className="h-3 w-3" /> Consolidar Selecionados
+                                                    </button>
+                                                )}
+
+                                                {activeErrorTab === "missingBanks" && (
+                                                    <button
+                                                        onClick={() => {
+                                                            const rows = errorGroups.missingBanks.filter(r => selectedErrorRows.includes(`${r.sheet}::${r.cpf || (r as any).nome}`))
+                                                            const ids = rows.map(r => (r as FoundRow).id).filter(Boolean) as string[]
+                                                            if (ids.length === 0) return
+                                                            setBankUpdateTarget(ids.length === 1 ? ids[0] : "SELECTED")
+                                                            ;(window as any).__selectedBankIds = ids
+                                                            setBankUpdateForm({ bankName: "", bankAgency: "", bankAccount: "", pixKey: "" })
+                                                            setIsBankUpdateOpen(true)
+                                                        }}
+                                                        className="flex items-center gap-1.5 bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider hover:bg-emerald-700 transition-colors"
+                                                    >
+                                                        <Building2 className="h-3 w-3" /> Corrigir Banco ({selectedErrorRows.length})
                                                     </button>
                                                 )}
                                             </>
@@ -2429,7 +2502,8 @@ export function FolhaPagamentoClient({
                                             duplicates: { border: "border-l-purple-500", bg: "bg-purple-50", text: "text-purple-700", icon: RotateCcw },
                                             nameMismatches: { border: "border-l-blue-500", bg: "bg-blue-50", text: "text-blue-700", icon: Info },
                                             valueMismatches: { border: "border-l-emerald-500", bg: "bg-emerald-50", text: "text-emerald-700", icon: Receipt },
-                                            extras: { border: "border-l-orange-500", bg: "bg-orange-50", text: "text-orange-700", icon: AlertCircle }
+                                            extras: { border: "border-l-orange-500", bg: "bg-orange-50", text: "text-orange-700", icon: AlertCircle },
+                                            missingBanks: { border: "border-l-emerald-500", bg: "bg-emerald-50", text: "text-emerald-700", icon: Building2 },
                                         }
                                         const style = tabStyles[activeErrorTab] || tabStyles.unregistered
 
