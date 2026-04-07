@@ -219,7 +219,8 @@ export function FolhaPagamentoClient({
     
     // Bank Update
     const [isBankUpdateOpen, setIsBankUpdateOpen] = useState(false)
-    const [bankUpdateTarget, setBankUpdateTarget] = useState<"ALL" | string>("ALL")
+    const [bankUpdateTarget, setBankUpdateTarget] = useState<"ALL" | "SELECTED" | string>("ALL")
+    const [bankUpdateSelectedIds, setBankUpdateSelectedIds] = useState<string[]>([])
     const [isUpdatingBank, setIsUpdatingBank] = useState(false)
     const [bankUpdateForm, setBankUpdateForm] = useState({ bankName: "", bankAgency: "", bankAccount: "", pixKey: "" })
 
@@ -343,8 +344,7 @@ export function FolhaPagamentoClient({
                     .filter(r => (r as any).isMissingBank && r.status === "found")
                     .map(r => (r as FoundRow).id)
             } else if (bankUpdateTarget === "SELECTED") {
-                ids = (window as any).__selectedBankIds ?? []
-                delete (window as any).__selectedBankIds
+                ids = bankUpdateSelectedIds
             } else {
                 ids = [bankUpdateTarget]
             }
@@ -2493,8 +2493,8 @@ export function FolhaPagamentoClient({
                                                             const rows = errorGroups.missingBanks.filter(r => selectedErrorRows.includes(`${r.sheet}::${r.cpf || (r as any).nome}`))
                                                             const ids = rows.map(r => (r as FoundRow).id).filter(Boolean) as string[]
                                                             if (ids.length === 0) return
-                                                            setBankUpdateTarget(ids.length === 1 ? ids[0] : "SELECTED")
-                                                            ;(window as any).__selectedBankIds = ids
+                                                            setBankUpdateSelectedIds(ids)
+                                                            setBankUpdateTarget("SELECTED")
                                                             setBankUpdateForm({ bankName: "", bankAgency: "", bankAccount: "", pixKey: "" })
                                                             setIsBankUpdateOpen(true)
                                                         }}
@@ -2609,6 +2609,7 @@ export function FolhaPagamentoClient({
                                                         {activeErrorTab === "missingBanks" && (
                                                             <button
                                                                 onClick={() => {
+                                                                    setBankUpdateSelectedIds([])
                                                                     setBankUpdateTarget(row.id!)
                                                                     setBankUpdateForm({
                                                                         bankName: row.bankName || "",
