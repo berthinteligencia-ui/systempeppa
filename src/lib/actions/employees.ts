@@ -288,7 +288,7 @@ export async function updateEmployeesBankBatch(
   const agency = isMentoreOrPix ? null : (data.bankAgency || null);
   const account = isMentoreOrPix ? null : (data.bankAccount || null);
 
-  await Promise.all(
+  const results = await Promise.all(
     ids.map((id) =>
       supabase
         .from("Employee")
@@ -304,7 +304,13 @@ export async function updateEmployeesBankBatch(
     )
   )
 
+  const errors = results.filter(r => r.error)
+  if (errors.length > 0) {
+    console.error("[updateEmployeesBankBatch] errors:", errors.map(r => r.error))
+    throw new Error(`Falha ao atualizar ${errors.length} funcionário(s): ${errors[0].error?.message}`)
+  }
+
   revalidatePath("/funcionarios")
   revalidatePath("/folha-pagamento")
-  return { success: true }
+  return { success: true, updated: ids.length }
 }

@@ -343,15 +343,27 @@ export function FolhaPagamentoClient({
                 ids = resultRows
                     .filter(r => (r as any).isMissingBank && r.status === "found")
                     .map(r => (r as FoundRow).id)
+                    .filter(Boolean) as string[]
             } else if (bankUpdateTarget === "SELECTED") {
                 ids = bankUpdateSelectedIds
             } else {
                 ids = [bankUpdateTarget]
             }
 
+            console.log("[BankUpdate] target:", bankUpdateTarget, "ids:", ids.length, ids.slice(0, 3))
+
             if (ids.length === 0) {
-                alert("Nenhum funcionário selecionado para atualizar.")
+                // Tenta fallback: pega todos os isMissingBank found independente do target
+                const fallback = resultRows
+                    .filter(r => (r as any).isMissingBank && r.status === "found")
+                    .map(r => (r as FoundRow).id)
+                    .filter(Boolean) as string[]
+                if (fallback.length > 0 && bankUpdateTarget !== "ALL") {
+                    // Confirma antes de usar fallback
+                }
+                alert(`Nenhum ID encontrado para atualizar.\nTarget: ${bankUpdateTarget}\nSelecionados: ${bankUpdateSelectedIds.length}\nFound com banco faltando: ${fallback.length}`)
                 setIsBankUpdateOpen(false)
+                setIsUpdatingBank(false)
                 return
             }
 
