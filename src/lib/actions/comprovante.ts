@@ -208,6 +208,74 @@ export async function saveComprovantes(data: {
     return { success: true, count: created.length }
 }
 
+export async function saveComprovanteManual(data: {
+    employeeId: string
+    employeeName: string
+    cpf: string
+    valor: string
+    situacao: string
+    mesAno: string          // "MM/AAAA"
+    fileName: string
+    fileType: string
+    fileBuffer: ArrayBuffer
+}) {
+    try {
+        const session = await auth()
+        if (!session?.user?.companyId) throw new Error("Não autorizado")
+        const companyId = session.user.companyId
+
+        // Upload do arquivo
+        const supabase = getSupabaseAdmin()
+        let fileUrl: string | null = null
+
+        const path = `${companyId}/manual/${Date.now()}_${data.fileName}`
+        const { data: uploadData, error: uploadError } = await supabase.storage
+            .from("comprovantes")
+            .upload(path, data.fileBuffer, { contentType: data.fileType, upsert: true })
+
+        if (uploadError) {
+            console.error("[SAVE_MANUAL] Erro upload:", uploadError.message)
+            throw new Error("Falha no upload do arquivo: " + uploadError.message)
+        }
+        if (uploadData) {
+            const { data: urlData } = supabase.storage.from("comprovantes").getPublicUrl(path)
+            fileUrl = urlData.publicUrl
+        }
+
+        // Salva no banco via Supabase
+        const [mes, ano] = data.mesAno.split("/")
+        const generatedAt = ano && mes ? `${ano}-${mes.padStart(2, "0")}-01` : null
+
+        const cleanValor = data.valor.replace(/\./g, "").replace(",", ".")
+        const amount = parseFloat(cleanValor) || null
+
+        const { error: insertError } = await supabase.from("Comprovante").insert({
+            companyId,
+            fileName: data.fileName,
+            employeeName: data.employeeName,
+            cpf: data.cpf.replace(/\D/g, ""),
+            situacao: data.situacao,
+            amount,
+            generatedAt,
+            employeeId: data.employeeId,
+            fileUrl,
+            extractedAt: new Date().toISOString(),
+        })
+
+        if (insertError) {
+            console.error("[SAVE_MANUAL] Erro insert:", insertError.message)
+            throw new Error("Falha ao salvar registro: " + insertError.message)
+        }
+
+        revalidatePath("/funcionarios")
+        revalidatePath("/comprovante")
+        return { success: true }
+    } catch (err: any) {
+        console.error("[SAVE_MANUAL] Erro:", err?.message ?? err)
+        throw err
+    }
+}
+
 export async function getEmployeeComprovantes(cpf: string, employeeId?: string) {
   const session = await auth()
   if (!session?.user?.companyId) throw new Error("Não autorizado")

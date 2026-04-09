@@ -30,7 +30,7 @@ import {
   createEmployee, updateEmployee, deleteEmployee,
   deleteEmployeesBatch, importEmployees,
 } from "@/lib/actions/employees"
-import { getEmployeeComprovantes, deleteComprovante, saveComprovantes } from "@/lib/actions/comprovante"
+import { getEmployeeComprovantes, deleteComprovante, saveComprovanteManual } from "@/lib/actions/comprovante"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -250,26 +250,23 @@ export function FuncionariosClient({
 
   async function handleUploadComprovante() {
     if (!extratoEmployee) return
-    if (!uploadFile) { alert("Selecione um arquivo PDF"); return }
-    const valorNum = parseFloat(uploadValor.replace(/\./g, "").replace(",", "."))
-    if (!uploadValor || isNaN(valorNum)) { alert("Informe o valor do comprovante"); return }
+    if (!uploadFile) { alert("Selecione um arquivo"); return }
+    if (!uploadValor.trim()) { alert("Informe o valor do comprovante"); return }
+    if (!uploadMes.match(/^\d{2}\/\d{4}$/)) { alert("Informe o mês no formato MM/AAAA"); return }
 
     setUploadLoading(true)
     try {
-      const buffer = await uploadFile.arrayBuffer()
-      const [mes, ano] = uploadMes.split("/")
-      await saveComprovantes({
-        records: [{
-          nome: extratoEmployee.name,
-          cpf: (extratoEmployee.cpf ?? "").replace(/\D/g, ""),
-          valor: uploadValor,
-          situacao: uploadSituacao,
-          fileName: uploadFile.name,
-          generatedAt: `${ano}-${mes}-01`,
-          dbEmployeeId: extratoEmployee.id,
-          cnpj_origem: undefined,
-        }],
-        fileData: { name: uploadFile.name, type: uploadFile.type, buffer },
+      const fileBuffer = await uploadFile.arrayBuffer()
+      await saveComprovanteManual({
+        employeeId: extratoEmployee.id,
+        employeeName: extratoEmployee.name,
+        cpf: extratoEmployee.cpf ?? "",
+        valor: uploadValor,
+        situacao: uploadSituacao,
+        mesAno: uploadMes,
+        fileName: uploadFile.name,
+        fileType: uploadFile.type || "application/octet-stream",
+        fileBuffer,
       })
       setUploadOpen(false)
       setUploadFile(null)
@@ -278,7 +275,7 @@ export function FuncionariosClient({
       const data = await getEmployeeComprovantes(extratoEmployee.cpf ?? "", extratoEmployee.id)
       setExtratoData(data)
     } catch (e: any) {
-      alert("Erro ao enviar: " + e.message)
+      alert("Erro ao enviar: " + (e?.message ?? "Erro desconhecido"))
     } finally {
       setUploadLoading(false)
     }
