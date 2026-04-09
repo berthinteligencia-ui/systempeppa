@@ -250,6 +250,7 @@ export async function saveComprovanteManual(data: {
         const amount = parseFloat(cleanValor) || null
 
         const { error: insertError } = await supabase.from("Comprovante").insert({
+            id: globalThis.crypto.randomUUID(),
             companyId,
             fileName: data.fileName,
             employeeName: data.employeeName,
