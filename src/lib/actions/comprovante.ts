@@ -281,23 +281,35 @@ export async function getEmployeeComprovantes(cpf: string, employeeId?: string) 
   const session = await auth()
   if (!session?.user?.companyId) throw new Error("Não autorizado")
   const companyId = session.user.companyId
+  const supabase = getSupabaseAdmin()
 
   const cleanCpf = cpf.replace(/\D/g, "")
-  const records = await prisma.comprovante.findMany({
-    where: { 
-        companyId,
-        OR: [
-            { cpf: cleanCpf },
-            employeeId ? { employeeId } : undefined
-        ].filter(Boolean) as any
-    },
-    orderBy: { extractedAt: "desc" },
-    select: {
-      id: true, fileName: true, employeeName: true, cpf: true,
-      situacao: true, amount: true, extractedAt: true, generatedAt: true, fileUrl: true, originCnpj: true,
-    },
-  })
-  return records.map(r => ({ ...r, amount: r.amount ? Number(r.amount) : null }))
+
+  const orFilter = employeeId
+    ? `cpf.eq.${cleanCpf},employeeId.eq.${employeeId}`
+    : `cpf.eq.${cleanCpf}`
+
+  const { data, error } = await supabase
+    .from("Comprovante")
+    .select("id, fileName, employeeName, cpf, situacao, amount, extractedAt, generatedAt, fileUrl, originCnpj")
+    .eq("companyId", companyId)
+    .or(orFilter)
+    .order("extractedAt", { ascending: false })
+
+  if (error) throw new Error("Erro ao buscar comprovantes: " + error.message)
+
+  return (data ?? []).map((r: any) => ({
+    id: r.id,
+    fileName: r.fileName,
+    employeeName: r.employeeName,
+    cpf: r.cpf,
+    situacao: r.situacao,
+    amount: r.amount != null ? Number(r.amount) : null,
+    extractedAt: r.extractedAt,
+    generatedAt: r.generatedAt,
+    fileUrl: r.fileUrl,
+    originCnpj: r.originCnpj,
+  }))
 }
 
 export async function sendMassMessage(data: { departmentId: string, month: number, year: number }) {
@@ -407,9 +419,9 @@ export async function deleteComprovante(id: string) {
         throw new Error("Apenas administradores ou RH podem excluir registros.")
     }
 
-    await prisma.comprovante.delete({
-        where: { id }
-    })
+    const supabase = getSupabaseAdmin()
+    const { error } = await supabase.from("Comprovante").delete().eq("id", id)
+    if (error) throw new Error("Erro ao excluir: " + error.message)
 
     revalidatePath("/comprovante")
     revalidatePath("/funcionarios")
