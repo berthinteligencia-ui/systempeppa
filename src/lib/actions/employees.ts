@@ -39,9 +39,11 @@ export async function createEmployee(data: {
   const supabase = getSupabaseAdmin()
   const now = new Date().toISOString()
 
+  const cleanCpf = data.cpf ? data.cpf.replace(/\D/g, "") : null
   check(await supabase.from("Employee").insert({
     id: randomUUID(),
     ...data,
+    cpf: cleanCpf,
     pagamento: data.pagamento || "pendente",
     hireDate: new Date(data.hireDate).toISOString(),
     departmentId: data.departmentId || null,
@@ -73,8 +75,10 @@ export async function updateEmployee(
 ) {
   const companyId = await getCompanyId()
   const supabase = getSupabaseAdmin()
+  const cleanCpf = data.cpf ? data.cpf.replace(/\D/g, "") : null
   check(await supabase.from("Employee").update({
     ...data,
+    cpf: cleanCpf,
     pagamento: data.pagamento,
     hireDate: new Date(data.hireDate).toISOString(),
     departmentId: data.departmentId || null,
@@ -102,7 +106,7 @@ export async function registerBatchFromPayroll(
     employees.map((e) => ({
       id: randomUUID(),
       name: e.nome,
-      cpf: e.cpf,
+      cpf: e.cpf ? e.cpf.replace(/\D/g, "") : null,
       phone: e.telefone || null,
       position: e.cargo || "A definir",
       salary: e.valor,
@@ -186,7 +190,7 @@ export async function importEmployees(
       uniqueByCpf.map((e) => ({
         id: randomUUID(),
         name: e.name,
-        cpf: e.cpf,
+        cpf: e.cpf ? e.cpf.replace(/\D/g, "") : null,
         phone: e.phone || null,
         email: e.email || null,
         position: e.position || "A definir",
@@ -246,13 +250,17 @@ export async function getEmployeeByCpf(cpf: string) {
   const companyId = await getCompanyId()
   const cleanCpf = cpf.replace(/\D/g, "")
   const supabase = getSupabaseAdmin()
+  
+  // Buscar todos os funcionários da empresa para permitir o "match" mesmo se estiverem formatados no banco
   const { data } = await supabase
     .from("Employee")
     .select("id, name, cpf, phone, position, bankName, bankAgency, bankAccount, pixKey")
-    .eq("cpf", cleanCpf)
     .eq("companyId", companyId)
-    .maybeSingle()
-  return data
+
+  if (!data) return null
+
+  // Retorna o primeiro que coincidir com os dígitos do CPF
+  return data.find(e => (e.cpf?.replace(/\D/g, "") === cleanCpf)) || null
 }
 
 export async function resetMonthlyStatus() {

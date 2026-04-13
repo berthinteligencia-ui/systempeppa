@@ -20,8 +20,9 @@ export default async function FuncionariosPage() {
   const lastComprovanteMap: Record<string, { url: string, amount: number | null }> = {}
   if (allComprovantes) {
     for (const c of allComprovantes) {
-      if (!lastComprovanteMap[c.cpf]) {
-        lastComprovanteMap[c.cpf] = { url: c.fileUrl, amount: c.amount }
+      const cleanC = c.cpf ? c.cpf.replace(/\D/g, "") : ""
+      if (cleanC && !lastComprovanteMap[cleanC]) {
+        lastComprovanteMap[cleanC] = { url: c.fileUrl, amount: c.amount }
       }
     }
   }
