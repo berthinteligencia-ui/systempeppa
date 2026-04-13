@@ -13,15 +13,15 @@ export default async function FuncionariosPage() {
   const [{ data: rawEmployees }, { data: departments }, { data: allComprovantes }] = await Promise.all([
     supabase.from("Employee").select("*, department:Department(*)").eq("companyId", companyId).order("name"),
     supabase.from("Department").select("*").eq("companyId", companyId).order("name"),
-    supabase.from("Comprovante").select("cpf, fileUrl, extractedAt").eq("companyId", companyId).order("extractedAt", { ascending: false })
+    supabase.from("Comprovante").select("cpf, fileUrl, extractedAt, amount").eq("companyId", companyId).order("extractedAt", { ascending: false })
   ])
 
-  // Map CPF to latest fileUrl
-  const lastComprovanteMap: Record<string, string> = {}
+  // Map CPF to latest fileUrl and amount
+  const lastComprovanteMap: Record<string, { url: string, amount: number | null }> = {}
   if (allComprovantes) {
     for (const c of allComprovantes) {
       if (!lastComprovanteMap[c.cpf]) {
-        lastComprovanteMap[c.cpf] = c.fileUrl
+        lastComprovanteMap[c.cpf] = { url: c.fileUrl, amount: c.amount }
       }
     }
   }
@@ -29,7 +29,8 @@ export default async function FuncionariosPage() {
   const employees = (rawEmployees ?? []).map((e) => ({ 
     ...e, 
     salary: Number(e.salary),
-    lastReceiptUrl: lastComprovanteMap[e.cpf.replace(/\D/g, "")] || null
+    lastReceiptUrl: e.cpf ? (lastComprovanteMap[e.cpf.replace(/\D/g, "")]?.url || null) : null,
+    lastReceiptAmount: e.cpf ? (lastComprovanteMap[e.cpf.replace(/\D/g, "")]?.amount || null) : null
   }))
 
   return (

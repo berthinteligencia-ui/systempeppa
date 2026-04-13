@@ -40,6 +40,7 @@ type Employee = {
   phone: string | null; position: string; salary: number | string
   hireDate: Date; status: string; pagamento: string; departmentId: string | null
   department: Department | null; lastReceiptUrl?: string | null
+  lastReceiptAmount?: number | null
   bankName?: string; bankAgency?: string; bankAccount?: string; pixKey?: string
 }
 
@@ -768,6 +769,13 @@ ${rows.map((emp, i) => `<tr>
                           {pagamentoMap[emp.pagamento?.toLowerCase()]?.label ?? emp.pagamento}
                         </span>
                       </div>
+
+                      {emp.lastReceiptAmount != null && (
+                        <div className="flex items-center justify-between pt-1">
+                          <span className="text-slate-500 text-[10px] uppercase tracking-wider font-bold">Valor Comprovante</span>
+                          <span className="font-bold text-emerald-600 text-xs">{fmtBRL(emp.lastReceiptAmount)}</span>
+                        </div>
+                      )}
 
 
                       <div className="flex items-center justify-between pt-2 border-t border-slate-50">
