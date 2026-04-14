@@ -30,7 +30,7 @@ const mainNav = [
   { href: "/unidades",         label: "Unidades",           icon: Building2,       feature: "unidades" },
   { href: "/nfs",              label: "NFs",                icon: Receipt,         feature: "nfs" },
   { href: "/folha-pagamento",  label: "Folha de Pagamento", icon: FileSpreadsheet, feature: "folha_pagamento" },
-  { href: "/comprovante",      label: "Relatório em Lote", icon: FileText,        feature: "comprovante" },
+  { href: "/comprovante",      label: "Extrato em Lote",    icon: FileText,        feature: "comprovante" },
   { href: "/whatsapp-business",label: "WhatsApp Business",  icon: MessageSquare,   feature: "whatsapp" },
   { href: "/relatorios",       label: "Relatórios",         icon: BarChart3,       feature: "relatorios" },
 ]

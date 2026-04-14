@@ -13,26 +13,36 @@ export default async function FuncionariosPage() {
   const [{ data: rawEmployees }, { data: departments }, { data: allComprovantes }] = await Promise.all([
     supabase.from("Employee").select("*, department:Department(*)").eq("companyId", companyId).order("name"),
     supabase.from("Department").select("*").eq("companyId", companyId).order("name"),
-    supabase.from("Comprovante").select("cpf, fileUrl, extractedAt, amount").eq("companyId", companyId).order("extractedAt", { ascending: false })
+    supabase.from("Comprovante").select("cpf, employeeId, fileUrl, extractedAt, amount").eq("companyId", companyId).order("extractedAt", { ascending: false })
   ])
 
   // Map CPF to latest fileUrl and amount
   const lastComprovanteMap: Record<string, { url: string, amount: number | null }> = {}
   if (allComprovantes) {
     for (const c of allComprovantes) {
+      // Prioridade 1: Vínculo por ID
+      if (c.employeeId && !lastComprovanteMap[c.employeeId]) {
+        lastComprovanteMap[c.employeeId] = { url: c.fileUrl, amount: c.amount ? Number(c.amount) : null }
+      }
+      // Prioridade 2: Vínculo por CPF limpo (fallback para registros sem employeeId)
       const cleanC = c.cpf ? c.cpf.replace(/\D/g, "") : ""
       if (cleanC && !lastComprovanteMap[cleanC]) {
-        lastComprovanteMap[cleanC] = { url: c.fileUrl, amount: c.amount }
+        lastComprovanteMap[cleanC] = { url: c.fileUrl, amount: c.amount ? Number(c.amount) : null }
       }
     }
   }
 
-  const employees = (rawEmployees ?? []).map((e) => ({ 
-    ...e, 
-    salary: Number(e.salary),
-    lastReceiptUrl: e.cpf ? (lastComprovanteMap[e.cpf.replace(/\D/g, "")]?.url || null) : null,
-    lastReceiptAmount: e.cpf ? (lastComprovanteMap[e.cpf.replace(/\D/g, "")]?.amount || null) : null
-  }))
+  const employees = (rawEmployees ?? []).map((e) => {
+    const cleanE = e.cpf ? e.cpf.replace(/\D/g, "") : ""
+    const receipt = lastComprovanteMap[e.id] || (cleanE ? lastComprovanteMap[cleanE] : null)
+
+    return { 
+      ...e, 
+      salary: Number(e.salary),
+      lastReceiptUrl: receipt?.url || null,
+      lastReceiptAmount: receipt?.amount || null
+    }
+  })
 
   return (
     <div className="space-y-6">

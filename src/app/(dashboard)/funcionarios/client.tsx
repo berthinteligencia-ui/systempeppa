@@ -4,7 +4,7 @@ import { useState, useRef, useCallback } from "react"
 import {
   UserPlus, Pencil, Trash2, CheckCircle2, AlertCircle, Clock, Filter,
   CheckSquare, Square, Download, FileDown, FileUp, Loader2, X, FileSpreadsheet,
-  FileText, ChevronDown, Receipt, User, Briefcase, Landmark,
+  FileText, ChevronDown, Receipt, User, Briefcase, Landmark, Eye,
 } from "lucide-react"
 import * as XLSX from "xlsx"
 import { Button } from "@/components/ui/button"
@@ -228,12 +228,6 @@ export function FuncionariosClient({
   // Upload manual de comprovante
   const [uploadOpen, setUploadOpen] = useState(false)
   const [uploadFile, setUploadFile] = useState<File | null>(null)
-  const [uploadValor, setUploadValor] = useState("")
-  const [uploadSituacao, setUploadSituacao] = useState("PAGO")
-  const [uploadMes, setUploadMes] = useState(() => {
-    const d = new Date(); d.setMonth(d.getMonth() - 1)
-    return `${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`
-  })
   const [uploadLoading, setUploadLoading] = useState(false)
   const uploadInputRef = useRef<HTMLInputElement>(null)
 
@@ -252,26 +246,17 @@ export function FuncionariosClient({
   async function handleUploadComprovante() {
     if (!extratoEmployee) return
     if (!uploadFile) { alert("Selecione um arquivo"); return }
-    if (!uploadValor.trim()) { alert("Informe o valor do comprovante"); return }
-    if (!uploadMes.match(/^\d{2}\/\d{4}$/)) { alert("Informe o mês no formato MM/AAAA"); return }
 
     setUploadLoading(true)
     try {
-      const fileBuffer = await uploadFile.arrayBuffer()
-      await saveComprovanteManual({
-        employeeId: extratoEmployee.id,
-        employeeName: extratoEmployee.name,
-        cpf: extratoEmployee.cpf ?? "",
-        valor: uploadValor,
-        situacao: uploadSituacao,
-        mesAno: uploadMes,
-        fileName: uploadFile.name,
-        fileType: uploadFile.type || "application/octet-stream",
-        fileBuffer,
-      })
+      const fd = new FormData()
+      fd.append("file", uploadFile)
+      fd.append("employeeId", extratoEmployee.id)
+      fd.append("employeeName", extratoEmployee.name)
+      fd.append("cpf", extratoEmployee.cpf ?? "")
+      await saveComprovanteManual(fd)
       setUploadOpen(false)
       setUploadFile(null)
-      setUploadValor("")
       // Recarrega extrato
       const data = await getEmployeeComprovantes(extratoEmployee.cpf ?? "", extratoEmployee.id)
       setExtratoData(data)
@@ -436,7 +421,7 @@ export function FuncionariosClient({
   .atrasado { background:#fee2e2; color:#991b1b; }
   @media print { body { margin: 0; } }
 </style></head><body>
-<h1>Relatório de Funcionários</h1>
+<h1>Extrato de Funcionários</h1>
 <p class="sub">Gerado em ${new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" })} · ${rows.length} funcionário${rows.length !== 1 ? "s" : ""}${filterDept !== "all" ? ` · ${departments.find(d => d.id === filterDept)?.name ?? ""}` : ""}${filterPagamento !== "all" ? ` · Pagamento: ${pagamentoMap[filterPagamento]?.label ?? filterPagamento}` : ""}</p>
 <table>
 <thead><tr>
@@ -788,22 +773,12 @@ ${rows.map((emp, i) => `<tr>
                       <div className="flex gap-1.5">
                         <button
                           onClick={() => openExtrato(emp)}
-                          title="Ver Extrato"
+                          title="Ver Extrato de Comprovantes"
                           className="flex h-9 items-center gap-1.5 px-2.5 justify-center rounded-lg border border-blue-100 bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors text-[11px] font-bold uppercase tracking-wide"
                         >
-                          <FileText className="h-3.5 w-3.5" />
+                          <Receipt className="h-3.5 w-3.5" />
                           Extrato
                         </button>
-                        {emp.lastReceiptUrl && (
-                          <button
-                            onClick={() => window.open(emp.lastReceiptUrl ?? '', '_blank')}
-                            title="Baixar Último Comprovante"
-                            className="flex h-9 items-center gap-1.5 px-2.5 justify-center rounded-lg border border-emerald-100 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors text-[11px] font-bold uppercase tracking-wide"
-                          >
-                            <Download className="h-3.5 w-3.5" />
-                            Baixar
-                          </button>
-                        )}
                         <button
                           onClick={() => openEdit(emp)}
                           className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition-colors"
@@ -836,8 +811,8 @@ ${rows.map((emp, i) => `<tr>
             <div className="flex items-start justify-between gap-4">
               <div>
                 <DialogTitle className="flex items-center gap-2">
-                  <FileText className="h-5 w-5 text-blue-600" />
-                  Extrato de Pagamentos
+                  <Receipt className="h-5 w-5 text-blue-600" />
+                  Extrato de Comprovantes
                 </DialogTitle>
                 {extratoEmployee && (
                   <p className="text-sm text-slate-500 mt-1">
@@ -846,7 +821,7 @@ ${rows.map((emp, i) => `<tr>
                 )}
               </div>
               <button
-                onClick={() => { setUploadFile(null); setUploadValor(""); setUploadSituacao("PAGO"); setUploadOpen(true) }}
+                onClick={() => { setUploadFile(null); setUploadOpen(true) }}
                 className="shrink-0 flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-700 transition-colors shadow-sm"
               >
                 <FileUp className="h-3.5 w-3.5" /> Enviar Comprovante
@@ -864,6 +839,19 @@ ${rows.map((emp, i) => `<tr>
                 <Receipt className="h-10 w-10 opacity-30" />
                 <p className="text-sm font-medium">Nenhum comprovante encontrado</p>
                 <p className="text-xs">Analise comprovantes na página de Comprovantes.</p>
+                {extratoEmployee && (
+                  <button
+                    onClick={async () => {
+                      const url = `/api/debug/comprovante?employeeId=${extratoEmployee.id}&cpf=${extratoEmployee.cpf ?? ""}`
+                      const res = await fetch(url)
+                      const json = await res.json()
+                      alert(JSON.stringify(json, null, 2))
+                    }}
+                    className="mt-2 text-[10px] text-slate-300 underline hover:text-slate-500"
+                  >
+                    [diagnóstico]
+                  </button>
+                )}
               </div>
             ) : (
               <div className="space-y-3">
@@ -950,15 +938,17 @@ ${rows.map((emp, i) => `<tr>
                             <td className="px-4 py-4 text-center">
                               <div className="flex items-center justify-center gap-1">
                                 {r.fileUrl ? (
-                                  <a
-                                    href={r.fileUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white transition-all border border-blue-100 shadow-sm"
-                                    title="Baixar Comprovante"
-                                  >
-                                    <Download className="h-4 w-4" />
-                                  </a>
+                                  <>
+                                    <a
+                                      href={r.fileUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white transition-all border border-emerald-100 shadow-sm"
+                                      title="Visualizar Comprovante"
+                                    >
+                                      <Eye className="h-4 w-4" />
+                                    </a>
+                                  </>
                                 ) : (
                                   <span className="text-[10px] text-slate-300 font-medium">—</span>
                                 )}
@@ -1023,42 +1013,7 @@ ${rows.map((emp, i) => `<tr>
               />
             </div>
 
-            {/* Valor */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-bold uppercase tracking-wider text-slate-500">Valor (R$)</Label>
-              <Input
-                placeholder="0,00"
-                value={uploadValor}
-                onChange={e => setUploadValor(e.target.value)}
-                className="h-10"
-              />
-            </div>
-
-            {/* Mês/Ano */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-bold uppercase tracking-wider text-slate-500">Mês/Ano de referência</Label>
-              <Input
-                placeholder="MM/AAAA"
-                value={uploadMes}
-                onChange={e => setUploadMes(e.target.value)}
-                className="h-10"
-              />
-            </div>
-
-            {/* Situação */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-bold uppercase tracking-wider text-slate-500">Situação</Label>
-              <Select value={uploadSituacao} onValueChange={setUploadSituacao}>
-                <SelectTrigger className="h-10">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="PAGO">Pago</SelectItem>
-                  <SelectItem value="PENDENTE">Pendente</SelectItem>
-                  <SelectItem value="LIBERADO">Liberado</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <p className="text-xs text-slate-400 text-center">O CPF, valor e situação serão extraídos automaticamente do PDF.</p>
           </div>
 
           <DialogFooter className="gap-2">

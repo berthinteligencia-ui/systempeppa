@@ -1,11 +1,10 @@
 "use server"
 
 import { auth } from "@/lib/auth"
-import { prisma } from "@/lib/prisma"
 import { getSupabaseAdmin } from "@/lib/supabase-admin"
 import { getEmployeeByCpf } from "./employees"
 import { revalidatePath } from "next/cache"
-import { randomUUID } from "crypto"
+
 
 export type ComprovanteData = {
   nome: string
@@ -13,7 +12,7 @@ export type ComprovanteData = {
   situacao: string
   valor?: string
   cnpj_origem?: string
-  generatedAt?: string
+  generatedAt?: string // Usado como Data de Emissão
   // Validation fields
   dbEmployeeId?: string
   dbEmployeeName?: string
@@ -55,14 +54,32 @@ export async function extractComprovanteData(formData: FormData, bank?: string, 
     // Formata a resposta do webhook para o padrão esperado pelo sistema
     const funcionarios = Array.isArray(result) ? result : (result.funcionarios || [result])
     
-    const list: ComprovanteData[] = funcionarios.map((item: any): ComprovanteData => ({
-      nome: String(item.funcionario || item.nome || item.employeeName || "Não detectado").trim(),
-      cpf: String(item["funcionario _cpf"] || item.funcionario_cpf || item.cpf || "").replace(/\D/g, ""),
-      situacao: String(item.situacao || item.status || "PROCESSADO").trim().toUpperCase(),
-      valor: item.valor || item.amount ? String(item.valor || item.amount) : undefined,
-      cnpj_origem: (item.origen || item.cnpj_origem || result.origen || result.cnpj_origem || "").replace(/\D/g, "") || undefined,
-      generatedAt: item.data || item.generatedAt || result.data || result.generatedAt || undefined,
-    }))
+    const list: ComprovanteData[] = funcionarios.map((item: any): ComprovanteData => {
+      // Prioriza chaves de funcionário/destino do webhook
+      const rawCpf = String(
+        item["funcionario _cpf"] || 
+        item.funcionario_cpf || 
+        item.destinatario_cpf || 
+        item.cpf_favorecido || 
+        item.cpf_destino || 
+        item.cpf || 
+        ""
+      );
+      
+      // Limpeza estrita: apenas números
+      const cleanCpf = rawCpf.replace(/\D/g, "");
+
+      const rawValor = item.valor_pago || item.valor_transacao || item.valor || item.amount || "";
+      
+      return {
+        nome: String(item.funcionario || item.nome || item.employeeName || "Não detectado").trim(),
+        cpf: cleanCpf,
+        situacao: String(item.situacao || item.status || "PROCESSADO").trim().toUpperCase(),
+        valor: rawValor ? String(rawValor) : undefined,
+        cnpj_origem: (item.origen || item.cnpj_origem || result.origen || result.cnpj_origem || "").replace(/\D/g, "") || undefined,
+        generatedAt: item.data || item.generatedAt || result.data || result.generatedAt || undefined,
+      };
+    })
 
     const normalize = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/Ç/g, "C").toUpperCase().trim()
 
@@ -76,11 +93,14 @@ export async function extractComprovanteData(formData: FormData, bank?: string, 
 
       // Fallback por Nome se não achar por CPF
       if (!employee && record.nome && record.nome !== "Não detectado") {
-        const allEmployees = await prisma.employee.findMany({
-          where: { companyId }
-        })
+        const supabase = getSupabaseAdmin()
+        const { data: allEmployees } = await supabase
+          .from("Employee")
+          .select("id, name, cpf")
+          .eq("companyId", companyId)
         const targetName = normalize(record.nome)
-        employee = allEmployees.find(e => normalize(e.name) === targetName)
+        const found = (allEmployees ?? []).find((e: any) => normalize(e.name) === targetName)
+        if (found) employee = found
       }
 
       if (employee) {
@@ -94,49 +114,134 @@ export async function extractComprovanteData(formData: FormData, bank?: string, 
 
     return list
   } catch (err: any) {
-    console.error("[EXTRACT_COMPROVANTE] Erro no Webhook:", err.message)
-    // Se o webhook fallhar, retornamos um registro genérico para "aceitar o PDF" conforme solicitado
+    console.error("[EXTRACT_COMPROVANTE] Erro no Webhook, tentando extração local:", err.message)
+    
+    // Tenta extração local como fallback (usando unpdf)
+    try {
+      const buffer = await file.arrayBuffer()
+      const { extractText } = await import("unpdf")
+      const { text: textPages } = await extractText(new Uint8Array(buffer))
+      const text = Array.isArray(textPages) ? textPages.join(" ") : String(textPages)
+      
+      const localResults = await localParseComprovante(text, companyId)
+      
+      if (localResults && localResults.length > 0) {
+        return localResults
+      }
+    } catch (localErr: any) {
+      console.error("[EXTRACT_COMPROVANTE] Erro na extração local:", localErr.message)
+    }
+
+    // Se tudo falhar, retorna o registro de erro amigável
     return [
       {
         nome: "ANÁLISE MANUAL NECESSÁRIA",
         cpf: "",
-        situacao: "PENDENTE_ANALISE",
+        situacao: "ERRO_EXTRACAO",
         isValid: false,
       }
     ]
   }
 }
 
+/**
+ * Helper para extração local de dados (Fallback quando o webhook falha)
+ */
+async function localParseComprovante(text: string, companyId: string): Promise<ComprovanteData[]> {
+    const supabase = getSupabaseAdmin()
+    
+    // 1. Encontra CPFs
+    const cpfMatches = text.match(/\d{3}[\.\s]?\d{3}[\.\s]?\d{3}[\-\.\s]?\d{2}/g) ?? []
+    const allCpfs = cpfMatches.map(c => c.replace(/\D/g, "")).filter(c => c.length === 11)
+    const cpfsFound = [...new Set(allCpfs)]
+    
+    // 2. Tenta identificar o de DESTINO
+    const DESTINO_KEYWORDS = ["FAVORECIDO", "DESTINATARIO", "PARA:", "RECEBEDOR", "CONTA DE DESTINO", "PIX", "CREDITADO", "DESTINO"];
+    const upperText = text.toUpperCase();
+    let destinationCpf: string | null = null;
 
-export async function saveComprovantes(data: {
-    unidadeId?: string
-    fechamentoId?: string
-    records: (ComprovanteData & { fileName: string })[]
-    fileData?: { name: string, type: string, buffer: ArrayBuffer }
-}) {
+    for (const keyword of DESTINO_KEYWORDS) {
+        const index = upperText.indexOf(keyword);
+        if (index !== -1) {
+            const segment = upperText.substring(index, index + 250);
+            const match = segment.match(/\d{3}[\.\s]?\d{3}[\.\s]?\d{3}[\-\.\s]?\d{2}/);
+            if (match) {
+                destinationCpf = match[0].replace(/\D/g, "");
+                break;
+            }
+        }
+    }
+
+    const finalCpf = destinationCpf || (cpfsFound.length > 0 ? cpfsFound[0] : null);
+    
+    if (!finalCpf) return []
+
+    // 3. Lookup no banco
+    const { data: employee } = await supabase
+        .from("Employee")
+        .select("id, name, cpf")
+        .eq("companyId", companyId)
+        .eq("cpf", finalCpf)
+        .maybeSingle()
+
+    // 4. Tenta extrair VALOR (ex: R$ 1.234,56)
+    const valorMatch = text.match(/(?:VALOR|TOTAL|PAGAMENTO|LIQUIDO|CREDITADO|PAGO|MONTANTE)[\s:]*R?\$?\s*(\d{1,3}(?:\.\d{3})*,\d{2})/i)
+    let valor = valorMatch ? valorMatch[1] : undefined
+
+    if (!valor) {
+        const allMoney = text.match(/\d{1,3}(?:\.\d{3})*,\d{2}/g)
+        if (allMoney && allMoney.length > 0) {
+            const values = allMoney.map(v => parseFloat(v.replace(/\./g, "").replace(",", ".")))
+            const maxVal = Math.max(...values)
+            valor = maxVal.toLocaleString("pt-BR", { minimumFractionDigits: 2 })
+        }
+    }
+
+    // 5. Tenta extrair DATA DE EMISSÃO (ex: 05/04/2026)
+    const dateMatch = text.match(/(\d{2}\/\d{2}\/\d{4})/);
+    const generatedAt = dateMatch ? dateMatch[1] : undefined;
+
+    return [{
+        nome: employee?.name || "Não detectado (Local)",
+        cpf: finalCpf,
+        situacao: "PROCESSADO_LOCAL",
+        valor,
+        generatedAt,
+        dbEmployeeId: employee?.id,
+        dbEmployeeName: employee?.name,
+        isValid: !!employee
+    }]
+}
+
+
+export async function saveComprovantes(formData: FormData) {
     const session = await auth()
     if (!session?.user?.companyId) throw new Error("Não autorizado")
     const companyId = session.user.companyId
+    const supabase = getSupabaseAdmin()
 
-    // Get current company CNPJ
-    const company = await prisma.company.findUnique({
-        where: { id: companyId },
-        select: { cnpj: true }
-    })
+    const file = formData.get("file") as File | null
+    const records: (ComprovanteData & { fileName: string })[] = JSON.parse(formData.get("records") as string)
+    const fechamentoId = (formData.get("fechamentoId") as string) || null
+
+    // Busca CNPJ da empresa via Supabase
+    const { data: company } = await supabase
+        .from("Company")
+        .select("cnpj")
+        .eq("id", companyId)
+        .single()
     const companyCnpj = company?.cnpj?.replace(/\D/g, "")
     console.log(`[SAVE_COMPROVANTE] Company CNPJ: ${companyCnpj}`)
 
-    let fileUrl = ""
-    if (data.fileData) {
-        const supabase = getSupabaseAdmin()
-        const path = `${companyId}/${Date.now()}_${data.fileData.name}`
+    // Upload do arquivo para storage (se houver)
+    let fileUrl: string | null = null
+    if (file && file.size > 0) {
+        const path = `${companyId}/${Date.now()}_${file.name}`
+        const fileBuffer = await file.arrayBuffer()
         const { data: uploadData, error } = await supabase.storage
             .from("comprovantes")
-            .upload(path, data.fileData.buffer, {
-                contentType: data.fileData.type,
-                upsert: true
-            })
-        
+            .upload(path, fileBuffer, { contentType: file.type || "application/octet-stream", upsert: true })
+
         if (error) {
             console.error("[SAVE_COMPROVANTE] Erro upload storage:", error.message)
         } else if (uploadData) {
@@ -145,129 +250,208 @@ export async function saveComprovantes(data: {
         }
     }
 
-    const created = await prisma.$transaction(async (tx) => {
-        const results = []
-        for (const r of data.records) {
-            // Converte "2.496,16" para 2496.16
-            let amount = null
-            if (r.valor) {
-                const cleanValor = String(r.valor).replace(/\./g, "").replace(",", ".")
-                amount = parseFloat(cleanValor)
-            }
-
-            // Evitar duplicatas: verifica se já existe um comprovante com mesmo CPF, Valor e Data de Geração
-            if (r.generatedAt) {
-                const existing = await tx.comprovante.findFirst({
-                    where: {
-                        companyId,
-                        cpf: r.cpf,
-                        amount: amount,
-                        generatedAt: r.generatedAt
-                    }
-                })
-                if (existing) {
-                    console.log(`[SAVE_COMPROVANTE] Duplicata detectada para CPF ${r.cpf} e data ${r.generatedAt}. Pulando.`)
-                    continue
-                }
-            }
-
-            const comprovante = await tx.comprovante.create({
-                data: {
-                    companyId,
-                    fileName: r.fileName,
-                    employeeName: r.nome,
-                    cpf: r.cpf,
-                    situacao: r.situacao,
-                    amount: amount,
-                    generatedAt: r.generatedAt || null,
-                    employeeId: r.dbEmployeeId || null,
-                    fechamentoId: data.fechamentoId || null,
-                    fileUrl: fileUrl || null,
-                    originCnpj: r.cnpj_origem || null,
-                }
-            })
-            results.push(comprovante)
-
-            // Update employee status if CNPJ matches and employee exists
-            const rCnpj = r.cnpj_origem?.replace(/\D/g, "")
-            console.log(`[SAVE_COMPROVANTE] Verificando: Empregado=${r.dbEmployeeId}, CNPJ_Ref=${rCnpj}, Empresa_CNPJ=${companyCnpj}`)
-            
-            if (r.dbEmployeeId && rCnpj && companyCnpj && rCnpj === companyCnpj) {
-                console.log(`[SAVE_COMPROVANTE] Match! Atualizando pagamento para efetuado. ID: ${r.dbEmployeeId}`)
-                await tx.employee.update({
-                    where: { id: r.dbEmployeeId },
-                    data: { pagamento: "efetuado" }
-                })
-            }
+    let savedCount = 0
+    let duplicatesCount = 0
+    for (const r of records) {
+        // Converte "2.496,16" → 2496.16
+        let amount: number | null = null
+        if (r.valor) {
+            const cleanValor = String(r.valor).replace(/\./g, "").replace(",", ".")
+            amount = parseFloat(cleanValor) || null
         }
-        return results
-    })
+
+        // Evitar duplicatas por CPF + valor + data (dia de emissão)
+        const { data: existing } = await supabase
+            .from("Comprovante")
+            .select("id")
+            .eq("companyId", companyId)
+            .eq("cpf", r.cpf)
+            .eq("amount", amount)
+            .eq("generatedAt", r.generatedAt || null)
+            .maybeSingle()
+            
+        if (existing) {
+            console.log(`[SAVE_COMPROVANTE] Duplicata detectada: CPF ${r.cpf}, Valor ${amount}, Data ${r.generatedAt}. Pulando.`)
+            duplicatesCount++
+            continue
+        }
+
+        const { error: insertError } = await supabase.from("Comprovante").insert({
+            id: globalThis.crypto.randomUUID(),
+            companyId,
+            fileName: r.fileName,
+            employeeName: r.nome,
+            cpf: r.cpf,
+            situacao: r.situacao,
+            amount,
+            generatedAt: r.generatedAt || null,
+            employeeId: r.dbEmployeeId || null,
+            fechamentoId,
+            fileUrl,
+            originCnpj: r.cnpj_origem || null,
+            extractedAt: new Date().toISOString(),
+        })
+
+        if (insertError) {
+            console.error("[SAVE_COMPROVANTE] Erro insert:", insertError.message)
+            continue
+        }
+
+        savedCount++
+
+        // Atualiza status do funcionário se CNPJ bater
+        const rCnpj = r.cnpj_origem?.replace(/\D/g, "")
+        if (r.dbEmployeeId && rCnpj && companyCnpj && rCnpj === companyCnpj) {
+            console.log(`[SAVE_COMPROVANTE] Match CNPJ! Atualizando pagamento. ID: ${r.dbEmployeeId}`)
+            await supabase.from("Employee")
+                .update({ pagamento: "efetuado", updatedAt: new Date().toISOString() })
+                .eq("id", r.dbEmployeeId)
+        }
+    }
 
     revalidatePath("/comprovante")
     revalidatePath("/funcionarios")
-    return { success: true, count: created.length }
+    return { success: true, count: savedCount, duplicates: duplicatesCount }
 }
 
-export async function saveComprovanteManual(data: {
-    employeeId: string
-    employeeName: string
-    cpf: string
-    valor: string
-    situacao: string
-    mesAno: string          // "MM/AAAA"
-    fileName: string
-    fileType: string
-    fileBuffer: ArrayBuffer
-}) {
+export async function analisarESalvarComprovante(formData: FormData) {
+    const session = await auth()
+    if (!session?.user?.companyId) throw new Error("Não autorizado")
+    const companyId = session.user.companyId
+    const supabase = getSupabaseAdmin()
+
+    const file = formData.get("file") as File | null
+    if (!file || file.size === 0) throw new Error("Arquivo não recebido")
+
+    // 1. Extrai texto do PDF localmente
+    // Lê duas vezes: unpdf desanexa o ArrayBuffer após uso
+    const bufferForText = await file.arrayBuffer()
+    const bufferForUpload = await file.arrayBuffer()
+    const { extractText } = await import("unpdf")
+    const { text: textPages } = await extractText(new Uint8Array(bufferForText))
+    const text = Array.isArray(textPages) ? textPages.join(" ") : String(textPages)
+
+    // 2. Extrai dados localmente usando o helper
+    const localResults = await localParseComprovante(text, companyId)
+    const result = localResults[0]; // Pega o primeiro (único para comprovante individual)
+
+    if (!result) {
+        throw new Error("Nenhum dado de destino encontrado no comprovante.")
+    }
+
+    const { cpf: finalCpfToLookup, dbEmployeeId, dbEmployeeName } = result;
+
+    console.log("[ANALISAR] Resultado local:", dbEmployeeName ?? "Nenhum", "CPF:", finalCpfToLookup);
+
+    // 4. Upload do PDF para storage
+    const path = `${companyId}/comprovantes/${Date.now()}_${file.name}`
+    const { data: uploadData, error: uploadError } = await supabase.storage
+        .from("comprovantes")
+        .upload(path, bufferForUpload, { contentType: file.type || "application/pdf", upsert: true })
+
+    if (uploadError) throw new Error("Falha no upload: " + uploadError.message)
+
+    const { data: urlData } = supabase.storage.from("comprovantes").getPublicUrl(path)
+    const fileUrl = urlData.publicUrl
+
+    // 5. De-duplicação individual (CPF + Valor + Data)
+    const rawValor = result.valor ? parseFloat(result.valor.replace(/\./g, "").replace(",", ".")) : null;
+    const { data: existing } = await supabase
+        .from("Comprovante")
+        .select("id")
+        .eq("companyId", companyId)
+        .eq("cpf", finalCpfToLookup)
+        .eq("amount", rawValor)
+        .eq("generatedAt", result.generatedAt || null)
+        .maybeSingle()
+
+    if (existing) {
+        console.log(`[ANALISAR] Já existe um registro idêntico para ${finalCpfToLookup}. Ignorando upload.`);
+        return { success: true, alreadyExists: true, employeeName: dbEmployeeName ?? null }
+    }
+
+    // 6. Insere registro
+    const { error: insertError } = await supabase.from("Comprovante").insert({
+        id: globalThis.crypto.randomUUID(),
+        companyId,
+        fileName: file.name,
+        employeeName: dbEmployeeName ?? "Não identificado",
+        cpf: finalCpfToLookup ?? "",
+        situacao: "PAGO",
+        amount: rawValor,
+        generatedAt: result.generatedAt || null,
+        employeeId: dbEmployeeId ?? null,
+        fileUrl,
+        extractedAt: new Date().toISOString(),
+    })
+
+    if (insertError) throw new Error("Falha ao salvar: " + insertError.message)
+
+    console.log("[ANALISAR] Salvo! employeeId:", dbEmployeeId ?? "null")
+    revalidatePath("/comprovante")
+    revalidatePath("/funcionarios")
+    return { success: true, employeeName: dbEmployeeName ?? null, cpfsFound: [finalCpfToLookup].filter(Boolean) as string[] }
+}
+
+export async function saveComprovanteManual(formData: FormData) {
     try {
         const session = await auth()
         if (!session?.user?.companyId) throw new Error("Não autorizado")
         const companyId = session.user.companyId
-
-        // Upload do arquivo
         const supabase = getSupabaseAdmin()
-        let fileUrl: string | null = null
 
-        const path = `${companyId}/manual/${Date.now()}_${data.fileName}`
+        // 1. Lê campos do FormData
+        const file = formData.get("file") as File | null
+        const employeeId = formData.get("employeeId") as string
+        const employeeName = formData.get("employeeName") as string
+        const cpf = formData.get("cpf") as string
+
+        if (!file || file.size === 0) throw new Error("Arquivo não recebido ou vazio")
+
+        const cpfToSave = cpf.replace(/\D/g, "")
+        console.log("[SAVE_MANUAL] file:", file.name, "size:", file.size, "cpf:", cpfToSave, "employeeId:", employeeId)
+
+        // 2. Upload do arquivo para storage
+        const fileBuffer = await file.arrayBuffer()
+        const path = `${companyId}/manual/${Date.now()}_${file.name}`
         const { data: uploadData, error: uploadError } = await supabase.storage
             .from("comprovantes")
-            .upload(path, data.fileBuffer, { contentType: data.fileType, upsert: true })
+            .upload(path, fileBuffer, { contentType: file.type || "application/octet-stream", upsert: true })
 
         if (uploadError) {
             console.error("[SAVE_MANUAL] Erro upload:", uploadError.message)
-            throw new Error("Falha no upload do arquivo: " + uploadError.message)
+            throw new Error("Falha no upload: " + uploadError.message)
         }
+
+        let fileUrl: string | null = null
         if (uploadData) {
             const { data: urlData } = supabase.storage.from("comprovantes").getPublicUrl(path)
             fileUrl = urlData.publicUrl
         }
 
-        // Salva no banco via Supabase
-        const [mes, ano] = data.mesAno.split("/")
-        const generatedAt = ano && mes ? `${ano}-${mes.padStart(2, "0")}-01` : null
+        console.log("[SAVE_MANUAL] fileUrl:", fileUrl)
 
-        const cleanValor = data.valor.replace(/\./g, "").replace(",", ".")
-        const amount = parseFloat(cleanValor) || null
-
+        // 3. Insere registro
         const { error: insertError } = await supabase.from("Comprovante").insert({
             id: globalThis.crypto.randomUUID(),
             companyId,
-            fileName: data.fileName,
-            employeeName: data.employeeName,
-            cpf: data.cpf.replace(/\D/g, ""),
-            situacao: data.situacao,
-            amount,
-            generatedAt,
-            employeeId: data.employeeId,
+            fileName: file.name,
+            employeeName,
+            cpf: cpfToSave,
+            situacao: "PAGO",
+            amount: null,
+            generatedAt: null,
+            employeeId,
             fileUrl,
             extractedAt: new Date().toISOString(),
         })
 
         if (insertError) {
             console.error("[SAVE_MANUAL] Erro insert:", insertError.message)
-            throw new Error("Falha ao salvar registro: " + insertError.message)
+            throw new Error("Falha ao salvar: " + insertError.message)
         }
 
+        console.log("[SAVE_MANUAL] Sucesso!")
         revalidatePath("/funcionarios")
         revalidatePath("/comprovante")
         return { success: true }
@@ -285,20 +469,39 @@ export async function getEmployeeComprovantes(cpf: string, employeeId?: string) 
 
   const cleanCpf = cpf.replace(/\D/g, "")
 
-  const orFilter = employeeId
-    ? `cpf.eq.${cleanCpf},employeeId.eq.${employeeId}`
-    : `cpf.eq.${cleanCpf}`
+  console.log("[GET_COMPROVANTES] companyId:", companyId, "cpf:", cleanCpf, "employeeId:", employeeId)
 
-  const { data, error } = await supabase
+  // Busca por CPF
+  const { data: byCpf, error: e1 } = await supabase
     .from("Comprovante")
     .select("id, fileName, employeeName, cpf, situacao, amount, extractedAt, generatedAt, fileUrl, originCnpj")
     .eq("companyId", companyId)
-    .or(orFilter)
+    .eq("cpf", cleanCpf)
     .order("extractedAt", { ascending: false })
 
-  if (error) throw new Error("Erro ao buscar comprovantes: " + error.message)
+  if (e1) console.error("[GET_COMPROVANTES] erro byCpf:", e1.message)
 
-  return (data ?? []).map((r: any) => ({
+  // Busca por employeeId
+  const byCpfIds = new Set((byCpf ?? []).map((r: any) => r.id))
+  let byEmployee: any[] = []
+  if (employeeId) {
+    const { data: byEmp, error: e2 } = await supabase
+      .from("Comprovante")
+      .select("id, fileName, employeeName, cpf, situacao, amount, extractedAt, generatedAt, fileUrl, originCnpj")
+      .eq("companyId", companyId)
+      .eq("employeeId", employeeId)
+      .order("extractedAt", { ascending: false })
+
+    if (e2) console.error("[GET_COMPROVANTES] erro byEmployee:", e2.message)
+    byEmployee = (byEmp ?? []).filter((r: any) => !byCpfIds.has(r.id))
+  }
+
+  const merged = [...(byCpf ?? []), ...byEmployee]
+    .sort((a: any, b: any) => new Date(b.extractedAt).getTime() - new Date(a.extractedAt).getTime())
+
+  console.log("[GET_COMPROVANTES] total encontrado:", merged.length)
+
+  return merged.map((r: any) => ({
     id: r.id,
     fileName: r.fileName,
     employeeName: r.employeeName,

@@ -8,7 +8,7 @@ export const ALL_FEATURES = [
     { key: "unidades",        label: "Unidades" },
     { key: "nfs",             label: "Notas Fiscais" },
     { key: "folha_pagamento", label: "Folha de Pagamento" },
-    { key: "comprovante",     label: "Relatório em Lote" },
+    { key: "comprovante",     label: "Extrato em Lote" },
     { key: "whatsapp",        label: "WhatsApp Business" },
     { key: "relatorios",      label: "Relatórios" },
     { key: "bancos",          label: "Bancos" },
