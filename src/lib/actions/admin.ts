@@ -6,6 +6,20 @@ import { randomUUID } from "crypto"
 import { prisma } from "@/lib/prisma"
 import bcrypt from "bcryptjs"
 
+// ── Serialization Helpers ──────────────────────────────────────────────────
+
+function safeIsoDate(date: any) {
+    if (date instanceof Date) return date.toISOString()
+    if (typeof date === "string" && date.length > 0) return date
+    return null
+}
+
+function safeNumber(val: any) {
+    if (val === null || val === undefined) return null
+    const n = Number(val)
+    return isNaN(n) ? null : n
+}
+
 const ADMIN_SECRET = process.env.ADMIN_SECRET ?? "pepacorp@admin"
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -77,29 +91,39 @@ export async function listAllCompanies() {
         orderBy: { createdAt: "desc" }
     })
 
-    // Serialize Dates and Decimals for Client Component
+    // Serialize Dates and Decimals robustly for Client Component
     return companies.map(c => ({
-        ...c,
+        id: c.id,
+        name: c.name,
+        cnpj: c.cnpj,
+        email: c.email,
+        whatsapp: c.whatsapp,
+        address: c.address,
+        city: c.city,
+        state: c.state,
         whatsappWebhookUrl: c.whatsappWebhookUrl ?? "",
-        createdAt: c.createdAt.toISOString(),
-        updatedAt: c.updatedAt.toISOString(),
+        webhookToken: c.webhookToken,
+        active: c.active,
+        createdAt: safeIsoDate(c.createdAt),
+        updatedAt: safeIsoDate(c.updatedAt),
+        _count: c._count,
         settings: c.settings ? {
             ...c.settings,
-            createdAt: c.settings.createdAt.toISOString(),
-            updatedAt: c.settings.updatedAt.toISOString(),
+            createdAt: safeIsoDate(c.settings.createdAt),
+            updatedAt: safeIsoDate(c.settings.updatedAt),
         } : null,
         subscription: c.subscription ? {
             ...c.subscription,
-            createdAt: c.subscription.createdAt.toISOString(),
-            updatedAt: c.subscription.updatedAt.toISOString(),
-            customBasePrice: c.subscription.customBasePrice ? Number(c.subscription.customBasePrice) : null,
-            customPricePerEmployee: c.subscription.customPricePerEmployee ? Number(c.subscription.customPricePerEmployee) : null,
+            createdAt: safeIsoDate(c.subscription.createdAt),
+            updatedAt: safeIsoDate(c.subscription.updatedAt),
+            customBasePrice: safeNumber(c.subscription.customBasePrice),
+            customPricePerEmployee: safeNumber(c.subscription.customPricePerEmployee),
             plan: c.subscription.plan ? {
                 ...c.subscription.plan,
-                basePrice: Number(c.subscription.plan.basePrice),
-                pricePerEmployee: Number(c.subscription.plan.pricePerEmployee),
-                createdAt: c.subscription.plan.createdAt.toISOString(),
-                updatedAt: c.subscription.plan.updatedAt.toISOString(),
+                basePrice: safeNumber(c.subscription.plan.basePrice) ?? 0,
+                pricePerEmployee: safeNumber(c.subscription.plan.pricePerEmployee) ?? 0,
+                createdAt: safeIsoDate(c.subscription.plan.createdAt),
+                updatedAt: safeIsoDate(c.subscription.plan.updatedAt),
             } : null
         } : null
     }))
