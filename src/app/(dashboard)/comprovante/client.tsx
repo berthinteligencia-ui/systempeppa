@@ -30,7 +30,7 @@ interface ComprovanteClientProps {
 function LoadingOverlay({ label }: { label: string }) {
     return (
         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#1a2744]/92 rounded-2xl backdrop-blur-[2px] animate-in fade-in duration-300">
-            <div className="relative h-16 w-16 mb-4">
+            <div className="relative h-12 w-12 mb-4">
                 <div className="absolute inset-0 rounded-full border-[3px] border-white/10" />
                 <div className="absolute inset-0 rounded-full border-[3px] border-transparent border-t-blue-400 animate-spin" style={{ animationDuration: "0.9s" }} />
                 <div className="absolute inset-[5px] rounded-full border-[2px] border-transparent border-t-indigo-300/60 animate-spin" style={{ animationDuration: "1.4s", animationDirection: "reverse" }} />
@@ -153,30 +153,30 @@ export function ComprovanteClient({ departments, fechamentos, banks, companyId, 
     }
 
     return (
-        <div className="p-8 flex flex-col gap-10 animate-in fade-in duration-700 max-w-[1600px] mx-auto">
+        <div className="p-6 flex flex-col gap-6 animate-in fade-in duration-700 max-w-[1600px] mx-auto">
 
             {/* Header */}
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
                 <div>
-                    <h1 className="text-4xl font-black text-[#1a2744] leading-tight tracking-tight">Processamento de Documentos</h1>
+                    <h1 className="text-3xl font-black text-[#1a2744] leading-tight tracking-tight">Processamento de Documentos</h1>
                     <p className="text-slate-400 mt-2 text-sm font-medium">Extração inteligente e vínculo automático de comprovantes bancários.</p>
                 </div>
             </div>
 
             {/* Cards Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-start">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
 
                 {/* Relatórios */}
                 <div className="flex flex-col gap-5 h-full">
                     <div
                         {...makeDragHandlers('lote')}
                         className={cn(
-                            "relative bg-white rounded-3xl p-10 shadow-sm border border-slate-100 cursor-pointer transition-all duration-300 group overflow-hidden flex-1",
+                            "relative bg-white rounded-3xl p-6 shadow-sm border border-slate-100 cursor-pointer transition-all duration-300 group overflow-hidden flex-1",
                             dragActive === 'lote' ? "ring-4 ring-blue-500/20 border-blue-400 scale-[1.02] shadow-xl" : "hover:shadow-xl hover:-translate-y-1"
                         )}
                     >
                         <input type="file" multiple accept=".pdf" onChange={handleFileInputLote} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
-                        <div className="h-16 w-16 bg-blue-50 rounded-2xl flex items-center justify-center mb-8 border border-blue-100 transition-transform group-hover:scale-110 relative">
+                        <div className="h-14 w-14 bg-blue-50 rounded-2xl flex items-center justify-center mb-6 border border-blue-100 transition-transform group-hover:scale-110 relative">
                             <FileText className="h-8 w-8 text-blue-600" />
                             <div className="absolute -right-1 -bottom-1 bg-white rounded-full p-1 shadow-sm border border-blue-100">
                                 <UploadCloud className="h-3 w-3 text-blue-400" />
@@ -198,7 +198,7 @@ export function ComprovanteClient({ departments, fechamentos, banks, companyId, 
                             <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Banco de Origem</span>
                         </div>
                         <Select value={selectedBankLote} onValueChange={setSelectedBankLote}>
-                            <SelectTrigger className="h-12 bg-slate-50 border-slate-200 font-bold text-slate-700 rounded-xl text-xs focus:ring-4 focus:ring-blue-500/10">
+                            <SelectTrigger className="h-10 bg-slate-50 border-slate-200 font-bold text-slate-700 rounded-xl text-xs focus:ring-4 focus:ring-blue-500/10">
                                 <SelectValue placeholder="Escolha o banco..." />
                             </SelectTrigger>
                             <SelectContent className="rounded-xl border-slate-200">
@@ -212,7 +212,7 @@ export function ComprovanteClient({ departments, fechamentos, banks, companyId, 
                     <Button
                         onClick={() => analyzeFiles('lote')}
                         disabled={analyzingCard !== null || !selectedBankLote || pendingLote.length === 0}
-                        className="h-14 bg-[#1a2744] hover:bg-[#0f1a30] text-white font-black uppercase tracking-[0.2em] text-[10px] rounded-2xl shadow-lg shadow-[#1a2744]/20 transition-all hover:scale-[1.02] active:scale-95 disabled:grayscale"
+                        className="h-12 bg-[#1a2744] hover:bg-[#0f1a30] text-white font-black uppercase tracking-[0.2em] text-[10px] rounded-2xl shadow-lg shadow-[#1a2744]/20 transition-all hover:scale-[1.02] active:scale-95 disabled:grayscale"
                     >
                         <Cloud className="h-4 w-4 mr-2" /> Analisar Lote
                     </Button>
@@ -223,12 +223,12 @@ export function ComprovanteClient({ departments, fechamentos, banks, companyId, 
                     <div
                         {...makeDragHandlers('comp')}
                         className={cn(
-                            "relative bg-white rounded-3xl p-10 shadow-sm border border-slate-100 cursor-pointer transition-all duration-300 group overflow-hidden flex-1",
+                            "relative bg-white rounded-3xl p-6 shadow-sm border border-slate-100 cursor-pointer transition-all duration-300 group overflow-hidden flex-1",
                             dragActive === 'comp' ? "ring-4 ring-indigo-500/20 border-indigo-400 scale-[1.02] shadow-xl" : "hover:shadow-xl hover:-translate-y-1"
                         )}
                     >
                         <input type="file" multiple accept=".pdf" onChange={handleFileInputComp} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
-                        <div className="h-16 w-16 bg-indigo-50 rounded-2xl flex items-center justify-center mb-8 border border-indigo-100 transition-transform group-hover:scale-110 relative">
+                        <div className="h-14 w-14 bg-indigo-50 rounded-2xl flex items-center justify-center mb-6 border border-indigo-100 transition-transform group-hover:scale-110 relative">
                             <Receipt className="h-8 w-8 text-indigo-600" />
                             <div className="absolute -right-1 -bottom-1 bg-white rounded-full p-1 shadow-sm border border-indigo-100">
                                 <UploadCloud className="h-3 w-3 text-indigo-400" />
@@ -244,12 +244,12 @@ export function ComprovanteClient({ departments, fechamentos, banks, companyId, 
                         {analyzingCard === 'comp' && <LoadingOverlay label="Viculando Dados" />}
                     </div>
 
-                    <div className="h-[92px] opacity-0 pointer-events-none md:block hidden" aria-hidden="true" />
+                    <div className="h-[76px] opacity-0 pointer-events-none md:block hidden" aria-hidden="true" />
 
                     <Button
                         onClick={() => analyzeFiles('comp')}
                         disabled={analyzingCard !== null || pendingComp.length === 0}
-                        className="h-14 bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase tracking-[0.2em] text-[10px] rounded-2xl shadow-lg shadow-indigo-600/20 transition-all hover:scale-[1.02] active:scale-95 disabled:grayscale"
+                        className="h-12 bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase tracking-[0.2em] text-[10px] rounded-2xl shadow-lg shadow-indigo-600/20 transition-all hover:scale-[1.02] active:scale-95 disabled:grayscale"
                     >
                         <FileUp className="h-4 w-4 mr-2" /> Analisar Individual
                     </Button>
@@ -257,10 +257,10 @@ export function ComprovanteClient({ departments, fechamentos, banks, companyId, 
 
                 {/* Notificações */}
                 <div className="flex flex-col gap-5 h-full">
-                    <div className="bg-white rounded-3xl p-8 shadow-sm border border-slate-100 h-full flex flex-col flex-1">
-                        <div className="flex items-center gap-4 mb-8">
-                            <div className="h-12 w-12 bg-emerald-100 rounded-2xl flex items-center justify-center border border-emerald-200">
-                                <MessageSquare className="h-6 w-6 text-emerald-600" />
+                    <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 h-full flex flex-col flex-1">
+                        <div className="flex items-center gap-4 mb-6">
+                            <div className="h-10 w-10 bg-emerald-100 rounded-xl flex items-center justify-center border border-emerald-200">
+                                <MessageSquare className="h-5 w-5 text-emerald-600" />
                             </div>
                             <div>
                                 <h3 className="text-lg font-black text-[#1a2744]">Envio em Massa</h3>
@@ -268,8 +268,8 @@ export function ComprovanteClient({ departments, fechamentos, banks, companyId, 
                             </div>
                         </div>
 
-                        <div className="space-y-4 mb-8 flex-1">
-                            <div className="space-y-3">
+                        <div className="space-y-3 mb-6 flex-1">
+                            <div className="space-y-2">
                                 <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 cursor-pointer hover:bg-slate-50 transition-colors">
                                     <input type="checkbox" checked={massUnit === "all"} onChange={() => setMassUnit("all")} className="h-4 w-4 rounded accent-blue-600" />
                                     <span className="text-xs font-bold text-slate-600 uppercase tracking-widest">Todas as Unidades</span>
@@ -282,14 +282,14 @@ export function ComprovanteClient({ departments, fechamentos, banks, companyId, 
                                 ))}
                             </div>
                             <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 italic text-slate-400 text-[11px] leading-relaxed">
-                                "Olá! Seu comprovante de pagamento já está disponível no portal. Clique para ver."
+                                {`"Olá! Seu comprovante de pagamento já está disponível no portal. Clique para ver."`}
                             </div>
                         </div>
 
                         <Button
                             onClick={handleSendMass}
                             disabled={isSendingMass}
-                            className="h-14 bg-emerald-600 hover:bg-emerald-700 text-white font-black uppercase tracking-[0.2em] text-[10px] rounded-2xl shadow-lg shadow-emerald-600/20 transition-all hover:scale-[1.02] active:scale-95 disabled:grayscale"
+                            className="h-12 bg-emerald-600 hover:bg-emerald-700 text-white font-black uppercase tracking-[0.2em] text-[10px] rounded-2xl shadow-lg shadow-emerald-600/20 transition-all hover:scale-[1.02] active:scale-95 disabled:grayscale"
                         >
                             {isSendingMass ? <Loader2 className="h-4 w-4 animate-spin" /> : <SendHorizontal className="h-4 w-4 mr-2" />} Iniciar Disparo
                         </Button>
@@ -299,15 +299,15 @@ export function ComprovanteClient({ departments, fechamentos, banks, companyId, 
 
             {/* Success Bar */}
             {showSuccess && (
-                <div className="flex items-center gap-5 bg-white border-2 border-emerald-500/20 p-6 rounded-3xl shadow-xl animate-in slide-in-from-bottom-5 duration-500 ease-out">
-                    <div className="h-12 w-12 rounded-2xl bg-emerald-500 flex items-center justify-center text-white shrink-0 shadow-lg shadow-emerald-500/30">
-                        <CheckCircle2 className="h-6 w-6" />
+                <div className="flex items-center gap-4 bg-white border-2 border-emerald-500/20 p-4 rounded-2xl shadow-xl animate-in slide-in-from-bottom-5 duration-500 ease-out">
+                    <div className="h-10 w-10 rounded-xl bg-emerald-500 flex items-center justify-center text-white shrink-0 shadow-lg shadow-emerald-500/30">
+                        <CheckCircle2 className="h-5 w-5" />
                     </div>
                     <div className="flex-1">
-                        <h4 className="font-black text-[#1a2744] text-base">Extração Finalizada</h4>
-                        <p className="text-slate-500 text-sm font-medium">{lastCount} arquivos processados com sucesso.</p>
+                        <h4 className="font-black text-[#1a2744] text-sm truncate">Extração Finalizada</h4>
+                        <p className="text-slate-500 text-xs font-medium">{lastCount} arquivos processados.</p>
                     </div>
-                    <Button onClick={() => router.push('/funcionarios')} className="bg-[#1a2744] text-white font-black uppercase tracking-widest text-[10px] px-6 py-3 rounded-xl shadow-lg shadow-[#1a2744]/20">
+                    <Button onClick={() => router.push('/funcionarios')} className="bg-[#1a2744] text-white font-black uppercase tracking-widest text-[9px] px-4 py-2 rounded-lg shadow-lg shadow-[#1a2744]/20 h-10">
                         Ver Funcionários
                     </Button>
                 </div>
