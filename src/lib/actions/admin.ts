@@ -3,7 +3,6 @@
 import { getSupabaseAdmin } from "@/lib/supabase-admin"
 import { cookies } from "next/headers"
 import { randomUUID } from "crypto"
-import { prisma } from "@/lib/prisma"
 import bcrypt from "bcryptjs"
 
 // ── Serialization Helpers ──────────────────────────────────────────────────
@@ -68,31 +67,35 @@ export type CompanyInput = {
 }
 
 export async function listAllCompanies() {
-    const companies = await prisma.company.findMany({
-        include: {
-            _count: {
-                select: { users: true, employees: { where: { status: "ACTIVE" } } }
-            },
-            subscription: {
-                include: { plan: true }
-            },
-            settings: {
-                select: {
-                    id: true,
-                    companyId: true,
-                    whatsappNotifications: true,
-                    autoBackup: true,
-                    payrollReminderDays: true,
-                    createdAt: true,
-                    updatedAt: true,
-                }
-            }
-        },
-        orderBy: { createdAt: "desc" }
-    })
+    const supabase = getSupabaseAdmin()
 
-    // Serialize Dates and Decimals robustly for Client Component
-    return companies.map(c => ({
+    const { data: companies, error } = await supabase
+        .from("Company")
+        .select(`
+            id, name, cnpj, email, whatsapp, address, city, state,
+            whatsappWebhookUrl, webhookToken, active, createdAt, updatedAt,
+            settings:Settings(id, companyId, whatsappNotifications, autoBackup, payrollReminderDays, createdAt, updatedAt),
+            subscription:Subscription(id, planId, customBasePrice, customPricePerEmployee, createdAt, updatedAt,
+                plan:Plan(id, name, basePrice, pricePerEmployee, createdAt, updatedAt)
+            )
+        `)
+        .order("createdAt", { ascending: false })
+
+    if (error) throw new Error(error.message)
+
+    // Conta usuários e funcionários ativos por empresa em batch
+    const [{ data: userRows }, { data: empRows }] = await Promise.all([
+        supabase.from("User").select("companyId"),
+        supabase.from("Employee").select("companyId").eq("status", "ACTIVE"),
+    ])
+
+    const userCount: Record<string, number> = {}
+    for (const u of userRows ?? []) userCount[u.companyId] = (userCount[u.companyId] ?? 0) + 1
+
+    const empCount: Record<string, number> = {}
+    for (const e of empRows ?? []) empCount[e.companyId] = (empCount[e.companyId] ?? 0) + 1
+
+    return (companies ?? []).map((c: any) => ({
         id: c.id,
         name: c.name,
         cnpj: c.cnpj,
@@ -106,7 +109,7 @@ export async function listAllCompanies() {
         active: c.active,
         createdAt: safeIsoDate(c.createdAt),
         updatedAt: safeIsoDate(c.updatedAt),
-        _count: c._count,
+        _count: { users: userCount[c.id] ?? 0, employees: empCount[c.id] ?? 0 },
         settings: c.settings ? {
             ...c.settings,
             createdAt: safeIsoDate(c.settings.createdAt),
