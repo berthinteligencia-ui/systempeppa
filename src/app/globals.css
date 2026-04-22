@@ -3,10 +3,19 @@
 @tailwind utilities;
 
 /* Scrollbar chat */
-.chat-scroll::-webkit-scrollbar { width: 6px; }
-.chat-scroll::-webkit-scrollbar-track { background: transparent; }
-.chat-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
-.chat-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+.chat-scroll::-webkit-scrollbar {
+    width: 6px;
+}
+.chat-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+.chat-scroll::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 9999px;
+}
+.chat-scroll::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
 
 @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
 
@@ -76,6 +85,7 @@
         @apply bg-background text-foreground;
     }
 }
+
 @layer utilities {
     .animate-spin-reverse {
         animation: spin-reverse 3s linear infinite;

@@ -55,8 +55,31 @@ export function WhatsAppChatWindow({ conversation, onMessageSent }: WhatsAppChat
 
         fetchMessages()
 
-        // Realtime: tenta receber INSERTs em tempo real
-        const channel = supabase
+        // Realtime: ouve INSERTs no n8n_chat_histories filtrado por session_id
+        const n8nChannel = supabase
+            .channel(`n8n:${conversationId}`)
+            .on(
+                'postgres_changes',
+                { event: 'INSERT', schema: 'public', table: 'n8n_chat_histories', filter: `session_id=eq.${conversationId}` },
+                (payload) => {
+                    const row = payload.new as any
+                    const msg = row.message
+                    if (msg?.type === "tool") return // ignora tool calls internas
+                    const rawContent = msg?.content ?? ""
+                    let content = rawContent
+                    if (typeof rawContent === "string") {
+                        try { const p = JSON.parse(rawContent); if (p?.text) content = p.text } catch {}
+                    }
+                    const senderType = msg?.type === "ai" ? "COMPANY" : "EMPLOYEE"
+                    const newMsg = { id: String(row.id), content, senderType, createdAt: new Date().toISOString(), conversationId }
+                    setMessages(prev => prev.some(m => m.id === newMsg.id) ? prev : [...prev, newMsg])
+                    onMessageSent()
+                }
+            )
+            .subscribe()
+
+        // Realtime legado: ouve mensagens_zap para fluxos antigos
+        const zapChannel = supabase
             .channel(`mensagens:${conversationId}`)
             .on(
                 'postgres_changes',
@@ -65,7 +88,7 @@ export function WhatsAppChatWindow({ conversation, onMessageSent }: WhatsAppChat
                     const row = payload.new as any
                     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationId ?? "")
                     const suffix = (conversationId ?? "").replace(/\D/g, "").slice(-8)
-                    const rowPhone = (row.numero_funcionario ?? "").replace(/@.*$/, "").replace(/\D/g, "")
+                    const rowPhone = (row.numero_funcionario ?? "").replace(/\D/g, "")
                     const matches = isUuid
                         ? row.lead_id === conversationId
                         : rowPhone.endsWith(suffix) || row.lead_id === conversationId
@@ -84,7 +107,8 @@ export function WhatsAppChatWindow({ conversation, onMessageSent }: WhatsAppChat
         const interval = setInterval(fetchMessages, 4000)
 
         return () => {
-            supabase.removeChannel(channel)
+            supabase.removeChannel(n8nChannel)
+            supabase.removeChannel(zapChannel)
             clearInterval(interval)
         }
     }, [conversationId])

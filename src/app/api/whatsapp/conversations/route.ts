@@ -5,6 +5,25 @@ import { auth } from "@/lib/auth"
 import { supabaseAdmin } from "@/lib/db"
 import { NextResponse } from "next/server"
 
+function extractContent(message: any): string {
+    if (!message) return ""
+    const raw = message.content
+    if (!raw) return ""
+    if (typeof raw !== "string") return String(raw)
+    try {
+        const parsed = JSON.parse(raw)
+        if (typeof parsed?.text === "string") return parsed.text
+    } catch { /* plain string */ }
+    return raw
+}
+
+function extractType(message: any): "human" | "ai" | "tool" {
+    const t = message?.type
+    if (t === "human") return "human"
+    if (t === "ai") return "ai"
+    return "tool"
+}
+
 export async function GET() {
     const session = await auth()
     if (!session?.user?.companyId) {
@@ -13,100 +32,83 @@ export async function GET() {
     const companyId = session.user.companyId
 
     try {
-        // 1. Busca todas as mensagens com lead info
-        const { data: messages, error: msgError } = await supabaseAdmin
-            .from("mensagens_zap")
-            .select("id, lead_id, conteudo, tipo, created_at, numero_funcionario")
-            .order("created_at", { ascending: false })
-            .limit(500)
+        // Tabela n8n_chat_histories tem colunas: id (int), session_id, message (jsonb)
+        // Sem coluna created_at — usa id como proxy de ordem cronológica
+        const { data: chatRows, error: chatError } = await supabaseAdmin
+            .from("n8n_chat_histories")
+            .select("id, session_id, message")
+            .order("id", { ascending: true })
+            .limit(5000)
 
-        if (msgError) throw new Error(msgError.message)
+        if (chatError) throw new Error(chatError.message)
 
-        // 2. Busca leads referenciados
-        const leadIds = [...new Set((messages ?? []).map(m => m.lead_id).filter(Boolean))]
-        const leadsMap: Record<string, any> = {}
-        if (leadIds.length > 0) {
-            const { data: leads } = await supabaseAdmin
-                .from("leads")
-                .select("id, nome, celular")
-                .in("id", leadIds)
-            for (const l of leads ?? []) leadsMap[l.id] = l
+        // Agrupa por session_id mantendo ordem por id
+        const sessions: Record<string, any[]> = {}
+        for (const row of chatRows ?? []) {
+            const sid = String(row.session_id ?? "").trim()
+            if (!sid) continue
+            if (!sessions[sid]) sessions[sid] = []
+            sessions[sid].push(row)
         }
 
-        // 3. Busca funcionários da empresa com departamento
-        const { data: employees } = await supabaseAdmin
-            .from("Employee")
-            .select("id, name, position, phone, email, cpf, salary, pagamento, hireDate, bankName, bankAgency, bankAccount, departmentId, Department(name)")
-            .eq("companyId", companyId)
+        // Para cada sessão, verifica empresa via resposta de tool (consulta_funcionario)
+        const result: any[] = []
 
-        const empList = employees ?? []
+        for (const [sessionId, messages] of Object.entries(sessions)) {
+            let empData: any = null
+            for (const row of messages) {
+                const msg = row.message
+                if (msg?.type !== "tool") continue
+                try {
+                    const parsed = JSON.parse(msg.content ?? "[]")
+                    const arr = Array.isArray(parsed) ? parsed : [parsed]
+                    const found = arr.find((e: any) => e?.companyId === companyId)
+                    if (found) { empData = found; break }
+                } catch { /* continua */ }
+            }
 
-        // Normaliza telefone: remove não-dígitos e sufixo WhatsApp, pega últimos 8 dígitos
-        const normPhone = (p: string | null | undefined) =>
-            (p ?? "").replace(/@.*$/, "").replace(/\D/g, "").slice(-8)
+            if (!empData) continue
 
-        // Monta mapa: telefone normalizado → employee
-        const empByPhone: Record<string, any> = {}
-        for (const e of empList) {
-            const n = normPhone(e.phone)
-            if (n) empByPhone[n] = e
-        }
-
-        // 4. Agrupa mensagens por telefone normalizado (últimos 10 dígitos)
-        //    Garante que o mesmo contato apareça como UMA única conversa
-        const grouped: Record<string, any[]> = {}
-        for (const msg of messages ?? []) {
-            const lead = msg.lead_id ? leadsMap[msg.lead_id] : null
-            const rawPhone = msg.numero_funcionario || lead?.celular || ""
-            const key = normPhone(rawPhone) || msg.lead_id || msg.id
-            if (!grouped[key]) grouped[key] = []
-            grouped[key].push(msg)
-        }
-
-        // 5. Monta resultado — uma entrada por contato, ordenada pela mensagem mais recente
-        const result = Object.entries(grouped)
-            .map(([key, msgs]) => {
-                // Ordena para garantir que latest seja de fato o mais recente
-                const sorted = [...msgs].sort((a, b) =>
-                    new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-                )
-                const latest = sorted[0]
-                const lead = latest.lead_id ? leadsMap[latest.lead_id] : null
-
-                const contactPhone = normPhone(latest.numero_funcionario) || normPhone(lead?.celular) || key
-                const emp = empByPhone[contactPhone] ?? null
-
-                return {
-                    id: key,
-                    active: true,
-                    updatedAt: latest.created_at,
-                    companyId,
-                    employeeId: emp?.id ?? null,
-                    isEmployee: !!emp,
-                    employee: {
-                        id: emp?.id ?? null,
-                        name: emp?.name ?? lead?.nome ?? key,
-                        position: emp?.position ?? null,
-                        phone: emp?.phone ?? lead?.celular ?? key,
-                        email: emp?.email ?? null,
-                        cpf: emp?.cpf ?? null,
-                        salary: emp?.salary ? Number(emp.salary) : null,
-                        pagamento: emp?.pagamento ?? null,
-                        hireDate: emp?.hireDate ?? null,
-                        bankName: emp?.bankName ?? null,
-                        bankAgency: emp?.bankAgency ?? null,
-                        bankAccount: emp?.bankAccount ?? null,
-                        department: (emp?.Department as any)?.name ?? null,
-                    },
-                    messages: [{
-                        id: latest.id,
-                        content: latest.conteudo,
-                        createdAt: latest.created_at,
-                        senderType: latest.tipo === "lead" ? "EMPLOYEE" : "COMPANY",
-                    }],
-                }
+            const visible = messages.filter(r => {
+                const t = extractType(r.message)
+                return t === "human" || t === "ai"
             })
-            .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+
+            if (visible.length === 0) continue
+
+            const latest = visible[visible.length - 1]
+
+            result.push({
+                id: sessionId,
+                active: true,
+                updatedAt: new Date().toISOString(),
+                companyId,
+                employeeId: empData.id ?? null,
+                isEmployee: true,
+                messageCount: visible.length,
+                employee: {
+                    id: empData.id ?? null,
+                    name: empData.name ?? sessionId,
+                    position: empData.position ?? null,
+                    phone: empData.phone ?? sessionId,
+                    email: empData.email ?? null,
+                    cpf: empData.cpf ?? null,
+                    salary: empData.salary ? Number(empData.salary) : null,
+                    pagamento: empData.pagamento ?? null,
+                    hireDate: empData.hireDate ?? null,
+                    bankName: empData.bankName ?? null,
+                    bankAgency: empData.bankAgency ?? null,
+                    bankAccount: empData.bankAccount ?? null,
+                    department: empData.department ?? null,
+                },
+                messages: [{
+                    id: String(latest.id),
+                    content: extractContent(latest.message),
+                    createdAt: new Date().toISOString(),
+                    senderType: extractType(latest.message) === "ai" ? "COMPANY" : "EMPLOYEE",
+                }],
+            })
+        }
 
         return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } })
     } catch (err: any) {

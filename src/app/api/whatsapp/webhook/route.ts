@@ -71,6 +71,29 @@ export async function POST(req: Request) {
             funcionario: "true",
         })
 
+        // Busca webhookToken da empresa para repassar ao n8n
+        const { data: companyData } = await supabaseAdmin
+            .from("Company")
+            .select("webhookToken")
+            .eq("id", employee.companyId)
+            .maybeSingle()
+
+        // Dispara n8n workflow de forma assíncrona (fire-and-forget)
+        fetch("https://teste.berthia.com.br/webhook/secretaria-whatsapp", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                employeeId: employee.id,
+                employeeName: employee.name,
+                companyId: employee.companyId,
+                phone: phoneClean,
+                leadId,
+                messageText,
+                messageId,
+                webhookToken: companyData?.webhookToken ?? "",
+            }),
+        }).catch(err => console.error("[WEBHOOK_N8N] Erro ao chamar n8n:", err.message))
+
         return NextResponse.json({ ok: true, messageId })
     } catch (err: any) {
         console.error("[WEBHOOK_IN] Erro:", err.message)

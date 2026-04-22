@@ -9,6 +9,25 @@ const CRM_WEBHOOK_URL = "https://webhook.berthia.com.br/webhook/enviacrmzap"
 
 const normPhone = (p: string | null | undefined) => (p ?? "").replace(/@.*$/, "").replace(/\D/g, "").slice(-8)
 
+function extractContent(message: any): string {
+    if (!message) return ""
+    const raw = message.content
+    if (!raw) return ""
+    if (typeof raw !== "string") return String(raw)
+    try {
+        const parsed = JSON.parse(raw)
+        if (typeof parsed?.text === "string") return parsed.text
+    } catch { /* plain string */ }
+    return raw
+}
+
+function extractMsgType(message: any): "human" | "ai" | "tool" {
+    const t = message?.type
+    if (t === "human") return "human"
+    if (t === "ai") return "ai"
+    return "tool"
+}
+
 export async function GET(req: Request) {
     const session = await auth()
     const { searchParams } = new URL(req.url)
@@ -17,13 +36,50 @@ export async function GET(req: Request) {
     if (!session?.user?.companyId) return new NextResponse("Unauthorized", { status: 401 })
     if (!conversationId) return new NextResponse("Missing conversationId", { status: 400 })
 
-    try {
-        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationId)
+    const companyId = session.user.companyId
 
+    try {
+        // Tabela n8n_chat_histories: colunas id (int), session_id, message — sem created_at
+        const { data: n8nRows, error: n8nError } = await supabaseAdmin
+            .from("n8n_chat_histories")
+            .select("id, session_id, message")
+            .eq("session_id", conversationId)
+            .order("id", { ascending: true })
+
+        if (!n8nError && n8nRows && n8nRows.length > 0) {
+            // Valida empresa via tool response (igual à conversations route)
+            // A resposta do tool "consulta_funcionario" contém companyId do funcionário
+            const hasAccess = n8nRows.some(m => {
+                if (m.message?.type !== "tool") return false
+                try {
+                    const parsed = JSON.parse(m.message.content ?? "[]")
+                    const arr = Array.isArray(parsed) ? parsed : [parsed]
+                    return arr.some((e: any) => e?.companyId === companyId)
+                } catch { return false }
+            })
+
+            if (!hasAccess) {
+                return new NextResponse(JSON.stringify({ error: "Acesso negado" }), { status: 403 })
+            }
+
+            const messages = n8nRows
+                .filter(m => extractMsgType(m.message) !== "tool")
+                .map((m, i) => ({
+                    id: String(m.id),
+                    content: extractContent(m.message),
+                    senderType: extractMsgType(m.message) === "ai" ? "COMPANY" : "EMPLOYEE",
+                    createdAt: new Date(Date.now() - (n8nRows.length - i) * 1000).toISOString(),
+                    conversationId,
+                }))
+
+            return NextResponse.json(messages, { headers: { "Cache-Control": "no-store" } })
+        }
+
+        // Fallback: busca em mensagens_zap (fluxo legado)
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationId)
         let rows: any[] = []
 
         if (isUuid) {
-            // Busca direto pelo lead_id
             const { data, error } = await supabaseAdmin
                 .from("mensagens_zap")
                 .select("id, conteudo, tipo, created_at, lead_id, numero_funcionario")
@@ -32,9 +88,7 @@ export async function GET(req: Request) {
             if (error) throw new Error(error.message)
             rows = data ?? []
         } else {
-            // conversationId é telefone normalizado (últimos 8 dígitos)
             const suffix = conversationId.replace(/\D/g, "").slice(-8)
-
             const [byPhone, leadLookup] = await Promise.all([
                 supabaseAdmin
                     .from("mensagens_zap")
@@ -47,17 +101,13 @@ export async function GET(req: Request) {
                     .ilike("celular", `%${suffix}%`)
                     .limit(10),
             ])
-
             const leadIds = (leadLookup.data ?? []).map((l: any) => l.id)
-
-            // Um único IN query em vez de N queries sequenciais
             const byLead = leadIds.length > 0
                 ? await supabaseAdmin
                     .from("mensagens_zap")
                     .select("id, conteudo, tipo, created_at, lead_id, numero_funcionario")
                     .in("lead_id", leadIds)
                 : { data: [] }
-
             const seen = new Set<string>()
             for (const r of [...(byPhone.data ?? []), ...(byLead.data ?? [])]) {
                 if (!seen.has(r.id)) { seen.add(r.id); rows.push(r) }
