@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useCallback } from "react"
+import { useState, useRef, useCallback, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import {
   UserPlus, Pencil, Trash2, CheckCircle2, AlertCircle, Clock, Filter,
@@ -29,7 +29,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 import {
   createEmployee, updateEmployee, deleteEmployee,
-  deleteEmployeesBatch, importEmployees,
+  deleteEmployeesBatch, importEmployees, resetDepartmentPaymentStatus,
+  updateEmployeePaymentStatus, updateEmployeeStatus,
 } from "@/lib/actions/employees"
 import { getEmployeeComprovantes, deleteComprovante, saveComprovanteManual } from "@/lib/actions/comprovante"
 
@@ -67,6 +68,10 @@ const pagamentoMap: Record<string, { label: string; cls: string }> = {
   lancado: { label: "LANÇADO", cls: "bg-orange-500 text-white shadow-sm" },
 }
 
+const normalizePag = (v: string | null) => {
+    return (v ?? "pendente").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+}
+
 const empty = {
   name: "", position: "", salary: "", hireDate: "", departmentId: "",
   cpf: "", email: "", phone: "", status: "ACTIVE", pagamento: "pendente",
@@ -98,7 +103,7 @@ const CPF_COLS = ["cpf", "doc", "documento", "cpf/cnpj", "registro", "matricula"
 const PHONE_COLS = ["telefone", "fone", "celular", "cel", "phone", "whatsapp", "zap", "contato"]
 const EMAIL_COLS = ["email", "e-mail", "mail", "correio", "endereço eletrônico"]
 const POSITION_COLS = ["cargo", "position", "funcao", "função", "ocupacao", "ocupação", "atividade", "setor/função"]
-const SALARY_COLS = ["salario", "salário", "salary", "remuneracao", "remuneração", "vencimento", "pagamento", "valor", "base", "líquido", "bruto"]
+const SALARY_COLS = ["salario", "salário", "salary", "remuneracao", "remuneração", "vencimento", "pagamento", "valor", "base", "líquido", "bruto", "status", "st", "sttatus"]
 const DEPT_COLS = ["unidade", "departamento", "setor", "department", "dept", "lotacao", "lotação", "filial", "estabelecimento"]
 const BANK_COLS = ["banco", "bank", "instituicao", "instituição"]
 const AGENCY_COLS = ["agencia", "agência", "agency", "ag"]
@@ -211,6 +216,7 @@ export function FuncionariosClient({
   const isAllowedToDelete = userRole?.toUpperCase() === "ADMIN" || userRole?.toUpperCase() === "RH"
   const router = useRouter()
 
+
   const [open, setOpen] = useState(false)
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [editing, setEditing] = useState<Employee | null>(null)
@@ -222,6 +228,17 @@ export function FuncionariosClient({
   const [filterSearch, setFilterSearch] = useState("")
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+  const [resetPagamentoOpen, setResetPagamentoOpen] = useState(false)
+  const [resetPagamentoDept, setResetPagamentoDept] = useState<string>("")
+
+  // Optimistic local employee list for instant pagamento updates
+  const [localEmployees, setLocalEmployees] = useState<Employee[]>(employees)
+  const [updatingPagamentoId, setUpdatingPagamentoId] = useState<string | null>(null)
+
+  useEffect(() => {
+    setLocalEmployees(employees)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employees])
 
   // Extrato state
   const [extratoEmployee, setExtratoEmployee] = useState<Employee | null>(null)
@@ -293,14 +310,14 @@ export function FuncionariosClient({
 
   // ── Filtering ────────────────────────────────────────────────────────────────
 
-  const filteredEmployees = employees.filter((emp) => {
+  const filteredEmployees = localEmployees.filter((emp) => {
     const s = filterSearch.toLowerCase().trim()
     const matchesSearch = !s || 
       emp.name.toLowerCase().includes(s) || 
       (emp.cpf && emp.cpf.includes(s))
     
     const matchesDept = filterDept === "all" || emp.departmentId === filterDept
-    const matchesPagamento = filterPagamento === "all" || (emp.pagamento && emp.pagamento.toLowerCase() === filterPagamento)
+    const matchesPagamento = filterPagamento === "all" || normalizePag(emp.pagamento) === filterPagamento
     const matchesStatus = filterStatus === "all" || emp.status === filterStatus
 
     return matchesSearch && matchesDept && matchesPagamento && matchesStatus
@@ -339,7 +356,7 @@ export function FuncionariosClient({
       email: emp.email ?? "",
       phone: emp.phone ?? "",
       status: emp.status,
-      pagamento: emp.pagamento || "pendente",
+      pagamento: normalizePag(emp.pagamento),
       bankName: emp.bankName ?? "",
       bankAgency: emp.bankAgency ?? "",
       bankAccount: emp.bankAccount ?? "",
@@ -369,12 +386,38 @@ export function FuncionariosClient({
         pixKey: form.pixKey.trim().toUpperCase(),
       }
       if (editing) {
+        // Optimistic update
+        const updated = {
+          ...editing,
+          ...data,
+          ...bankData,
+          status: form.status,
+          pagamento: form.pagamento,
+          department: departments.find(d => d.id === form.departmentId) || editing.department,
+        }
+        setLocalEmployees(prev => prev.map(e => e.id === editing.id ? updated as any : e))
+        
         await updateEmployee(editing.id, { ...data, ...bankData, status: form.status, pagamento: form.pagamento })
       } else {
+        // Optimistic add (with temp ID)
+        const tempId = "temp-" + Date.now()
+        const newItem = {
+          id: tempId,
+          ...data,
+          ...bankData,
+          status: "ACTIVE", // Default for new
+          pagamento: form.pagamento || "pendente",
+          department: departments.find(d => d.id === form.departmentId),
+        }
+        setLocalEmployees(prev => [newItem as any, ...prev])
+        
         await createEmployee({ ...data, ...bankData, pagamento: form.pagamento })
       }
       setOpen(false)
       router.refresh()
+    } catch (err: any) {
+      console.error("[SUBMIT_ERROR]", err)
+      alert("Erro ao salvar: " + (err.message || "Erro desconhecido"))
     } finally {
       setLoading(false)
     }
@@ -382,22 +425,85 @@ export function FuncionariosClient({
 
   async function handleDelete() {
     if (!deleteId) return
+    const idToDelete = deleteId
     setLoading(true)
-    try { await deleteEmployee(deleteId) } finally {
+    // Optimistic delete
+    setLocalEmployees(prev => prev.filter(e => e.id !== idToDelete))
+    try {
+      await deleteEmployee(idToDelete)
+    } catch (err: any) {
+      // Rollback if error
+      alert("Erro ao excluir: " + err.message)
+      router.refresh()
+    } finally {
       setDeleteId(null); setLoading(false)
+      router.refresh()
     }
   }
 
   async function handleBulkDelete() {
     if (selectedIds.size === 0) return
+    const ids = Array.from(selectedIds)
     setLoading(true)
+    // Optimistic delete
+    setLocalEmployees(prev => prev.filter(e => !selectedIds.has(e.id)))
     try {
-      await deleteEmployeesBatch(Array.from(selectedIds))
+      await deleteEmployeesBatch(ids)
       setSelectedIds(new Set()); setBulkDeleteOpen(false)
-    } finally { setLoading(false) }
+    } catch (err: any) {
+      alert("Erro ao excluir em massa: " + err.message)
+      router.refresh()
+    } finally {
+      setLoading(false)
+      router.refresh()
+    }
+  }
+
+  async function handleResetPagamento() {
+    if (!resetPagamentoDept) return
+    const deptId = resetPagamentoDept
+    setLoading(true)
+    // Optimistic update for all in dept
+    setLocalEmployees(prev => prev.map(e => e.departmentId === deptId ? { ...e, pagamento: "pendente" } : e))
+    try {
+      await resetDepartmentPaymentStatus(deptId)
+      setResetPagamentoOpen(false)
+    } catch (err: any) {
+      alert("Erro ao resetar: " + err.message)
+      router.refresh()
+    } finally {
+      setLoading(false)
+      router.refresh()
+    }
   }
 
   function set(k: string, v: string) { setForm((f) => ({ ...f, [k]: v })) }
+
+  async function handleQuickPagamento(empId: string, novoPagamento: string) {
+    setUpdatingPagamentoId(empId)
+    setLocalEmployees(prev => prev.map(e => e.id === empId ? { ...e, pagamento: novoPagamento } : e))
+    try {
+      await updateEmployeePaymentStatus(empId, novoPagamento)
+      router.refresh()
+    } catch (err: any) {
+      setLocalEmployees(prev => prev.map(e => e.id === empId ? { ...e, pagamento: employees.find(o => o.id === empId)?.pagamento ?? "pendente" } : e))
+      alert("Erro ao atualizar situação de pagamento: " + err.message)
+    } finally {
+      setUpdatingPagamentoId(null)
+    }
+  }
+
+  async function handleStatusToggle(empId: string, currentStatus: string) {
+    const nextStatus = currentStatus === "ACTIVE" ? "INACTIVE" : "ACTIVE"
+    setLocalEmployees(prev => prev.map(e => e.id === empId ? { ...e, status: nextStatus } : e))
+    try {
+      await updateEmployeeStatus(empId, nextStatus)
+      router.refresh()
+    } catch (err: any) {
+      setLocalEmployees(prev => prev.map(e => e.id === empId ? { ...e, status: currentStatus } : e))
+      alert("Erro ao atualizar status: " + err.message)
+    }
+  }
 
   // ── Export PDF ────────────────────────────────────────────────────────────────
 
@@ -442,7 +548,7 @@ ${rows.map((emp, i) => `<tr>
   <td>${fmtPhone(emp.phone)}</td>
   <td>${fmtBRL(Number(emp.salary))}</td>
   <td><span class="badge ${emp.status}">${statusMap[emp.status as keyof typeof statusMap]?.label ?? emp.status}</span></td>
-  <td><span class="badge ${emp.pagamento}">${pagamentoMap[emp.pagamento]?.label ?? emp.pagamento}</span></td>
+  <td><span class="badge ${normalizePag(emp.pagamento)}">${pagamentoMap[normalizePag(emp.pagamento)]?.label ?? emp.pagamento}</span></td>
 </tr>`).join("")}
 </tbody></table>
 </body></html>`)
@@ -463,7 +569,7 @@ ${rows.map((emp, i) => `<tr>
       "Salário": Number(emp.salary),
       "Data Admissão": fmtDate(emp.hireDate),
       "Status": statusMap[emp.status as keyof typeof statusMap]?.label ?? emp.status,
-      "Pagamento": pagamentoMap[emp.pagamento]?.label ?? emp.pagamento,
+      "Pagamento": pagamentoMap[normalizePag(emp.pagamento)]?.label ?? emp.pagamento,
       "Banco": emp.bankName ?? "",
       "Agência": emp.bankAgency ?? "",
       "Conta": emp.bankAccount ?? "",
@@ -610,6 +716,13 @@ ${rows.map((emp, i) => `<tr>
                 <FileUp className="h-4 w-4 text-slate-500" />
                 <span>Importar</span>
               </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => { setResetPagamentoDept(filterDept !== "all" ? filterDept : ""); setResetPagamentoOpen(true) }}
+                className="gap-2 cursor-pointer text-amber-700 focus:text-amber-700"
+              >
+                <CheckCircle2 className="h-4 w-4 text-amber-500" />
+                <span>Resetar Pagamento</span>
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
 
@@ -722,8 +835,9 @@ ${rows.map((emp, i) => `<tr>
                       {/* Status & Selection Indicator */}
                       <div className="flex items-center gap-2 pt-0.5 shrink-0">
                         <button
-                          title={s.label}
-                          className={`h-4 w-4 rounded-full border-2 border-white shadow-md cursor-default ${
+                          onClick={() => handleStatusToggle(emp.id, emp.status)}
+                          title={emp.status === "ACTIVE" ? "Desativar Funcionário" : "Ativar Funcionário"}
+                          className={`h-5 w-5 rounded-full border-2 border-white shadow-md transition-transform active:scale-90 ${
                             emp.status === 'ACTIVE' ? 'bg-emerald-500' : 
                             emp.status === 'INACTIVE' ? 'bg-red-500' : 
                             'bg-amber-500'
@@ -756,9 +870,29 @@ ${rows.map((emp, i) => `<tr>
 
                       <div className="flex items-center justify-between">
                         <span className="text-slate-500 text-xs uppercase tracking-wider font-bold">Pagamento</span>
-                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-black uppercase ${pagamentoMap[emp.pagamento?.toLowerCase()]?.cls ?? pagamentoMap.pendente.cls}`}>
-                          {pagamentoMap[emp.pagamento?.toLowerCase()]?.label ?? emp.pagamento}
-                        </span>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              disabled={updatingPagamentoId === emp.id}
+                              title="Clique para alterar situação de pagamento"
+                              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-black uppercase cursor-pointer hover:opacity-80 transition-opacity disabled:opacity-50 ${pagamentoMap[normalizePag(emp.pagamento)]?.cls ?? pagamentoMap.pendente.cls}`}
+                            >
+                              {updatingPagamentoId === emp.id ? "..." : (pagamentoMap[normalizePag(emp.pagamento)]?.label ?? emp.pagamento)}
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-40">
+                            {Object.entries(pagamentoMap).map(([value, { label, cls }]) => (
+                              <DropdownMenuItem
+                                key={value}
+                                disabled={normalizePag(emp.pagamento) === value}
+                                onClick={() => handleQuickPagamento(emp.id, value)}
+                                className="gap-2 cursor-pointer"
+                              >
+                                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-black uppercase ${cls}`}>{label}</span>
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
 
                       {emp.lastReceiptAmount != null && (
@@ -1375,6 +1509,44 @@ ${rows.map((emp, i) => `<tr>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={handleBulkDelete} disabled={loading} className="bg-red-600 hover:bg-red-700">
               Excluir todos
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ── Reset Pagamento Confirm ── */}
+      <AlertDialog open={resetPagamentoOpen} onOpenChange={setResetPagamentoOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Resetar pagamento da unidade?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                {!resetPagamentoDept ? (
+                  <div className="space-y-2">
+                    <p className="text-sm text-slate-600">Selecione a unidade que terá o pagamento resetado para <strong>PENDENTE</strong>:</p>
+                    <Select value={resetPagamentoDept} onValueChange={setResetPagamentoDept}>
+                      <SelectTrigger className="h-10">
+                        <SelectValue placeholder="Selecionar unidade..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {departments.map(d => (
+                          <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-600">
+                    Todos os funcionários de <strong>{departments.find(d => d.id === resetPagamentoDept)?.name}</strong> terão o status de pagamento alterado para <strong>PENDENTE</strong>. Esta ação não pode ser desfeita.
+                  </p>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleResetPagamento} disabled={loading || !resetPagamentoDept} className="bg-amber-600 hover:bg-amber-700">
+              Confirmar
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

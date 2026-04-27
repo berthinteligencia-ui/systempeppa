@@ -44,7 +44,7 @@ export async function createEmployee(data: {
     id: randomUUID(),
     ...data,
     cpf: cleanCpf,
-    pagamento: data.pagamento || "pendente",
+    pagamento: (data.pagamento || "pendente").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""),
     hireDate: new Date(data.hireDate).toISOString(),
     departmentId: data.departmentId || null,
     companyId,
@@ -76,15 +76,44 @@ export async function updateEmployee(
   const companyId = await getCompanyId()
   const supabase = getSupabaseAdmin()
   const cleanCpf = data.cpf ? data.cpf.replace(/\D/g, "") : null
-  check(await supabase.from("Employee").update({
+  const updatedRows = check(await supabase.from("Employee").update({
     ...data,
     cpf: cleanCpf,
-    pagamento: data.pagamento,
-    hireDate: new Date(data.hireDate).toISOString(),
+    pagamento: data.pagamento ? data.pagamento.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : undefined,
+    hireDate: data.hireDate ? new Date(data.hireDate).toISOString() : undefined,
     departmentId: data.departmentId || null,
     updatedAt: new Date().toISOString(),
-  }).eq("id", id).eq("companyId", companyId))
+  }).eq("id", id).eq("companyId", companyId).select())
+
+  if (!updatedRows || updatedRows.length === 0) {
+    // Debugging: Check if the employee exists but has a different companyId
+    const { data: checkEmp } = await supabase.from("Employee").select("id, companyId, name").eq("id", id).maybeSingle()
+    if (!checkEmp) {
+      throw new Error(`Funcionário ID ${id} não encontrado no banco de dados.`)
+    }
+    if (checkEmp.companyId !== companyId) {
+      throw new Error(`O funcionário ${checkEmp.name} (ID ${id}) pertence à empresa ${checkEmp.companyId}, mas você está tentando atualizá-lo como empresa ${companyId}.`)
+    }
+    throw new Error(`Nenhum registro encontrado para atualizar (ID: ${id}, CompanyID: ${companyId})`)
+  }
+
+  // Log activity
+  const session = await auth()
+  if (session?.user) {
+    const { logActivity } = await import("@/lib/logActivity")
+    await logActivity({
+      userId: session.user.id,
+      userName: session.user.name ?? "",
+      userEmail: session.user.email ?? "",
+      companyId,
+      action: "UPDATE_EMPLOYEE",
+      target: data.name,
+      details: { status: data.status, pagamento: data.pagamento }
+    })
+  }
+
   revalidatePath("/funcionarios")
+  revalidatePath("/folha-pagamento")
 }
 
 export async function deleteEmployee(id: string) {
@@ -102,27 +131,37 @@ export async function registerBatchFromPayroll(
   const companyId = await getCompanyId()
   const supabase = getSupabaseAdmin()
   const now = new Date().toISOString()
-  check(await supabase.from("Employee").upsert(
-    employees.map((e) => ({
-      id: randomUUID(),
-      name: e.nome,
-      cpf: e.cpf ? e.cpf.replace(/\D/g, "") : null,
-      phone: e.telefone || null,
-      position: e.cargo || "A definir",
-      salary: e.valor,
-      bankName: e.bankName || null,
-      bankAgency: e.bankAgency || null,
-      bankAccount: e.bankAccount || null,
-      pixKey: e.pixKey || null,
-      status: "ACTIVE", // Re-activate if already exists
-      hireDate: now,
-      companyId,
-      departmentId,
-      createdAt: now,
-      updatedAt: now,
-    })),
-    { onConflict: "cpf", ignoreDuplicates: false }
-  ))
+
+  // We use upsert with onConflict 'cpf' to update existing records
+  // We omit the 'id' if we want the DB to generate it or find it via 'cpf'
+  // However, Supabase's upsert with onConflict works best when we don't provide a random ID that would conflict
+  
+  const records = employees.map((e) => ({
+    name: e.nome.trim().toUpperCase(),
+    cpf: e.cpf ? e.cpf.replace(/\D/g, "") : null,
+    phone: e.telefone || null,
+    position: (e.cargo || "A DEFINIR").trim().toUpperCase(),
+    salary: e.valor,
+    bankName: e.bankName?.trim().toUpperCase() || null,
+    bankAgency: e.bankAgency?.trim() || null,
+    bankAccount: e.bankAccount?.trim() || null,
+    pixKey: e.pixKey?.trim().toUpperCase() || null,
+    status: "ACTIVE", 
+    companyId,
+    departmentId,
+    updatedAt: now,
+  }))
+
+  const { error } = await supabase.from("Employee").upsert(records, {
+    onConflict: "cpf",
+    ignoreDuplicates: false, // We want to UPDATE if it exists
+  })
+
+  if (error) {
+    console.error("[registerBatchFromPayroll] error:", error)
+    throw new Error("Falha ao registrar lote: " + error.message)
+  }
+
   revalidatePath("/funcionarios")
   revalidatePath("/folha-pagamento")
 }
@@ -263,6 +302,19 @@ export async function getEmployeeByCpf(cpf: string) {
   return data.find(e => (e.cpf?.replace(/\D/g, "") === cleanCpf)) || null
 }
 
+export async function resetDepartmentPaymentStatus(departmentId: string) {
+  const companyId = await getCompanyId()
+  const supabase = getSupabaseAdmin()
+  const now = new Date().toISOString()
+  check(await supabase.from("Employee")
+    .update({ pagamento: "pendente", updatedAt: now })
+    .eq("companyId", companyId)
+    .eq("departmentId", departmentId)
+  )
+  revalidatePath("/funcionarios")
+  return { success: true }
+}
+
 export async function resetMonthlyStatus() {
   const companyId = await getCompanyId()
   const supabase = getSupabaseAdmin()
@@ -270,13 +322,97 @@ export async function resetMonthlyStatus() {
   
   check(await supabase.from("Employee")
     .update({ 
-      status: "INACTIVE", 
-      pagamento: "pendente",
+      status: "INACTIVE",
       updatedAt: now 
     })
     .eq("companyId", companyId)
   )
   
+  return { success: true }
+}
+
+export async function checkAndRunMonthlyReset() {
+  const companyId = await getCompanyId()
+  const supabase = getSupabaseAdmin()
+  const now = new Date()
+  const currentMonth = now.getMonth() + 1
+  const currentYear = now.getFullYear()
+
+  // Only run on the 1st of the month
+  if (now.getDate() !== 1) return
+
+  const { data: settings } = await supabase
+    .from("Settings")
+    .select("lastResetMonth, lastResetYear")
+    .eq("companyId", companyId)
+    .maybeSingle()
+
+  if (settings?.lastResetMonth === currentMonth && settings?.lastResetYear === currentYear) {
+    return // Already run this month
+  }
+
+  // Run inactivation
+  await resetMonthlyStatus()
+
+  // Update settings
+  await supabase
+    .from("Settings")
+    .upsert({
+      companyId,
+      lastResetMonth: currentMonth,
+      lastResetYear: currentYear,
+      updatedAt: now.toISOString()
+    }, { onConflict: "companyId" })
+
+  revalidatePath("/funcionarios")
+}
+
+export async function updateEmployeeStatus(id: string, status: string) {
+  const companyId = await getCompanyId()
+  const supabase = getSupabaseAdmin()
+  
+  const { data: updatedRows, error } = await supabase
+    .from("Employee")
+    .update({ status, updatedAt: new Date().toISOString() })
+    .eq("id", id)
+    .eq("companyId", companyId)
+    .select()
+
+  if (error) throw new Error(error.message)
+  
+  if (!updatedRows || updatedRows.length === 0) {
+    throw new Error("Não foi possível atualizar o status.")
+  }
+
+  revalidatePath("/funcionarios")
+  revalidatePath("/folha-pagamento")
+  return { success: true }
+}
+
+export async function updateEmployeePaymentStatus(id: string, pagamento: string) {
+  const companyId = await getCompanyId()
+  const supabase = getSupabaseAdmin()
+  const normalized = pagamento.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  
+  const { data: updatedRows, error } = await supabase
+    .from("Employee")
+    .update({ pagamento: normalized, updatedAt: new Date().toISOString() })
+    .eq("id", id)
+    .eq("companyId", companyId)
+    .select()
+
+  if (error) throw new Error(error.message)
+  
+  if (!updatedRows || updatedRows.length === 0) {
+    // Debug info for the user
+    const { data: checkEmp } = await supabase.from("Employee").select("id, companyId").eq("id", id).maybeSingle()
+    if (!checkEmp) throw new Error("Funcionário não encontrado.")
+    if (checkEmp.companyId !== companyId) throw new Error("Este funcionário pertence a outra empresa.")
+    throw new Error("Não foi possível atualizar o registro.")
+  }
+
+  revalidatePath("/funcionarios")
+  revalidatePath("/folha-pagamento")
   return { success: true }
 }
 

@@ -71,17 +71,25 @@ export async function updateCompanySettings(data: {
     check(await supabase.from("Company").update(finalCompanyData).eq("id", companyId))
 
     if (settings) {
-        // Fetch existing settings to get the ID if it exists
         const { data: existing } = await supabase
             .from("Settings")
             .select("id")
             .eq("companyId", companyId)
             .single()
 
-        check(await supabase.from("Settings").upsert(
-            { ...settings, id: existing?.id || randomUUID(), companyId, updatedAt: new Date().toISOString() },
-            { onConflict: "companyId" }
-        ))
+        if (existing) {
+            check(await supabase.from("Settings").update({ 
+                ...settings, 
+                updatedAt: new Date().toISOString() 
+            }).eq("companyId", companyId))
+        } else {
+            check(await supabase.from("Settings").insert({
+                ...settings,
+                id: randomUUID(),
+                companyId,
+                updatedAt: new Date().toISOString()
+            }))
+        }
     }
 
     await logActivity({
@@ -146,6 +154,7 @@ export async function checkAndPerformMonthlyReset() {
                        settings.lastResetYear !== currentYear
 
     if (needsReset) {
+        console.log(`[AUTO-RESET] Triggered for company ${companyId}. Current: ${currentMonth}/${currentYear}, Last: ${settings.lastResetMonth}/${settings.lastResetYear}`)
         console.log(`[AUTO-RESET] Resetando empresa ${companyId} para o mês ${currentMonth}/${currentYear}`)
         
         // Executa o reset de funcionários

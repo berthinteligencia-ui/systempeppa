@@ -1245,7 +1245,7 @@ export function FolhaPagamentoClient({
                     </button>
                     <button 
                         onClick={async () => {
-                            if (!confirm("Isso irá desativar todos os funcionários e resetar o status de pagamento para 'pendente'. Deseja continuar?")) return
+                            if (!confirm("Isso irá DESATIVAR todos os funcionários e resetar o status de pagamento para 'pendente'. Eles serão reativados automaticamente ao lançar a nova folha. Deseja continuar?")) return
                             const res = await resetMonthlyStatus()
                             if (res.success) {
                                 alert("Sistema resetado para o novo mês.")

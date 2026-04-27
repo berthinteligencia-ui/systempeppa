@@ -298,15 +298,6 @@ export async function saveComprovantes(formData: FormData) {
         }
 
         savedCount++
-
-        // Atualiza status do funcionário se CNPJ bater
-        const rCnpj = r.cnpj_origem?.replace(/\D/g, "")
-        if (r.dbEmployeeId && rCnpj && companyCnpj && rCnpj === companyCnpj) {
-            console.log(`[SAVE_COMPROVANTE] Match CNPJ! Atualizando pagamento. ID: ${r.dbEmployeeId}`)
-            await supabase.from("Employee")
-                .update({ pagamento: "efetuado", updatedAt: new Date().toISOString() })
-                .eq("id", r.dbEmployeeId)
-        }
     }
 
     revalidatePath("/comprovante")

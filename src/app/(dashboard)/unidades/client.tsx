@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Plus, Pencil, Trash2, Building2, FileSpreadsheet, Search, Power } from "lucide-react"
+import { Plus, Pencil, Trash2, Building2, FileSpreadsheet, Search, Power, RotateCcw } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -14,12 +14,14 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { createDepartment, updateDepartment, deleteDepartment, toggleDepartmentStatus } from "@/lib/actions/departments"
+import { resetDepartmentPaymentStatus } from "@/lib/actions/employees"
 
 type Department = { id: string; name: string; cnpj?: string | null; active: boolean; _count: { employees: number } }
 
 export function UnidadesClient({ departments, userRole }: { departments: Department[]; userRole?: string }) {
   const [open, setOpen] = useState(false)
   const [deleteId, setDeleteId] = useState<string | null>(null)
+  const [resetDept, setResetDept] = useState<Department | null>(null)
   const [editing, setEditing] = useState<Department | null>(null)
   const [name, setName] = useState("")
   const [cnpj, setCnpj] = useState("")
@@ -72,6 +74,17 @@ export function UnidadesClient({ departments, userRole }: { departments: Departm
     setLoading(true)
     try {
       await toggleDepartmentStatus(dept.id, !dept.active)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleResetPagamento() {
+    if (!resetDept) return
+    setLoading(true)
+    try {
+      await resetDepartmentPaymentStatus(resetDept.id)
+      setResetDept(null)
     } finally {
       setLoading(false)
     }
@@ -154,6 +167,14 @@ export function UnidadesClient({ departments, userRole }: { departments: Departm
                         <FileSpreadsheet className="h-3.5 w-3.5" /> FECHAMENTOS
                       </Link>
                       <button
+                        onClick={() => setResetDept(dept)}
+                        disabled={loading}
+                        className="rounded p-1.5 text-amber-500 hover:bg-amber-50 transition-colors"
+                        title="Resetar pagamento para PENDENTE"
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                      </button>
+                      <button
                         onClick={() => handleToggle(dept)}
                         disabled={loading}
                         className={`rounded p-1.5 transition-colors ${
@@ -217,6 +238,24 @@ export function UnidadesClient({ departments, userRole }: { departments: Departm
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Reset Pagamento */}
+      <AlertDialog open={!!resetDept} onOpenChange={(v) => { if (!v) setResetDept(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Resetar pagamento da unidade?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Todos os {resetDept?._count.employees} funcionários de <strong>{resetDept?.name}</strong> terão o status de pagamento alterado para <strong>PENDENTE</strong>. Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleResetPagamento} disabled={loading} className="bg-amber-600 hover:bg-amber-700">
+              {loading ? "Aguarde..." : "Confirmar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
         <AlertDialogContent>

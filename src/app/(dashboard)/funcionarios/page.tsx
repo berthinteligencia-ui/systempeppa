@@ -1,11 +1,17 @@
 import { getSupabaseAdmin } from "@/lib/supabase-admin"
+
+export const dynamic = "force-dynamic"
 import { auth } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { FuncionariosClient } from "./client"
+import { checkAndRunMonthlyReset } from "@/lib/actions/employees"
 
 export default async function FuncionariosPage() {
   const session = await auth()
   if (!session?.user?.companyId) redirect("/login")
+
+  // Check for monthly reset logic (runs only on 1st of month)
+  await checkAndRunMonthlyReset()
 
   const supabase = getSupabaseAdmin()
   const companyId = session.user.companyId
