@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useRef, useCallback } from "react"
+import { useRouter } from "next/navigation"
 import {
   UserPlus, Pencil, Trash2, CheckCircle2, AlertCircle, Clock, Filter,
   CheckSquare, Square, Download, FileDown, FileUp, Loader2, X, FileSpreadsheet,
@@ -208,6 +209,7 @@ export function FuncionariosClient({
 }: { employees: Employee[]; departments: Department[]; userRole?: string }) {
   console.log("[DEBUG] FuncionariosClient userRole:", userRole)
   const isAllowedToDelete = userRole?.toUpperCase() === "ADMIN" || userRole?.toUpperCase() === "RH"
+  const router = useRouter()
 
   const [open, setOpen] = useState(false)
   const [deleteId, setDeleteId] = useState<string | null>(null)
@@ -372,6 +374,7 @@ export function FuncionariosClient({
         await createEmployee({ ...data, ...bankData, pagamento: form.pagamento })
       }
       setOpen(false)
+      router.refresh()
     } finally {
       setLoading(false)
     }
