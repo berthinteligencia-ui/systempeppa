@@ -63,7 +63,7 @@ const pagamentoMap: Record<string, { label: string; cls: string }> = {
   efetuado: { label: "EFETUADO", cls: "bg-emerald-600 text-white shadow-sm" },
   pago: { label: "PAGO", cls: "bg-emerald-100 text-emerald-700" },
   atrasado: { label: "ATRASADO", cls: "bg-red-100 text-red-700" },
-  lancado: { label: "LANÇADO", cls: "bg-blue-600 text-white shadow-sm" },
+  lancado: { label: "LANÇADO", cls: "bg-orange-500 text-white shadow-sm" },
 }
 
 const empty = {
@@ -420,7 +420,7 @@ export function FuncionariosClient({
   .efetuado { background:#059669; color:#ffffff; }
   .pago     { background:#d1fae5; color:#065f46; }
   .atrasado { background:#fee2e2; color:#991b1b; }
-  .lancado  { background:#2563eb; color:#ffffff; }
+  .lancado  { background:#f97316; color:#ffffff; }
   @media print { body { margin: 0; } }
 </style></head><body>
 <h1>Extrato de Funcionários</h1>
