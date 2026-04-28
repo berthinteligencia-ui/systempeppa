@@ -132,11 +132,17 @@ export async function registerBatchFromPayroll(
   const supabase = getSupabaseAdmin()
   const now = new Date().toISOString()
 
-  // We use upsert with onConflict 'cpf' to update existing records
-  // We omit the 'id' if we want the DB to generate it or find it via 'cpf'
-  // However, Supabase's upsert with onConflict works best when we don't provide a random ID that would conflict
-  
-  const records = employees.map((e) => ({
+  // De-duplicate by CPF to avoid conflict on the same upsert batch
+  const uniqueByCpf = Array.from(
+    employees.reduce((map, e) => {
+      const key = e.cpf ? e.cpf.replace(/\D/g, "") : `__no_cpf_${Math.random()}`
+      if (!map.has(key)) map.set(key, e)
+      return map
+    }, new Map<string, typeof employees[0]>()).values()
+  )
+
+  const records = uniqueByCpf.map((e) => ({
+    id: randomUUID(),           // Required: PostgreSQL has no auto-default for cuid()
     name: e.nome.trim().toUpperCase(),
     cpf: e.cpf ? e.cpf.replace(/\D/g, "") : null,
     phone: e.telefone || null,
@@ -146,15 +152,17 @@ export async function registerBatchFromPayroll(
     bankAgency: e.bankAgency?.trim() || null,
     bankAccount: e.bankAccount?.trim() || null,
     pixKey: e.pixKey?.trim().toUpperCase() || null,
-    status: "ACTIVE", 
+    status: "ACTIVE",
+    hireDate: now,
     companyId,
     departmentId,
+    createdAt: now,
     updatedAt: now,
   }))
 
   const { error } = await supabase.from("Employee").upsert(records, {
     onConflict: "cpf",
-    ignoreDuplicates: false, // We want to UPDATE if it exists
+    ignoreDuplicates: false,
   })
 
   if (error) {

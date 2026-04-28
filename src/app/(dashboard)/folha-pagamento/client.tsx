@@ -414,7 +414,7 @@ export function FolhaPagamentoClient({
         setRegistering(true)
         try {
             await registerBatchFromPayroll(toRegister.map(({ cpf, nome, valor, telefone, cargo, bankName, bankAgency, bankAccount, pix }) => ({
-                cpf, nome, valor, telefone, cargo, bankName, bankAgency, bankAccount, pix
+                cpf, nome, valor, telefone, cargo, bankName, bankAgency, bankAccount, pixKey: pix
             })), unidade)
             const fd = new FormData()
             fd.append("file", file!); fd.append("mes", mes); fd.append("ano", ano); fd.append("unidade", unidade)
@@ -423,6 +423,8 @@ export function FolhaPagamentoClient({
             if (res.ok) setResult(data)
             setMissing([])
             setPhase("result")
+        } catch (err: any) {
+            alert("Erro ao cadastrar funcionários: " + (err.message || "Erro desconhecido"));
         } finally { setRegistering(false) }
     }
 
