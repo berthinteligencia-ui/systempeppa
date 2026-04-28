@@ -813,7 +813,6 @@ ${rows.map((emp, i) => `<tr>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {filteredEmployees.map((emp) => {
               const s = statusMap[emp.status as keyof typeof statusMap] ?? statusMap.ACTIVE
-              const Icon = s.icon
               const isSelected = selectedIds.has(emp.id)
               
               return (
@@ -894,14 +893,6 @@ ${rows.map((emp, i) => `<tr>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
-
-                      {emp.lastReceiptAmount != null && (
-                        <div className="flex items-center justify-between pt-1">
-                          <span className="text-slate-500 text-[10px] uppercase tracking-wider font-bold">Valor Comprovante</span>
-                          <span className="font-bold text-emerald-600 text-xs">{fmtBRL(emp.lastReceiptAmount)}</span>
-                        </div>
-                      )}
-
 
                       <div className="flex items-center justify-between pt-2 border-t border-slate-50">
                         <span className="text-slate-500 text-xs uppercase tracking-wider font-bold">Salário</span>
