@@ -416,12 +416,35 @@ export function FolhaPagamentoClient({
             await registerBatchFromPayroll(toRegister.map(({ cpf, nome, valor, telefone, cargo, bankName, bankAgency, bankAccount, pix }) => ({
                 cpf, nome, valor, telefone, cargo, bankName, bankAgency, bankAccount, pixKey: pix
             })), unidade)
-            const fd = new FormData()
-            fd.append("file", file!); fd.append("mes", mes); fd.append("ano", ano); fd.append("unidade", unidade)
-            const res = await fetch("/api/folha/analyze", { method: "POST", body: fd })
-            const data = await res.json()
-            if (res.ok) setResult(data)
-            setMissing([])
+            
+            // Atualiza estado local sem re-analisar o arquivo, assim as exclusões anteriores são preservadas
+            if (result) {
+                const registeredCpfs = new Set(toRegister.map(r => r.cpf));
+                const newFound = [...result.found];
+                const newMissing = result.missing.filter(m => !registeredCpfs.has(m.cpf));
+                
+                toRegister.forEach(m => {
+                    newFound.push({
+                        ...m,
+                        id: `registered-${Date.now()}-${Math.random()}`,
+                        dbName: m.nome,
+                        dbSalary: m.valor,
+                        status: "found",
+                        isMissingBank: m.isMissingBank,
+                        nameMismatch: false,
+                        valueMismatch: false,
+                        isInvalidCpf: false
+                    } as FoundRow & { status: "found" });
+                });
+
+                setResult({
+                    ...result,
+                    found: newFound,
+                    missing: newMissing
+                });
+                setMissing(newMissing);
+            }
+            alert(`${toRegister.length} funcionários cadastrados com sucesso!`);
             setPhase("result")
         } catch (err: any) {
             alert("Erro ao cadastrar funcionários: " + (err.message || "Erro desconhecido"));
@@ -690,15 +713,9 @@ export function FolhaPagamentoClient({
         setMissing(newMissing)
     }
 
-    async function handleSaveClosing() {
+    async function executeSaveClosing(missingOverride?: MissingRow[]) {
         if (!result) return
-        
-        // Bloqueia se houver qualquer divergência pendente (incluindo extras sem CPF)
-        if (totalDiversions > 0) {
-            alert(`Não é possível fechar a unidade. Existem ${totalDiversions} pendências (funcionários não encontrados, sem CPF, CPFs inválidos ou duplicados) que precisam ser resolvidas ou excluídas antes de finalizar.`)
-            return
-        }
-
+        const missingToSave = missingOverride ?? missing
         setIsSaving(true)
         try {
             await savePayrollAnalysis({
@@ -706,15 +723,14 @@ export function FolhaPagamentoClient({
                 month: parseInt(mes), year: parseInt(ano),
                 departmentId: unidade || null,
                 total: result.total,
-                analysisData: { 
-                    found: result.found, 
-                    missing, 
-                    extras: result.extras || [], 
+                analysisData: {
+                    found: result.found,
+                    missing: missingToSave,
+                    extras: result.extras || [],
                     excluded: excludedRows,
-                    sheetSummary: result.sheetSummary 
+                    sheetSummary: result.sheetSummary
                 }
             })
-            // Avança o fluxo da NF vinculada para ANALISADA
             if (selectedNfId) {
                 await updateNotaFiscalStatus(selectedNfId, "ANALISADA")
             }
@@ -722,6 +738,15 @@ export function FolhaPagamentoClient({
         } catch (err: any) {
             alert("Erro ao salvar: " + err.message)
         } finally { setIsSaving(false) }
+    }
+
+    async function handleSaveClosing() {
+        if (!result) return
+        if (totalDiversions > 0) {
+            alert(`Não é possível fechar a unidade. Existem ${totalDiversions} pendências (funcionários não encontrados, sem CPF, CPFs inválidos ou duplicados) que precisam ser resolvidas ou excluídas antes de finalizar.`)
+            return
+        }
+        await executeSaveClosing()
     }
 
     async function handleReconcileName(row: FoundRow) {
@@ -1243,13 +1268,21 @@ export function FolhaPagamentoClient({
     const totalDiversions = useMemo(() => {
         if (!result) return 0
         return errorGroups.unregistered.length +
-               errorGroups.invalidCpfs.length + 
-               errorGroups.nameMismatches.length + 
+               errorGroups.invalidCpfs.length +
+               errorGroups.nameMismatches.length +
                errorGroups.valueMismatches.length +
-               errorGroups.duplicates.length + 
+               errorGroups.duplicates.length +
                errorGroups.extras.length +
                errorGroups.missingBanks.length
     }, [errorGroups])
+
+    // Erros que bloqueiam o cadastro: CPF inválido, duplicatas e extras sem CPF
+    // Name/value mismatches e missing banks são avisos — não bloqueiam
+    const nonRegistrationBlockingErrors = useMemo(() =>
+        errorGroups.invalidCpfs.length +
+        errorGroups.duplicates.length +
+        errorGroups.extras.length,
+    [errorGroups])
 
     const [activeErrorTab, setActiveErrorTab] = useState<"unregistered" | "invalidCpfs" | "duplicates" | "nameMismatches" | "extras" | "missingBanks">("unregistered")
 
@@ -1545,16 +1578,6 @@ export function FolhaPagamentoClient({
                                     </button>
                                 )}
 
-                                {/* Fechar Unidade */}
-                                <button
-                                    onClick={handleSaveClosing}
-                                    disabled={isSaving}
-                                    className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-40 shadow-sm shadow-blue-500/10 transition-colors"
-                                >
-                                    {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
-                                    Fechar Unidade
-                                </button>
-
                                 <div className="w-px h-5 bg-slate-200" />
 
                                 <SelectField
@@ -1699,67 +1722,113 @@ export function FolhaPagamentoClient({
                         </div>
                     )}
 
-                    {/* Missing CPFs and Inconsistencies banner */}
-                    {showResults && totalDiversions > 0 && (
-                        <div className="mx-5 mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
-                            <div className="flex items-center gap-2 mb-3">
-                                <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
-                                <div>
-                                    <h3 className="text-sm font-bold text-amber-900">Atenção Necessária ({totalDiversions})</h3>
-                                    <p className="text-[11px] text-amber-700">
-                                        {missing.length > 0 && `${missing.length} não cadastrados. `}
-                                        {invalidCpfCount > 0 && `${invalidCpfCount} CPF(s) inválidos. `}
-                                        {nameMismatchCount > 0 && `${nameMismatchCount} divergências de nome. `}
-                                        {valMismatchCount > 0 && `${valMismatchCount} divergências de valor. `}
-                                        {duplicateCpfCount > 0 && `${duplicateCpfCount} CPF(s) dup. mesma aba. `}
-                                        {crossAbaDuplicateCount > 0 && `${crossAbaDuplicateCount} CPF(s) dup. entre abas. `}
-                                        {missingBankCount > 0 && `${missingBankCount} com dados bancários ausentes.`}
-                                    </p>
+                    {/* ─── Smart status banner ─── */}
+                    {showResults && result && (() => {
+                        // ESTADO 1 — Sem nenhuma pendência → pronto para fechar
+                        if (totalDiversions === 0) return (
+                            <div className="mx-5 mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 animate-in fade-in duration-300">
+                                <div className="flex items-center justify-between gap-3 flex-wrap">
+                                    <div className="flex items-center gap-2.5">
+                                        <div className="size-8 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
+                                            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-bold text-emerald-900">Análise concluída — nenhuma pendência</p>
+                                            <p className="text-[11px] text-emerald-700">{result.found.length} colaboradores conferidos e prontos. A folha pode ser fechada agora.</p>
+                                        </div>
+                                    </div>
+                                    <button onClick={handleSaveClosing} disabled={isSaving}
+                                        className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-60 transition-colors shadow-sm shrink-0">
+                                        {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                                        Fechar Folha
+                                    </button>
                                 </div>
                             </div>
-                            <div className="flex gap-2">
-                                {missing.length > 0 && (
+                        )
+
+                        // ESTADO 2 — Só faltam cadastros (erros bloqueantes zerados) → cadastrar e fechar
+                        if (nonRegistrationBlockingErrors === 0 && missing.length > 0) return (
+                            <div className="mx-5 mt-4 rounded-xl border border-blue-200 bg-blue-50 p-4 animate-in fade-in duration-300">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <div className="size-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
+                                        <UserPlus className="h-4 w-4 text-blue-600" />
+                                    </div>
+                                    <div>
+                                        <p className="text-sm font-bold text-blue-900">Erros conferidos — {missing.length} funcionário{missing.length !== 1 ? "s" : ""} aguardando cadastro</p>
+                                        <p className="text-[11px] text-blue-700">
+                                            Todos os erros foram revisados. Cadastre os colaboradores abaixo e feche a folha em um único passo.
+                                            {(nameMismatchCount > 0 || valMismatchCount > 0 || missingBankCount > 0) && (
+                                                <span className="ml-1 opacity-70">
+                                                    ({[nameMismatchCount > 0 && `${nameMismatchCount} div. nome`, valMismatchCount > 0 && `${valMismatchCount} div. valor`, missingBankCount > 0 && `${missingBankCount} s/ banco`].filter(Boolean).join(", ")} — apenas avisos)
+                                                </span>
+                                            )}
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="flex gap-2 flex-wrap">
                                     <button onClick={handleRegisterAll} disabled={registering}
-                                        className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60 transition-colors">
-                                        {registering ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
-                                        Cadastrar Todos
+                                        className="flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-60 transition-colors">
+                                        <UserPlus className="h-3.5 w-3.5" /> Cadastrar Selecionados
                                     </button>
-                                )}
-                                {missingBankCount > 0 && (
-                                    <button 
-                                        onClick={() => {
-                                            setActiveErrorTab("missingBanks")
-                                            setIsErrorCorrectionOpen(true)
-                                        }}
-                                        className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 transition-colors"
-                                    >
-                                        <Building2 className="h-3.5 w-3.5" /> Corrigir Bancos
-                                    </button>
-                                )}
-                                <button onClick={() => {
-                                        // Abre na aba com mais erros
-                                        const tabs = [
-                                            { id: "unregistered", count: missing.length },
-                                            { id: "invalidCpfs", count: invalidCpfCount },
-                                            { id: "duplicates", count: errorGroups.duplicates.length },
-                                            { id: "nameMismatches", count: nameMismatchCount },
-                                            { id: "extras", count: result?.extras?.length || 0 },
-                                            { id: "missingBanks", count: missingBankCount },
-                                        ] as const
-                                        const first = tabs.find(t => t.count > 0)
-                                        if (first) setActiveErrorTab(first.id)
-                                        setIsErrorCorrectionOpen(true)
-                                    }} disabled={registering}
-                                    className="flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-100/50 px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-200 disabled:opacity-60 transition-colors">
-                                    <Edit className="h-3.5 w-3.5" /> Corrigir Erros
-                                </button>
-                                <button onClick={handleIgnoreAndContinue} disabled={registering}
-                                    className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-60 transition-colors">
-                                    <Users className="h-3.5 w-3.5" /> Ignorar e continuar
-                                </button>
+                                    {missingBankCount > 0 && (
+                                        <button onClick={() => { setActiveErrorTab("missingBanks"); setIsErrorCorrectionOpen(true) }}
+                                            className="flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50 transition-colors">
+                                            <Building2 className="h-3.5 w-3.5" /> Corrigir Bancos
+                                        </button>
+                                    )}
+                                </div>
                             </div>
-                        </div>
-                    )}
+                        )
+
+                        // ESTADO 3 — Erros bloqueantes presentes → aviso âmbar
+                        return (
+                            <div className="mx-5 mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
+                                    <div>
+                                        <h3 className="text-sm font-bold text-amber-900">Atenção Necessária ({totalDiversions})</h3>
+                                        <p className="text-[11px] text-amber-700">
+                                            {missing.length > 0 && `${missing.length} não cadastrados. `}
+                                            {invalidCpfCount > 0 && `${invalidCpfCount} CPF(s) inválidos. `}
+                                            {nameMismatchCount > 0 && `${nameMismatchCount} divergências de nome. `}
+                                            {valMismatchCount > 0 && `${valMismatchCount} divergências de valor. `}
+                                            {duplicateCpfCount > 0 && `${duplicateCpfCount} CPF(s) dup. mesma aba. `}
+                                            {crossAbaDuplicateCount > 0 && `${crossAbaDuplicateCount} CPF(s) dup. entre abas. `}
+                                            {missingBankCount > 0 && `${missingBankCount} com dados bancários ausentes.`}
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="flex gap-2 flex-wrap">
+                                    <button onClick={() => {
+                                            const tabs = [
+                                                { id: "unregistered", count: missing.length },
+                                                { id: "invalidCpfs", count: invalidCpfCount },
+                                                { id: "duplicates", count: errorGroups.duplicates.length },
+                                                { id: "nameMismatches", count: nameMismatchCount },
+                                                { id: "extras", count: result?.extras?.length || 0 },
+                                                { id: "missingBanks", count: missingBankCount },
+                                            ] as const
+                                            const first = tabs.find(t => t.count > 0)
+                                            if (first) setActiveErrorTab(first.id)
+                                            setIsErrorCorrectionOpen(true)
+                                        }} disabled={registering}
+                                        className="flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-100/50 px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-200 disabled:opacity-60 transition-colors">
+                                        <Edit className="h-3.5 w-3.5" /> Corrigir Erros
+                                    </button>
+                                    {missingBankCount > 0 && (
+                                        <button onClick={() => { setActiveErrorTab("missingBanks"); setIsErrorCorrectionOpen(true) }}
+                                            className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 transition-colors">
+                                            <Building2 className="h-3.5 w-3.5" /> Corrigir Bancos
+                                        </button>
+                                    )}
+                                    <button onClick={handleIgnoreAndContinue} disabled={registering}
+                                        className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-60 transition-colors">
+                                        <Users className="h-3.5 w-3.5" /> Ignorar e continuar
+                                    </button>
+                                </div>
+                            </div>
+                        )
+                    })()}
 
 
                     {/* Results table */}
