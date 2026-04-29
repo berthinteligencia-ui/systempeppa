@@ -527,6 +527,53 @@ export function FolhaPagamentoClient({
         setMissing(newMissing)
     }
 
+    function doExcludeRowsBatch(rows: AnalyzedRow[], observacao: string) {
+        if (!result || rows.length === 0) return
+
+        const newResult = { ...result }
+        let newMissing = [...missing]
+
+        for (const row of rows) {
+            if (row.status === "found") {
+                const idx = newResult.found.findIndex(r => r.cpf === row.cpf && r.sheet === row.sheet)
+                if (idx !== -1) newResult.found.splice(idx, 1)
+            } else if (row.status === "missing") {
+                const idx = newResult.missing.findIndex(r => r.cpf === row.cpf && r.sheet === row.sheet)
+                if (idx !== -1) newResult.missing.splice(idx, 1)
+                const midx = newMissing.findIndex(r => r.cpf === row.cpf && r.sheet === row.sheet)
+                if (midx !== -1) newMissing.splice(midx, 1)
+            } else if (row.status === "extra") {
+                const idx = (newResult.extras || []).findIndex(r => r.cpfCnpj === row.cpf && r.sheet === row.sheet)
+                if (idx !== -1) newResult.extras.splice(idx, 1)
+            }
+        }
+
+        newResult.total = rows.reduce((acc, r) => acc - r.valor, newResult.total)
+
+        const sheetMap = new Map<string, { count: number; total: number }>()
+        const all = [
+            ...newResult.found,
+            ...newMissing,
+            ...(newResult.extras || []).map(r => ({ ...r, cpf: r.cpfCnpj }))
+        ]
+        all.forEach(r => {
+            const entry = sheetMap.get(r.sheet) || { count: 0, total: 0 }
+            entry.count++; entry.total += r.valor
+            sheetMap.set(r.sheet, entry)
+        })
+        newResult.sheetSummary = Array.from(sheetMap.entries()).map(([sheet, data]) => ({ sheet, ...data }))
+
+        setResult(newResult)
+        setMissing(newMissing)
+        setExcludedRows(prev => {
+            const existing = new Set(prev.map(r => `${r.cpf}::${r.sheet}::${r.nome}`))
+            const toAdd = rows
+                .filter(r => !existing.has(`${r.cpf}::${r.sheet}::${r.nome}`))
+                .map(r => ({ ...r, status: "excluded" as any, observacao }))
+            return [...prev, ...toAdd]
+        })
+    }
+
     function handleDeleteRow(row: AnalyzedRow) {
         if (!result) return
         const autoReason = detectExcludeReason(row)
@@ -2475,7 +2522,7 @@ export function FolhaPagamentoClient({
                                                     onClick={() => {
                                                         const rows = errorGroups[activeErrorTab].filter(r => selectedErrorRows.includes(`${r.sheet}::${r.cpf || (r as any).nome}`))
                                                         if (confirm(`Remover ${rows.length} registros selecionados?`)) {
-                                                            rows.forEach(r => doExcludeRow(r as any, "Remoção em lote via ferramenta de correção"))
+                                                            doExcludeRowsBatch(rows as any[], "Remoção em lote via ferramenta de correção")
                                                             setSelectedErrorRows([])
                                                         }
                                                     }}

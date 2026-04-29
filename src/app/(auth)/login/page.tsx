@@ -3,12 +3,22 @@
 import { useState } from "react"
 import { signIn } from "next-auth/react"
 import { useRouter } from "next/navigation"
-import { Landmark, ArrowRight, Loader2 } from "lucide-react"
+import { Landmark, ArrowRight, Loader2, Eye, EyeOff, Mail, ArrowLeft, CheckCircle2 } from "lucide-react"
+import { requestPasswordReset } from "@/lib/actions/passwordReset"
+
+type View = "login" | "forgot" | "forgot-success"
 
 export default function LoginPage() {
   const router = useRouter()
+  const [view, setView] = useState<View>("login")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
+
+  // Forgot password state
+  const [resetEmail, setResetEmail] = useState("")
+  const [resetError, setResetError] = useState("")
+  const [resetLoading, setResetLoading] = useState(false)
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -42,11 +52,29 @@ export default function LoginPage() {
     router.push("/dashboard")
   }
 
+  async function handleResetRequest(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    setResetLoading(true)
+    setResetError("")
+
+    try {
+      const result = await requestPasswordReset(resetEmail)
+      if (result.success) {
+        setView("forgot-success")
+      } else {
+        setResetError(result.message)
+      }
+    } catch {
+      setResetError("Erro ao processar solicitação. Tente novamente.")
+    } finally {
+      setResetLoading(false)
+    }
+  }
+
   return (
     <div className="min-h-screen w-full flex flex-col lg:flex-row bg-[#f6f6f8] font-sans selection:bg-blue-100 selection:text-blue-900 overflow-hidden">
-      {/* Visual side - Left (approx. 62% on large screens) */}
+      {/* Visual side */}
       <div className="hidden lg:flex lg:w-[62%] bg-[#1e3b8a] relative overflow-hidden items-center justify-center p-12 xl:p-24">
-        {/* Modern abstract background elements */}
         <div className="absolute top-0 right-0 w-full h-full opacity-10 pointer-events-none">
           <div className="absolute -top-24 -right-24 w-[500px] h-[500px] rounded-full border-[60px] border-white animate-pulse duration-7000"></div>
           <div className="absolute bottom-12 left-12 w-80 h-80 rounded-full border-[30px] border-white animate-pulse duration-10000 delay-1000"></div>
@@ -73,37 +101,22 @@ export default function LoginPage() {
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-6 border-t border-white/10">
-            <div className="flex items-start gap-3">
-              <div className="size-5 rounded-full bg-blue-400/20 flex items-center justify-center mt-0.5">
-                <div className="size-2 rounded-full bg-blue-300"></div>
+            {["Visão Consolidada", "Inteligência de Folha", "Segurança de Dados", "Suporte Prioritário"].map(item => (
+              <div key={item} className="flex items-start gap-3">
+                <div className="size-5 rounded-full bg-blue-400/20 flex items-center justify-center mt-0.5">
+                  <div className="size-2 rounded-full bg-blue-300"></div>
+                </div>
+                <p className="text-sm font-bold text-blue-100">{item}</p>
               </div>
-              <p className="text-sm font-bold text-blue-100">Visão Consolidada</p>
-            </div>
-            <div className="flex items-start gap-3">
-              <div className="size-5 rounded-full bg-blue-400/20 flex items-center justify-center mt-0.5">
-                <div className="size-2 rounded-full bg-blue-300"></div>
-              </div>
-              <p className="text-sm font-bold text-blue-100">Inteligência de Folha</p>
-            </div>
-            <div className="flex items-start gap-3">
-              <div className="size-5 rounded-full bg-blue-400/20 flex items-center justify-center mt-0.5">
-                <div className="size-2 rounded-full bg-blue-300"></div>
-              </div>
-              <p className="text-sm font-bold text-blue-100">Segurança de Dados</p>
-            </div>
-            <div className="flex items-start gap-3">
-              <div className="size-5 rounded-full bg-blue-400/20 flex items-center justify-center mt-0.5">
-                <div className="size-2 rounded-full bg-blue-300"></div>
-              </div>
-              <p className="text-sm font-bold text-blue-100">Suporte Prioritário</p>
-            </div>
+            ))}
           </div>
         </div>
       </div>
 
-      {/* Form side - Right (approx. 38% on large screens) */}
+      {/* Form side */}
       <div className="flex-1 flex items-center justify-center p-8 sm:p-12 lg:p-16 xl:p-24 bg-white relative">
         <div className="w-full max-w-[400px] space-y-10 animate-in fade-in slide-in-from-right-8 duration-700 delay-150">
+          {/* Mobile logo */}
           <div className="lg:hidden flex items-center gap-3 mb-12 justify-center">
             <div className="size-12 bg-[#1e3b8a] rounded-xl flex items-center justify-center shadow-2xl shadow-blue-900/20">
               <Landmark className="h-6 w-6 text-white" />
@@ -114,69 +127,186 @@ export default function LoginPage() {
             </div>
           </div>
 
-          <div className="space-y-3 text-center lg:text-left">
-            <h3 className="text-4xl font-black tracking-tight text-slate-900">Acesse agora</h3>
-            <p className="text-slate-500 font-medium">Insira suas credenciais corporativas com segurança.</p>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-7">
-            <div className="space-y-2">
-              <label htmlFor="email" className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 ml-1">
-                E-mail Corporativo
-              </label>
-              <div className="relative group">
-                <input
-                  id="email"
-                  name="email"
-                  type="email"
-                  required
-                  placeholder="exemplo@pepacorp.com"
-                  className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold transition-all focus:ring-4 focus:ring-blue-600/10 focus:border-blue-600 focus:bg-white outline-none group-hover:border-slate-300"
-                />
+          {/* LOGIN VIEW */}
+          {view === "login" && (
+            <>
+              <div className="space-y-3 text-center lg:text-left">
+                <h3 className="text-4xl font-black tracking-tight text-slate-900">Acesse agora</h3>
+                <p className="text-slate-500 font-medium">Insira suas credenciais corporativas com segurança.</p>
               </div>
+
+              <form onSubmit={handleSubmit} className="space-y-7">
+                <div className="space-y-2">
+                  <label htmlFor="email" className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 ml-1">
+                    E-mail Corporativo
+                  </label>
+                  <div className="relative group">
+                    <input
+                      id="email"
+                      name="email"
+                      type="email"
+                      required
+                      placeholder="exemplo@pepacorp.com"
+                      className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold transition-all focus:ring-4 focus:ring-blue-600/10 focus:border-blue-600 focus:bg-white outline-none group-hover:border-slate-300"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between px-1">
+                    <label htmlFor="password" className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">
+                      Senha de Sistema
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => { setView("forgot"); setResetError(""); setResetEmail("") }}
+                      className="text-xs font-bold text-[#1e3b8a] hover:text-blue-700 transition-colors"
+                    >
+                      Esqueci a senha
+                    </button>
+                  </div>
+                  <div className="relative group">
+                    <input
+                      id="password"
+                      name="password"
+                      type={showPassword ? "text" : "password"}
+                      required
+                      placeholder="••••••••"
+                      className="w-full px-5 py-4 pr-14 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold transition-all focus:ring-4 focus:ring-blue-600/10 focus:border-blue-600 focus:bg-white outline-none group-hover:border-slate-300"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(v => !v)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors p-1"
+                      aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                    >
+                      {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                    </button>
+                  </div>
+                </div>
+
+                {error && (
+                  <div className="bg-red-50 border border-red-100 p-4 rounded-2xl flex items-center gap-3 animate-in fade-in zoom-in-95 duration-200">
+                    <div className="size-2.5 rounded-full bg-red-500 shadow-sm animate-pulse shrink-0"></div>
+                    <p className="text-xs font-bold text-red-700 leading-tight">{error}</p>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full bg-[#1e3b8a] hover:bg-[#162a63] text-white py-5 px-6 rounded-2xl font-black uppercase tracking-[0.15em] text-xs transition-all shadow-2xl shadow-blue-900/20 active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-3 group overflow-hidden"
+                >
+                  {loading ? (
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                  ) : (
+                    <>
+                      Entrar na Plataforma
+                      <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1.5" />
+                    </>
+                  )}
+                </button>
+              </form>
+            </>
+          )}
+
+          {/* FORGOT PASSWORD VIEW */}
+          {view === "forgot" && (
+            <>
+              <div className="space-y-3 text-center lg:text-left">
+                <div className="inline-flex items-center justify-center size-14 rounded-2xl bg-blue-50 mb-2">
+                  <Mail className="h-7 w-7 text-[#1e3b8a]" />
+                </div>
+                <h3 className="text-4xl font-black tracking-tight text-slate-900">Recuperar acesso</h3>
+                <p className="text-slate-500 font-medium leading-relaxed">
+                  Informe seu e-mail corporativo. Enviaremos uma senha temporária para você acessar a plataforma.
+                </p>
+              </div>
+
+              <form onSubmit={handleResetRequest} className="space-y-7">
+                <div className="space-y-2">
+                  <label htmlFor="reset-email" className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400 ml-1">
+                    E-mail Corporativo
+                  </label>
+                  <div className="relative group">
+                    <input
+                      id="reset-email"
+                      type="email"
+                      required
+                      value={resetEmail}
+                      onChange={e => setResetEmail(e.target.value)}
+                      placeholder="exemplo@pepacorp.com"
+                      className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold transition-all focus:ring-4 focus:ring-blue-600/10 focus:border-blue-600 focus:bg-white outline-none group-hover:border-slate-300"
+                    />
+                  </div>
+                </div>
+
+                {resetError && (
+                  <div className="bg-red-50 border border-red-100 p-4 rounded-2xl flex items-center gap-3 animate-in fade-in zoom-in-95 duration-200">
+                    <div className="size-2.5 rounded-full bg-red-500 shadow-sm animate-pulse shrink-0"></div>
+                    <p className="text-xs font-bold text-red-700 leading-tight">{resetError}</p>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={resetLoading}
+                  className="w-full bg-[#1e3b8a] hover:bg-[#162a63] text-white py-5 px-6 rounded-2xl font-black uppercase tracking-[0.15em] text-xs transition-all shadow-2xl shadow-blue-900/20 active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-3 group"
+                >
+                  {resetLoading ? (
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                  ) : (
+                    <>
+                      Enviar senha temporária
+                      <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1.5" />
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setView("login")}
+                  className="w-full flex items-center justify-center gap-2 text-sm font-bold text-slate-500 hover:text-slate-700 transition-colors py-2"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Voltar ao login
+                </button>
+              </form>
+            </>
+          )}
+
+          {/* FORGOT SUCCESS VIEW */}
+          {view === "forgot-success" && (
+            <div className="space-y-8 text-center lg:text-left">
+              <div>
+                <div className="inline-flex items-center justify-center size-16 rounded-2xl bg-emerald-50 mb-4">
+                  <CheckCircle2 className="h-8 w-8 text-emerald-500" />
+                </div>
+                <h3 className="text-4xl font-black tracking-tight text-slate-900 mb-3">E-mail enviado!</h3>
+                <p className="text-slate-500 font-medium leading-relaxed">
+                  Se o endereço <strong className="text-slate-700">{resetEmail}</strong> estiver cadastrado, você receberá uma senha temporária em instantes.
+                </p>
+              </div>
+
+              <div className="bg-blue-50 border border-blue-100 rounded-2xl p-5 space-y-2">
+                <p className="text-xs font-black uppercase tracking-widest text-blue-600">Próximos passos</p>
+                <ol className="space-y-1.5 text-sm text-slate-600 font-medium">
+                  <li>1. Verifique sua caixa de entrada (e spam)</li>
+                  <li>2. Acesse com a senha temporária recebida</li>
+                  <li>3. Crie uma nova senha permanente</li>
+                </ol>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setView("login")}
+                className="w-full bg-[#1e3b8a] hover:bg-[#162a63] text-white py-5 px-6 rounded-2xl font-black uppercase tracking-[0.15em] text-xs transition-all shadow-2xl shadow-blue-900/20 active:scale-[0.98] flex items-center justify-center gap-3 group"
+              >
+                Ir para o login
+                <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1.5" />
+              </button>
             </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center justify-between px-1">
-                <label htmlFor="password" className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">
-                  Senha de Sistema
-                </label>
-                <a href="#" className="text-xs font-bold text-[#1e3b8a] hover:text-blue-700 transition-colors">Esqueci a senha</a>
-              </div>
-              <div className="relative group">
-                <input
-                  id="password"
-                  name="password"
-                  type="password"
-                  required
-                  placeholder="••••••••"
-                  className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold transition-all focus:ring-4 focus:ring-blue-600/10 focus:border-blue-600 focus:bg-white outline-none group-hover:border-slate-300"
-                />
-              </div>
-            </div>
-
-            {error && (
-              <div className="bg-red-50 border border-red-100 p-4 rounded-2xl flex items-center gap-3 animate-in fade-in zoom-in-95 duration-200">
-                <div className="size-2.5 rounded-full bg-red-500 shadow-sm animate-pulse"></div>
-                <p className="text-xs font-bold text-red-700 leading-tight">{error}</p>
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-[#1e3b8a] hover:bg-[#162a63] text-white py-5 px-6 rounded-2xl font-black uppercase tracking-[0.15em] text-xs transition-all shadow-2xl shadow-blue-900/20 active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-3 group overflow-hidden"
-            >
-              {loading ? (
-                <Loader2 className="h-6 w-6 animate-spin" />
-              ) : (
-                <>
-                  Entrar na Plataforma
-                  <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1.5" />
-                </>
-              )}
-            </button>
-          </form>
+          )}
 
           <footer className="pt-12 flex flex-col items-center lg:items-start border-t border-slate-100">
             <div className="flex items-center gap-2 mb-4 opacity-40 grayscale hover:grayscale-0 transition-all cursor-default">
