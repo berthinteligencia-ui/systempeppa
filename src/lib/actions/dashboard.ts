@@ -40,11 +40,7 @@ export async function getDashboardData(month?: number, year?: number) {
         _count: { employees: (activeEmps ?? []).filter(e => e.departmentId === d.id).length }
     }))
 
-    const totalCost = (currentAnalyses ?? []).reduce((acc, curr) => acc + Number(curr.total), 0)
     const prevTotalCost = (prevAnalyses ?? []).reduce((acc, curr) => acc + Number(curr.total), 0)
-
-    const unitClosings = (currentAnalyses ?? []).length
-    const totalUnits = depts.length
 
     const total = totalEmployees ?? 0
     const efetuados = efetivadosCount ?? 0
@@ -52,10 +48,6 @@ export async function getDashboardData(month?: number, year?: number) {
     const pendingPaymentsCount = total - efetuados
     // Progresso financeiro: % de funcionários com pagamento efetuado
     const closingProgress = total > 0 ? Math.round((efetuados / total) * 100) : 0
-
-    const variation = prevTotalCost > 0
-        ? ((totalCost - prevTotalCost) / prevTotalCost) * 100
-        : 0
 
     const unitList = depts.map(dept => {
         const analysis = (currentAnalyses ?? []).find(a => a.departmentId === dept.id)
@@ -69,6 +61,15 @@ export async function getDashboardData(month?: number, year?: number) {
             cost: analysis ? Number(analysis.total) : 0
         }
     })
+
+    // Sum only the cost of units that have a registered fechamento (avoids counting duplicate or orphan PayrollAnalysis records)
+    const totalCost = unitList.reduce((acc, u) => acc + u.cost, 0)
+    const unitClosings = unitList.filter(u => u.status === "FECHADO").length
+    const totalUnits = depts.length
+
+    const variation = prevTotalCost > 0
+        ? ((totalCost - prevTotalCost) / prevTotalCost) * 100
+        : 0
 
     const alerts = unitList
         .filter(u => u.status === "PENDENTE")
