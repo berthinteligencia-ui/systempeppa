@@ -24,14 +24,15 @@ export async function getDashboardData(month?: number, year?: number) {
         { data: currentAnalyses },
         { data: prevAnalyses },
         { count: totalEmployees },
-        { count: pendingPaymentsCount },
+        { count: efetivadosCount },
     ] = await Promise.all([
         supabase.from("Department").select("*").eq("companyId", companyId),
         supabase.from("Employee").select("departmentId").eq("companyId", companyId).eq("status", "ACTIVE"),
         supabase.from("PayrollAnalysis").select("*").eq("companyId", companyId).eq("month", currentMonth).eq("year", currentYear),
         supabase.from("PayrollAnalysis").select("*").eq("companyId", companyId).eq("month", prevMonth).eq("year", prevYear),
         supabase.from("Employee").select("*", { count: "exact", head: true }).eq("companyId", companyId).eq("status", "ACTIVE"),
-        supabase.from("Employee").select("*", { count: "exact", head: true }).eq("companyId", companyId).eq("status", "ACTIVE").eq("pagamento", "pendente"),
+        // Apenas "efetuado" é considerado pago — qualquer outro status (pendente, lancado, pago, atrasado) é pendente
+        supabase.from("Employee").select("*", { count: "exact", head: true }).eq("companyId", companyId).eq("status", "ACTIVE").eq("pagamento", "efetuado"),
     ])
 
     const depts = (departments ?? []).map(d => ({
@@ -44,7 +45,13 @@ export async function getDashboardData(month?: number, year?: number) {
 
     const unitClosings = (currentAnalyses ?? []).length
     const totalUnits = depts.length
-    const closingProgress = totalUnits > 0 ? Math.round((unitClosings / totalUnits) * 100) : 0
+
+    const total = totalEmployees ?? 0
+    const efetuados = efetivadosCount ?? 0
+    // Pendentes = todos ativos que NÃO têm pagamento "efetuado"
+    const pendingPaymentsCount = total - efetuados
+    // Progresso financeiro: % de funcionários com pagamento efetuado
+    const closingProgress = total > 0 ? Math.round((efetuados / total) * 100) : 0
 
     const variation = prevTotalCost > 0
         ? ((totalCost - prevTotalCost) / prevTotalCost) * 100
@@ -95,7 +102,7 @@ export async function getDashboardData(month?: number, year?: number) {
             totalUnits,
             closingProgress,
             variation,
-            pendingPaymentsCount: pendingPaymentsCount ?? 0,
+            pendingPaymentsCount,
         },
         unitList,
         alerts,
