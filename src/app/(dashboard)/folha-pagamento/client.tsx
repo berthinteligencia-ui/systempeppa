@@ -1585,6 +1585,7 @@ export function FolhaPagamentoClient({
                                     value={viewFilter}
                                     onChange={setViewFilter}
                                     options={[
+                                        { value: "RESUMO", label: "Resumo" },
                                         { value: "GERAL", label: "Geral" },
                                         { value: "EXCLUIDOS", label: "Excluídos" },
                                         { value: "BANCO", label: "Banco (Todos)" },
@@ -1831,8 +1832,85 @@ export function FolhaPagamentoClient({
                     })()}
 
 
+                    {/* ─── RESUMO view ─── */}
+                    {showResults && result && viewFilter === "RESUMO" && (() => {
+                        const totalFolha = result.total
+                        const totalExcluido = excludedRows.reduce((acc, r) => acc + r.valor, 0)
+                        const totalGeral = totalFolha + totalExcluido
+                        return (
+                            <div className="p-5 space-y-5 animate-in fade-in duration-200">
+                                {/* Totalizadores */}
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                                        <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 mb-1">Folha Fechada</p>
+                                        <p className="text-2xl font-black text-emerald-800">{fmtBRL(totalFolha)}</p>
+                                        <p className="text-[11px] text-emerald-600 mt-1">{result.found.length + missing.length} colaborador{result.found.length + missing.length !== 1 ? "es" : ""}</p>
+                                    </div>
+                                    <div className="rounded-xl border border-red-200 bg-red-50 p-4">
+                                        <p className="text-[10px] font-black uppercase tracking-widest text-red-500 mb-1">Total Excluído</p>
+                                        <p className="text-2xl font-black text-red-700">{fmtBRL(totalExcluido)}</p>
+                                        <p className="text-[11px] text-red-500 mt-1">{excludedRows.length} registro{excludedRows.length !== 1 ? "s" : ""} removido{excludedRows.length !== 1 ? "s" : ""}</p>
+                                    </div>
+                                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Total Geral (bruto)</p>
+                                        <p className="text-2xl font-black text-slate-800">{fmtBRL(totalGeral)}</p>
+                                        <p className="text-[11px] text-slate-400 mt-1">Folha + excluídos</p>
+                                    </div>
+                                </div>
+
+                                {/* Lista de excluídos */}
+                                {excludedRows.length > 0 ? (
+                                    <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+                                        <div className="flex items-center justify-between px-5 py-3 bg-slate-50 border-b border-slate-100">
+                                            <p className="text-[11px] font-black uppercase tracking-widest text-slate-500">Registros Excluídos</p>
+                                            <span className="text-[10px] font-bold text-slate-400">{excludedRows.length} itens</span>
+                                        </div>
+                                        <table className="w-full text-sm">
+                                            <thead>
+                                                <tr className="text-left text-[10px] font-semibold uppercase tracking-wide text-slate-400 border-b border-slate-100">
+                                                    <th className="px-5 py-2.5">Nome</th>
+                                                    <th className="px-4 py-2.5">CPF</th>
+                                                    <th className="px-4 py-2.5">Motivo</th>
+                                                    <th className="px-4 py-2.5 text-right">Valor</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100">
+                                                {excludedRows.map((r, i) => (
+                                                    <tr key={i} className="hover:bg-slate-50 transition-colors">
+                                                        <td className="px-5 py-2.5">
+                                                            <p className="font-semibold text-slate-800 text-xs">{r.nome}</p>
+                                                            <p className="text-[10px] text-slate-400 font-mono">{r.sheet}</p>
+                                                        </td>
+                                                        <td className="px-4 py-2.5 font-mono text-[11px] text-slate-500">{fmtCpf(r.cpf)}</td>
+                                                        <td className="px-4 py-2.5 max-w-[220px]">
+                                                            <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded px-2 py-0.5 block truncate">
+                                                                {r.observacao || "—"}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-4 py-2.5 text-right font-bold text-red-600 text-xs">{fmtBRL(r.valor)}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                            <tfoot>
+                                                <tr className="border-t-2 border-slate-200 bg-slate-50">
+                                                    <td colSpan={3} className="px-5 py-3 text-xs font-black uppercase tracking-wider text-slate-600">Total Excluído</td>
+                                                    <td className="px-4 py-3 text-right font-black text-red-700 text-sm">{fmtBRL(totalExcluido)}</td>
+                                                </tr>
+                                            </tfoot>
+                                        </table>
+                                    </div>
+                                ) : (
+                                    <div className="rounded-xl border border-slate-200 bg-white p-8 text-center">
+                                        <CheckCircle2 className="h-8 w-8 text-emerald-400 mx-auto mb-2 opacity-50" />
+                                        <p className="text-sm font-semibold text-slate-500">Nenhum registro foi excluído nesta análise.</p>
+                                    </div>
+                                )}
+                            </div>
+                        )
+                    })()}
+
                     {/* Results table */}
-                    {showResults && result && (
+                    {showResults && result && viewFilter !== "RESUMO" && (
                         <>
                             <div className="overflow-x-auto flex-1">
                                 <table className="w-full text-sm">
