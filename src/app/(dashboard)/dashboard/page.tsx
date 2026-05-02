@@ -110,7 +110,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       {/* KPI Cards */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {kpis.map((kpi) => {
-          const isMainKpi = kpi.title === "CUSTO TOTAL EMPRESA"
+          const isMainKpi = false
           return (
             <div 
               key={kpi.title} 
