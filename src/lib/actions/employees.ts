@@ -5,6 +5,7 @@ import { getSupabaseAdmin, check } from "@/lib/supabase-admin"
 import { auth } from "@/lib/auth"
 
 import { randomUUID } from "crypto"
+import { toTitleCase } from "@/lib/utils/departments"
 
 async function getCompanyId() {
   const session = await auth()
@@ -43,6 +44,7 @@ export async function createEmployee(data: {
   check(await supabase.from("Employee").insert({
     id: randomUUID(),
     ...data,
+    name: toTitleCase(data.name.trim()),
     cpf: cleanCpf,
     pagamento: (data.pagamento || "pendente").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""),
     hireDate: new Date(data.hireDate).toISOString(),
@@ -78,6 +80,7 @@ export async function updateEmployee(
   const cleanCpf = data.cpf ? data.cpf.replace(/\D/g, "") : null
   const updatedRows = check(await supabase.from("Employee").update({
     ...data,
+    name: toTitleCase(data.name.trim()),
     cpf: cleanCpf,
     pagamento: data.pagamento ? data.pagamento.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : undefined,
     hireDate: data.hireDate ? new Date(data.hireDate).toISOString() : undefined,
@@ -143,7 +146,7 @@ export async function registerBatchFromPayroll(
 
   const records = uniqueByCpf.map((e) => ({
     id: randomUUID(),           // Required: PostgreSQL has no auto-default for cuid()
-    name: e.nome.trim().toUpperCase(),
+    name: toTitleCase(e.nome.trim()),
     cpf: e.cpf ? e.cpf.replace(/\D/g, "") : null,
     phone: e.telefone || null,
     position: (e.cargo || "A DEFINIR").trim().toUpperCase(),
@@ -177,7 +180,7 @@ export async function registerBatchFromPayroll(
 export async function updateEmployeeName(id: string, name: string) {
   const companyId = await getCompanyId()
   const supabase = getSupabaseAdmin()
-  check(await supabase.from("Employee").update({ name, updatedAt: new Date().toISOString() })
+  check(await supabase.from("Employee").update({ name: toTitleCase(name.trim()), updatedAt: new Date().toISOString() })
     .eq("id", id).eq("companyId", companyId))
   revalidatePath("/funcionarios")
 }
@@ -236,7 +239,7 @@ export async function importEmployees(
     check(await supabase.from("Employee").upsert(
       uniqueByCpf.map((e) => ({
         id: randomUUID(),
-        name: e.name,
+        name: toTitleCase(e.name.trim()),
         cpf: e.cpf ? e.cpf.replace(/\D/g, "") : null,
         phone: e.phone || null,
         email: e.email || null,
@@ -339,6 +342,21 @@ export async function resetMonthlyStatus() {
   return { success: true }
 }
 
+export async function reactivateAllEmployees() {
+  const companyId = await getCompanyId()
+  const supabase = getSupabaseAdmin()
+  const now = new Date().toISOString()
+
+  check(await supabase.from("Employee")
+    .update({ status: "ACTIVE", updatedAt: now })
+    .eq("companyId", companyId)
+    .eq("status", "INACTIVE")
+  )
+
+  revalidatePath("/funcionarios")
+  return { success: true }
+}
+
 export async function checkAndRunMonthlyReset() {
   const companyId = await getCompanyId()
   const supabase = getSupabaseAdmin()
@@ -346,8 +364,8 @@ export async function checkAndRunMonthlyReset() {
   const currentMonth = now.getMonth() + 1
   const currentYear = now.getFullYear()
 
-  // Only run on the 1st of the month
-  if (now.getDate() !== 1) return
+  // Only run on the 20th of the month
+  if (now.getDate() !== 20) return
 
   const { data: settings } = await supabase
     .from("Settings")

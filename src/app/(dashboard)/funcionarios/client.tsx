@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useCallback, useEffect } from "react"
+import React, { useState, useRef, useCallback, useEffect, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import {
   UserPlus, Pencil, Trash2, CheckCircle2, AlertCircle, Clock, Filter,
@@ -30,13 +30,14 @@ import {
 import {
   createEmployee, updateEmployee, deleteEmployee,
   deleteEmployeesBatch, importEmployees, resetDepartmentPaymentStatus,
-  updateEmployeePaymentStatus, updateEmployeeStatus,
+  updateEmployeePaymentStatus, updateEmployeeStatus, reactivateAllEmployees,
 } from "@/lib/actions/employees"
 import { getEmployeeComprovantes, deleteComprovante, saveComprovanteManual } from "@/lib/actions/comprovante"
+import { buildTree, flattenTree, toTitleCase } from "@/lib/utils/departments"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Department = { id: string; name: string }
+type Department = { id: string; name: string; parentId?: string | null; children?: Department[] }
 type Employee = {
   id: string; name: string; cpf: string | null; email: string | null
   phone: string | null; position: string; salary: number | string
@@ -222,6 +223,7 @@ export function FuncionariosClient({
   const [editing, setEditing] = useState<Employee | null>(null)
   const [form, setForm] = useState(empty)
   const [loading, setLoading] = useState(false)
+  const [filterPrincipal, setFilterPrincipal] = useState("all")
   const [filterDept, setFilterDept] = useState("all")
   const [filterPagamento, setFilterPagamento] = useState("all")
   const [filterStatus, setFilterStatus] = useState("ACTIVE")
@@ -230,6 +232,7 @@ export function FuncionariosClient({
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
   const [resetPagamentoOpen, setResetPagamentoOpen] = useState(false)
   const [resetPagamentoDept, setResetPagamentoDept] = useState<string>("")
+  const [reativarTodosOpen, setReativarTodosOpen] = useState(false)
 
   // Optimistic local employee list for instant pagamento updates
   const [localEmployees, setLocalEmployees] = useState<Employee[]>(employees)
@@ -237,7 +240,6 @@ export function FuncionariosClient({
 
   useEffect(() => {
     setLocalEmployees(employees)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employees])
 
   // Extrato state
@@ -310,13 +312,43 @@ export function FuncionariosClient({
 
   // ── Filtering ────────────────────────────────────────────────────────────────
 
+  // Cascata: sub-unidade tem prioridade; se não, usa a principal; se nenhum, sem filtro
+  const deptFilterIds = useMemo(() => {
+    const root = filterDept !== "all" ? filterDept : filterPrincipal !== "all" ? filterPrincipal : null
+    if (!root) return null
+    const ids = new Set<string>([root])
+    const queue = [root]
+    while (queue.length) {
+      const current = queue.shift()!
+      departments.filter(d => d.parentId === current).forEach(d => {
+        ids.add(d.id)
+        queue.push(d.id)
+      })
+    }
+    return ids
+  }, [filterDept, filterPrincipal, departments])
+
+  // Sub-unidades disponíveis para o segundo select
+  const principalTree = useMemo(
+    () => buildTree(departments as any) as any[],
+    [departments]
+  )
+  const selectedPrincipalNode = useMemo(
+    () => principalTree.find((r: any) => r.id === filterPrincipal) ?? null,
+    [principalTree, filterPrincipal]
+  )
+  const subUnitList = useMemo(
+    () => flattenTree(selectedPrincipalNode?.children ?? [], 0) as any[],
+    [selectedPrincipalNode]
+  )
+
   const filteredEmployees = localEmployees.filter((emp) => {
     const s = filterSearch.toLowerCase().trim()
-    const matchesSearch = !s || 
-      emp.name.toLowerCase().includes(s) || 
+    const matchesSearch = !s ||
+      emp.name.toLowerCase().includes(s) ||
       (emp.cpf && emp.cpf.includes(s))
-    
-    const matchesDept = filterDept === "all" || emp.departmentId === filterDept
+
+    const matchesDept = !deptFilterIds || (emp.departmentId != null && deptFilterIds.has(emp.departmentId))
     const matchesPagamento = filterPagamento === "all" || normalizePag(emp.pagamento) === filterPagamento
     const matchesStatus = filterStatus === "all" || emp.status === filterStatus
 
@@ -370,7 +402,7 @@ export function FuncionariosClient({
     setLoading(true)
     try {
       const data = {
-        name: form.name.trim().toUpperCase(),
+        name: form.name.trim(),
         position: form.position.trim().toUpperCase() || "A DEFINIR",
         salary: parseFloat(form.salary),
         hireDate: form.hireDate || new Date().toISOString().split("T")[0],
@@ -533,7 +565,7 @@ export function FuncionariosClient({
   @media print { body { margin: 0; } }
 </style></head><body>
 <h1>Extrato de Funcionários</h1>
-<p class="sub">Gerado em ${new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" })} · ${rows.length} funcionário${rows.length !== 1 ? "s" : ""}${filterDept !== "all" ? ` · ${departments.find(d => d.id === filterDept)?.name ?? ""}` : ""}${filterPagamento !== "all" ? ` · Pagamento: ${pagamentoMap[filterPagamento]?.label ?? filterPagamento}` : ""}</p>
+<p class="sub">Gerado em ${new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" })} · ${rows.length} funcionário${rows.length !== 1 ? "s" : ""}${filterDept !== "all" ? ` · ${departments.find(d => d.id === filterDept)?.name ?? ""}` : filterPrincipal !== "all" ? ` · ${departments.find(d => d.id === filterPrincipal)?.name ?? ""} (todos)` : ""}${filterPagamento !== "all" ? ` · Pagamento: ${pagamentoMap[filterPagamento]?.label ?? filterPagamento}` : ""}</p>
 <table>
 <thead><tr>
   <th>#</th><th>Nome</th><th>CPF</th><th>Cargo</th><th>Unidade</th><th>Telefone</th><th>Salário</th><th>Status</th><th>Pagamento</th>
@@ -541,7 +573,7 @@ export function FuncionariosClient({
 <tbody>
 ${rows.map((emp, i) => `<tr>
   <td>${i + 1}</td>
-  <td>${emp.name}</td>
+  <td>${toTitleCase(emp.name)}</td>
   <td>${fmtCpf(emp.cpf)}</td>
   <td>${emp.position}</td>
   <td>${emp.department?.name ?? "—"}</td>
@@ -560,7 +592,7 @@ ${rows.map((emp, i) => `<tr>
 
   function handleExportExcel() {
     const data = filteredEmployees.map((emp) => ({
-      "Nome": emp.name,
+      "Nome": toTitleCase(emp.name),
       "CPF": fmtCpf(emp.cpf),
       "Cargo": emp.position,
       "Unidade": emp.department?.name ?? "",
@@ -717,11 +749,18 @@ ${rows.map((emp, i) => `<tr>
                 <span>Importar</span>
               </DropdownMenuItem>
               <DropdownMenuItem
-                onClick={() => { setResetPagamentoDept(filterDept !== "all" ? filterDept : ""); setResetPagamentoOpen(true) }}
+                onClick={() => { setResetPagamentoDept(filterDept !== "all" ? filterDept : filterPrincipal !== "all" ? filterPrincipal : ""); setResetPagamentoOpen(true) }}
                 className="gap-2 cursor-pointer text-amber-700 focus:text-amber-700"
               >
                 <CheckCircle2 className="h-4 w-4 text-amber-500" />
                 <span>Resetar Pagamento</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => setReativarTodosOpen(true)}
+                className="gap-2 cursor-pointer text-emerald-700 focus:text-emerald-700"
+              >
+                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                <span>Ativar Todos</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -757,17 +796,35 @@ ${rows.map((emp, i) => `<tr>
             />
           </div>
 
-          <Select value={filterDept} onValueChange={setFilterDept}>
-            <SelectTrigger className="bg-white min-w-[180px] h-10 border-slate-200">
-              <SelectValue placeholder="Unidade" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas as unidades</SelectItem>
-              {departments.map((d) => (
-                <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+          {/* Nível 1 — Unidade Principal */}
+          <select
+            value={filterPrincipal}
+            onChange={e => { setFilterPrincipal(e.target.value); setFilterDept("all") }}
+            className="h-10 min-w-[180px] rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+          >
+            <option value="all">Todas as unidades</option>
+            {principalTree.map((root: any) => (
+              <option key={root.id} value={root.id}>
+                {toTitleCase(root.name)}
+              </option>
+            ))}
+          </select>
+
+          {/* Nível 2 — Sub-unidade (aparece só quando uma principal está selecionada) */}
+          {filterPrincipal !== "all" && subUnitList.length > 0 && (
+            <select
+              value={filterDept}
+              onChange={e => setFilterDept(e.target.value)}
+              className="h-10 min-w-[180px] rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-900 shadow-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+            >
+              <option value="all">↳ Todas as sub-unidades</option>
+              {subUnitList.map((sub: any) => (
+                <option key={sub.id} value={sub.id}>
+                  {"   ".repeat(sub.depth)}↳ {toTitleCase(sub.name)}
+                </option>
               ))}
-            </SelectContent>
-          </Select>
+            </select>
+          )}
 
           <Select value={filterPagamento} onValueChange={setFilterPagamento}>
             <SelectTrigger className="bg-white min-w-[150px] h-10 border-slate-200">
@@ -826,7 +883,7 @@ ${rows.map((emp, i) => `<tr>
                     <div className="mb-4 flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <h3 className="font-bold text-slate-900 group-hover:text-blue-600 transition-colors line-clamp-1">
-                          {emp.name}
+                          {toTitleCase(emp.name)}
                         </h3>
                         <p className="text-xs font-medium text-slate-500">{fmtCpf(emp.cpf)}</p>
                       </div>
@@ -1236,8 +1293,8 @@ ${rows.map((emp, i) => `<tr>
                         <SelectValue placeholder="Selecione..." />
                       </SelectTrigger>
                       <SelectContent>
-                        {departments.map((d) => (
-                          <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                        {flattenTree(buildTree(departments as any)).map((d) => (
+                          <SelectItem key={d.id} value={d.id}>{"  ".repeat(d.depth)}{d.depth > 0 ? "↳ " : ""}{d.name}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -1538,6 +1595,39 @@ ${rows.map((emp, i) => `<tr>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={handleResetPagamento} disabled={loading || !resetPagamentoDept} className="bg-amber-600 hover:bg-amber-700">
               Confirmar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ── Ativar Todos Confirm ── */}
+      <AlertDialog open={reativarTodosOpen} onOpenChange={setReativarTodosOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Ativar todos os funcionários?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Todos os funcionários <strong>inativos</strong> serão alterados para <strong>Ativo</strong>. Funcionários afastados não serão afetados.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={loading}
+              className="bg-emerald-600 hover:bg-emerald-700"
+              onClick={async () => {
+                setLoading(true)
+                try {
+                  await reactivateAllEmployees()
+                  setReativarTodosOpen(false)
+                  router.refresh()
+                } catch (err: any) {
+                  alert("Erro: " + err.message)
+                } finally {
+                  setLoading(false)
+                }
+              }}
+            >
+              Ativar Todos
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

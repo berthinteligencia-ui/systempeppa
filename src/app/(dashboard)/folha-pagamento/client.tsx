@@ -28,10 +28,11 @@ import {
     savePayrollAnalysis, listPayrollAnalyses, getPayrollAnalysis, deletePayrollAnalysis
 } from "@/lib/actions/payroll"
 import { updateNotaFiscalStatus } from "@/lib/actions/nfs"
+import { buildTree, flattenTree, toTitleCase } from "@/lib/utils/departments"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type Department = { id: string; name: string }
+type Department = { id: string; name: string; parentId?: string | null }
 type NfRow = { id: string; numero: string; emitente: string; valor: number | string; dataEmissao: Date | string; status: string }
 
 type FoundRow = { id: string; nome: string; cpf: string; valor: number; sheet: string; telefone?: string; cargo?: string; bankName?: string; bankAgency?: string; bankAccount?: string; pix?: string; isInvalidCpf?: boolean; isMissingBank?: boolean; nameMismatch?: boolean; valueMismatch?: boolean; dbName?: string; dbSalary?: number; departmentId?: string }
@@ -163,6 +164,7 @@ export function FolhaPagamentoClient({
     const [mes, setMes] = useState("")
     const [ano, setAno] = useState(String(CURRENT_YEAR))
     const [unidade, setUnidade] = useState("")
+    const [unidadePrincipal, setUnidadePrincipal] = useState("")
     const [file, setFile] = useState<File | null>(null)
     const [isDragging, setIsDragging] = useState(false)
     const inputRef = useRef<HTMLInputElement>(null)
@@ -240,6 +242,20 @@ export function FolhaPagamentoClient({
             router.replace(`${pathname}${query}`, { scroll: false })
         }
     }, [searchParams])
+
+    // Cascata de unidades (mesmo padrão de funcionários)
+    const principalTree = useMemo(
+        () => buildTree(departments.map(d => ({ ...d, _count: { employees: 0 }, active: true }))) as any[],
+        [departments]
+    )
+    const selectedPrincipalNode = useMemo(
+        () => principalTree.find((r: any) => r.id === unidadePrincipal) ?? null,
+        [principalTree, unidadePrincipal]
+    )
+    const subUnitList = useMemo(
+        () => flattenTree(selectedPrincipalNode?.children ?? [], 0) as any[],
+        [selectedPrincipalNode]
+    )
 
     // Derived
     const mesLabel = MESES.find((m) => m.value === mes)?.label ?? ""
@@ -485,7 +501,7 @@ export function FolhaPagamentoClient({
     }
 
     function reset() {
-        setMes(""); setAno(String(CURRENT_YEAR)); setUnidade(""); setFile(null)
+        setMes(""); setAno(String(CURRENT_YEAR)); setUnidade(""); setUnidadePrincipal(""); setFile(null)
         setResult(null); setMissing([]); setPhase("form"); setError(null); setDebugInfo(null); setPhoneUpdates([]); setColumnMappingSheets(null); setColumnHints({})
         setManualForm({ nome: "", cpf: "", valor: "", sheet: "", id: "", telefone: "", cargo: "", bankName: "", bankAgency: "", bankAccount: "", pix: "" })
         setExtraForm({ nome: "", cpfCnpj: "", valor: "", sheet: "", cargo: "", pix: "" })
@@ -898,7 +914,10 @@ export function FolhaPagamentoClient({
             const data = await getPayrollAnalysis(id)
             if (data) {
                 const ad = data.data as any
-                setAnalysisId(data.id); setMes(String(data.month)); setAno(String(data.year)); setUnidade(data.departmentId ?? "")
+                const deptId = data.departmentId ?? ""
+                const dept = departments.find(d => d.id === deptId)
+                setAnalysisId(data.id); setMes(String(data.month)); setAno(String(data.year)); setUnidade(deptId)
+                setUnidadePrincipal(dept?.parentId ?? deptId)
                 setResult({ 
                     found: ad.found || [], 
                     missing: ad.missing || [], 
@@ -1343,9 +1362,39 @@ export function FolhaPagamentoClient({
 
             {/* Compact selectors */}
             <div className="flex flex-wrap items-center gap-3">
-                <SelectField label="" value={unidade} onChange={setUnidade}
-                    options={[{ value: "", label: "Selecionar unidade..." }, ...departments.map(d => ({ value: d.id, label: d.name }))]}
-                />
+                {/* Nível 1 — Unidade Principal */}
+                <select
+                    value={unidadePrincipal}
+                    onChange={e => {
+                        const val = e.target.value
+                        setUnidadePrincipal(val)
+                        setUnidade(val)
+                    }}
+                    className="h-10 min-w-[180px] rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                >
+                    <option value="">Selecionar unidade...</option>
+                    {principalTree.map((root: any) => (
+                        <option key={root.id} value={root.id}>
+                            {toTitleCase(root.name)}
+                        </option>
+                    ))}
+                </select>
+
+                {/* Nível 2 — Sub-unidade (aparece só quando uma principal está selecionada) */}
+                {unidadePrincipal && subUnitList.length > 0 && (
+                    <select
+                        value={unidade !== unidadePrincipal ? unidade : ""}
+                        onChange={e => setUnidade(e.target.value || unidadePrincipal)}
+                        className="h-10 min-w-[180px] rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-900 shadow-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+                    >
+                        <option value="">↳ (toda a unidade)</option>
+                        {subUnitList.map((sub: any) => (
+                            <option key={sub.id} value={sub.id}>
+                                {"   ".repeat(sub.depth)}↳ {toTitleCase(sub.name)}
+                            </option>
+                        ))}
+                    </select>
+                )}
                 <SelectField label="" value={mes} onChange={setMes}
                     options={[{ value: "", label: "Mês..." }, ...MESES.map(m => ({ value: m.value, label: m.label }))]}
                 />

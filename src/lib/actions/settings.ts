@@ -132,6 +132,9 @@ export async function checkAndPerformMonthlyReset() {
     const currentMonth = now.getMonth() + 1 // 1-12
     const currentYear = now.getFullYear()
 
+    // Only run on or after the 20th of the month
+    if (now.getDate() < 20) return
+
     // Se as configurações não existem, criamos e marcamos como resetado (para não resetar retroativamente na primeira vez)
     if (!settings) {
         const id = randomUUID()

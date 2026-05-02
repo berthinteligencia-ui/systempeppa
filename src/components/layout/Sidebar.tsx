@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useSession, signOut } from "next-auth/react"
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import {
   LayoutDashboard,
   Building2,
@@ -46,6 +46,46 @@ function initials(name: string) {
   return name.split(" ").slice(0, 2).map((n) => n[0]).join("").toUpperCase()
 }
 
+const NavItem = ({
+  href,
+  label,
+  icon: Icon,
+  isSubItem = false,
+  collapsed,
+  pathname,
+  onMouseEnter,
+  onMouseLeave,
+}: {
+  href: string
+  label: string
+  icon: React.ElementType
+  isSubItem?: boolean
+  collapsed: boolean
+  pathname: string
+  onMouseEnter: (e: React.MouseEvent, label: string) => void
+  onMouseLeave: () => void
+}) => (
+  <Link
+    href={href}
+    onMouseEnter={e => onMouseEnter(e, label)}
+    onMouseLeave={onMouseLeave}
+  >
+    <span
+      className={cn(
+        "flex items-center rounded-lg transition-all",
+        collapsed ? "justify-center gap-0 px-3 py-2.5" : isSubItem ? "gap-3 pl-10 pr-3 py-2" : "gap-3 px-3 py-2.5",
+        pathname === href
+          ? "bg-blue-600 text-white shadow-sm"
+          : "text-slate-300 hover:bg-white/10 hover:text-white",
+        !collapsed && isSubItem && "text-xs py-1.5"
+      )}
+    >
+      <Icon className={cn("shrink-0", isSubItem ? "h-3.5 w-3.5" : "h-4 w-4")} />
+      {!collapsed && <span>{label}</span>}
+    </span>
+  </Link>
+)
+
 export function Sidebar() {
   const pathname = usePathname()
   const { data: session } = useSession()
@@ -54,6 +94,15 @@ export function Sidebar() {
   const [configExpanded, setConfigExpanded] = useState(false)
   const sidebarRef = useRef<HTMLElement>(null)
   const [allowedFeatures, setAllowedFeatures] = useState<Record<string, boolean> | null>(null)
+  const [tooltip, setTooltip] = useState<{ label: string; top: number } | null>(null)
+
+  const showTooltip = useCallback((e: React.MouseEvent, label: string) => {
+    if (!collapsed) return
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    setTooltip({ label, top: rect.top + rect.height / 2 })
+  }, [collapsed])
+
+  const hideTooltip = useCallback(() => { setTooltip(null) }, [])
 
   useEffect(() => {
     if (!session?.user) return
@@ -91,34 +140,6 @@ export function Sidebar() {
     }
   }, [pathname])
 
-  const NavItem = ({
-    href,
-    label,
-    icon: Icon,
-    isSubItem = false,
-  }: {
-    href: string
-    label: string
-    icon: React.ElementType
-    isSubItem?: boolean
-  }) => (
-    <Link href={href} title={collapsed ? label : undefined}>
-      <span
-        className={cn(
-          "flex items-center rounded-lg transition-all",
-          collapsed ? "justify-center gap-0 px-3 py-2.5" : isSubItem ? "gap-3 pl-10 pr-3 py-2" : "gap-3 px-3 py-2.5",
-          pathname === href
-            ? "bg-blue-600 text-white shadow-sm"
-            : "text-slate-300 hover:bg-white/10 hover:text-white",
-          !collapsed && isSubItem && "text-xs py-1.5"
-        )}
-      >
-        <Icon className={cn("shrink-0", isSubItem ? "h-3.5 w-3.5" : "h-4 w-4")} />
-        {!collapsed && <span>{label}</span>}
-      </span>
-    </Link>
-  )
-
   return (
     <aside
       ref={sidebarRef}
@@ -146,7 +167,7 @@ export function Sidebar() {
       {/* Main nav */}
       <nav className="flex flex-1 flex-col gap-1 px-3 py-4 overflow-y-auto custom-scrollbar">
         {mainNav.filter(item => isAllowed(item.feature)).map((item) => (
-          <NavItem key={item.href} {...item} />
+          <NavItem key={item.href} {...item} collapsed={collapsed} pathname={pathname} onMouseEnter={showTooltip} onMouseLeave={hideTooltip} />
         ))}
 
         {/* Configurações Group */}
@@ -156,6 +177,8 @@ export function Sidebar() {
               if (collapsed) setCollapsed(false)
               setConfigExpanded(!configExpanded)
             }}
+            onMouseEnter={e => showTooltip(e, "Configurações")}
+            onMouseLeave={hideTooltip}
             className={cn(
               "flex w-full items-center rounded-lg px-3 py-2.5 text-sm font-medium transition-all group",
               collapsed ? "justify-center gap-0" : "gap-3 justify-between",
@@ -176,7 +199,7 @@ export function Sidebar() {
           {configExpanded && !collapsed && (
             <div className="mt-1 flex flex-col gap-1 animate-in fade-in slide-in-from-top-2 duration-200">
               {configNav.filter(item => isAllowed(item.feature)).map((item) => (
-                <NavItem key={item.href} {...item} isSubItem />
+                <NavItem key={item.href} {...item} isSubItem collapsed={collapsed} pathname={pathname} onMouseEnter={showTooltip} onMouseLeave={hideTooltip} />
               ))}
             </div>
           )}
@@ -233,6 +256,21 @@ export function Sidebar() {
           >
             <LogOut className="h-4 w-4" />
           </button>
+        </div>
+      )}
+
+      {/* Tooltip flutuante para itens recolhidos */}
+      {collapsed && tooltip && (
+        <div
+          className="pointer-events-none fixed z-[100]"
+          style={{ top: tooltip.top, left: 68, transform: "translateY(-50%)" }}
+        >
+          <div className="flex items-center">
+            <div className="h-0 w-0 border-y-[5px] border-r-[6px] border-y-transparent border-r-slate-700" />
+            <div className="rounded-md bg-slate-700 px-2.5 py-1.5 text-xs font-semibold text-white shadow-lg whitespace-nowrap">
+              {tooltip.label}
+            </div>
+          </div>
         </div>
       )}
     </aside>
