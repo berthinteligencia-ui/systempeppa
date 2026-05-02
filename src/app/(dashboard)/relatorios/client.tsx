@@ -1,18 +1,20 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { useRouter } from "next/navigation"
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
     PieChart, Pie, Cell, Legend, LineChart, Line
 } from "recharts"
 import {
     BarChart3, TrendingUp, PieChart as PieIcon, Calendar,
-    ArrowUpRight, ArrowDownRight, FileText, Download, Filter
+    ArrowUpRight, ArrowDownRight, FileText, Download, Filter, Trash2
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
     Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from "@/components/ui/select"
+import { deletePayrollAnalysis } from "@/lib/actions/payroll"
 
 // --- Types ---
 type Department = { id: string; name: string }
@@ -34,13 +36,30 @@ const MONTHS = [
 ]
 
 export function RelatoriosClient({
-    analyses,
+    analyses: initialAnalyses,
     departments
 }: {
     analyses: PayrollAnalysis[]
     departments: Department[]
 }) {
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString())
+    const [analyses, setAnalyses] = useState(initialAnalyses)
+    const [deletingId, setDeletingId] = useState<string | null>(null)
+    const router = useRouter()
+
+    async function handleDelete(id: string, label: string) {
+        if (!confirm(`Excluir o fechamento "${label}"? Esta ação não pode ser desfeita.`)) return
+        setDeletingId(id)
+        try {
+            await deletePayrollAnalysis(id)
+            setAnalyses(prev => prev.filter(a => a.id !== id))
+            router.refresh()
+        } catch (err: any) {
+            alert("Erro ao excluir: " + err.message)
+        } finally {
+            setDeletingId(null)
+        }
+    }
 
     // --- Data Transformation ---
 
@@ -266,16 +285,19 @@ export function RelatoriosClient({
                                 <th className="px-5 py-3">Unidade</th>
                                 <th className="px-5 py-3 text-right">Valor Total</th>
                                 <th className="px-5 py-3 text-right">Data</th>
+                                <th className="px-5 py-3 w-10" />
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50">
-                            {analyses.slice(0, 5).map((a) => (
-                                <tr key={a.id} className="hover:bg-slate-50 transition-colors">
+                            {analyses.map((a) => {
+                                const label = `${MONTHS[a.month - 1]}/${a.year} — ${a.department?.name || "Sem Unidade"}`
+                                return (
+                                <tr key={a.id} className={`hover:bg-slate-50 transition-colors ${!a.departmentId ? "bg-amber-50/50" : ""}`}>
                                     <td className="px-5 py-3.5 font-medium text-slate-700">
                                         {MONTHS[a.month - 1]} / {a.year}
                                     </td>
                                     <td className="px-5 py-3.5 text-slate-500">
-                                        {a.department?.name || "Sem Unidade"}
+                                        {a.department?.name || <span className="text-amber-600 font-semibold">Sem Unidade</span>}
                                     </td>
                                     <td className="px-5 py-3.5 text-right font-bold text-blue-600">
                                         {formatBRL(Number(a.total))}
@@ -283,8 +305,19 @@ export function RelatoriosClient({
                                     <td className="px-5 py-3.5 text-right text-xs text-slate-400">
                                         {new Date(a.createdAt).toLocaleDateString("pt-BR")}
                                     </td>
+                                    <td className="px-3 py-3.5 text-right">
+                                        <button
+                                            onClick={() => handleDelete(a.id, label)}
+                                            disabled={deletingId === a.id}
+                                            className="p-1.5 rounded-md text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-50"
+                                            title="Excluir fechamento"
+                                        >
+                                            <Trash2 className="h-4 w-4" />
+                                        </button>
+                                    </td>
                                 </tr>
-                            ))}
+                                )
+                            })}
                         </tbody>
                     </table>
                 </div>

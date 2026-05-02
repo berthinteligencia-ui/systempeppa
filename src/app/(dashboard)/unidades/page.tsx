@@ -12,12 +12,30 @@ export default async function UnidadesPage() {
 
   const [{ data: depts }, { data: empList }] = await Promise.all([
     supabase.from("Department").select("*").eq("companyId", companyId).order("name"),
-    supabase.from("Employee").select("departmentId").eq("companyId", companyId),
+    supabase.from("Employee").select("departmentId").eq("companyId", companyId).eq("status", "ACTIVE"),
   ])
 
-  const departments = (depts ?? []).map(d => ({
+  const allEmps = empList ?? []
+  const unassignedCount = allEmps.filter(e => !e.departmentId).length
+
+  const direct = (depts ?? []).map(d => ({
     ...d,
-    _count: { employees: (empList ?? []).filter(e => e.departmentId === d.id).length }
+    _count: { employees: allEmps.filter(e => e.departmentId === d.id).length }
+  }))
+
+  // Soma recursiva de descendentes para que o pai exiba o total consolidado
+  function countDescendants(deptId: string): number {
+    return direct
+      .filter(d => d.parentId === deptId)
+      .reduce((sum, child) => sum + child._count.employees + countDescendants(child.id), 0)
+  }
+
+  const departments = direct.map(d => ({
+    ...d,
+    _count: {
+      // Departamentos raiz (sem pai) absorvem os funcionários sem unidade para bater com o dashboard
+      employees: d._count.employees + countDescendants(d.id) + (!d.parentId ? unassignedCount : 0)
+    }
   }))
 
   return (

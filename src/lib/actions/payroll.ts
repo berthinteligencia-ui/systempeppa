@@ -90,4 +90,6 @@ export async function deletePayrollAnalysis(id: string) {
     const supabase = getSupabaseAdmin()
     check(await supabase.from("PayrollAnalysis").delete().eq("id", id).eq("companyId", companyId))
     revalidatePath("/folha-pagamento")
+    revalidatePath("/relatorios")
+    revalidatePath("/dashboard")
 }
