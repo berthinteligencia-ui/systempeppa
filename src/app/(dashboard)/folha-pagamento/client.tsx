@@ -1390,7 +1390,7 @@ export function FolhaPagamentoClient({
                         <option value="">↳ (toda a unidade)</option>
                         {subUnitList.map((sub: any) => (
                             <option key={sub.id} value={sub.id}>
-                                {"   ".repeat(sub.depth)}↳ {toTitleCase(sub.name)}
+                                {"   ".repeat(sub.depth)}↳ {sub.name.toUpperCase()}
                             </option>
                         ))}
                     </select>

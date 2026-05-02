@@ -35,7 +35,7 @@ export function Header({ title = "Dashboard Executivo" }: HeaderProps) {
             CNPJ: {formatCnpj(companyCnpj)}
           </p>
         ) : session?.user ? (
-          <p className="text-[10px] font-medium text-slate-400 mt-0.5 italic">
+          <p className="text-[10px] font-semibold text-slate-400 mt-0.5 uppercase tracking-wide">
             Configurações da empresa pendentes
           </p>
         ) : null}

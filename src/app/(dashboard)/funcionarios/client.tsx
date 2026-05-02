@@ -820,7 +820,7 @@ ${rows.map((emp, i) => `<tr>
               <option value="all">↳ Todas as sub-unidades</option>
               {subUnitList.map((sub: any) => (
                 <option key={sub.id} value={sub.id}>
-                  {"   ".repeat(sub.depth)}↳ {toTitleCase(sub.name)}
+                  {"   ".repeat(sub.depth)}↳ {sub.name.toUpperCase()}
                 </option>
               ))}
             </select>

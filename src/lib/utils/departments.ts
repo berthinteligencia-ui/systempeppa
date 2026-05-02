@@ -1,5 +1,5 @@
 export function toTitleCase(str: string): string {
-  return str.toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
+  return str.toLowerCase().split(" ").map(w => w ? w[0].toUpperCase() + w.slice(1) : w).join(" ")
 }
 
 export type DeptRow = {

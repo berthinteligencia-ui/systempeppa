@@ -12,11 +12,30 @@ export async function getDashboardData(month?: number, year?: number) {
     const currentMonth = month ?? now.getMonth() + 1
     const currentYear = year ?? now.getFullYear()
 
-    const prevDate = new Date(currentYear, currentMonth - 2, 1)
+    const supabase = getSupabaseAdmin()
+
+    // If no explicit month/year was requested, find the latest month with data
+    let effectiveMonth = currentMonth
+    let effectiveYear = currentYear
+
+    if (!month && !year) {
+        const { data: latestAnalysis } = await supabase
+            .from("PayrollAnalysis")
+            .select("month, year")
+            .eq("companyId", companyId)
+            .order("year", { ascending: false })
+            .order("month", { ascending: false })
+            .limit(1)
+
+        if (latestAnalysis && latestAnalysis.length > 0) {
+            effectiveMonth = latestAnalysis[0].month
+            effectiveYear = latestAnalysis[0].year
+        }
+    }
+
+    const prevDate = new Date(effectiveYear, effectiveMonth - 2, 1)
     const prevMonth = prevDate.getMonth() + 1
     const prevYear = prevDate.getFullYear()
-
-    const supabase = getSupabaseAdmin()
 
     const [
         { data: departments },
@@ -28,11 +47,11 @@ export async function getDashboardData(month?: number, year?: number) {
     ] = await Promise.all([
         supabase.from("Department").select("*").eq("companyId", companyId),
         supabase.from("Employee").select("departmentId").eq("companyId", companyId).eq("status", "ACTIVE"),
-        supabase.from("PayrollAnalysis").select("*").eq("companyId", companyId).eq("month", currentMonth).eq("year", currentYear),
+        supabase.from("PayrollAnalysis").select("*").eq("companyId", companyId).eq("month", effectiveMonth).eq("year", effectiveYear),
         supabase.from("PayrollAnalysis").select("*").eq("companyId", companyId).eq("month", prevMonth).eq("year", prevYear),
         supabase.from("Employee").select("*", { count: "exact", head: true }).eq("companyId", companyId).eq("status", "ACTIVE"),
         // Apenas "efetuado" é considerado pago — qualquer outro status (pendente, lancado, pago, atrasado) é pendente
-        supabase.from("Employee").select("*", { count: "exact", head: true }).eq("companyId", companyId).eq("status", "ACTIVE").eq("pagamento", "efetuado"),
+        supabase.from("Employee").select("*", { count: "exact", head: true }).eq("companyId", companyId).eq("status", "ACTIVE").ilike("pagamento", "efetuado"),
     ])
 
     const depts = (departments ?? []).map(d => ({
@@ -55,15 +74,15 @@ export async function getDashboardData(month?: number, year?: number) {
             id: dept.id,
             name: dept.name,
             code: `UNIT-${dept.id.slice(-4).toUpperCase()}`,
-            manager: "Gerente Unidade",
+            manager: "GERENTE UNIDADE",
             status: analysis ? "FECHADO" : "PENDENTE",
             headcount: dept._count.employees,
             cost: analysis ? Number(analysis.total) : 0
         }
     })
 
-    // Sum only the cost of units that have a registered fechamento (avoids counting duplicate or orphan PayrollAnalysis records)
-    const totalCost = unitList.reduce((acc, u) => acc + u.cost, 0)
+    // Soma todos os fechamentos do período, independente de ter departmentId correspondente
+    const totalCost = (currentAnalyses ?? []).reduce((acc, a) => acc + Number(a.total), 0)
     const unitClosings = unitList.filter(u => u.status === "FECHADO").length
     const totalUnits = depts.length
 
@@ -75,8 +94,8 @@ export async function getDashboardData(month?: number, year?: number) {
         .filter(u => u.status === "PENDENTE")
         .map(u => ({
             type: "FECHAMENTO PENDENTE",
-            time: "Aguardando",
-            message: `A unidade ${u.name} ainda não realizou o fechamento da folha para ${currentMonth}/${currentYear}.`,
+            time: "AGUARDANDO",
+            message: `A UNIDADE ${u.name.toUpperCase()} AINDA NÃO REALIZOU O FECHAMENTO DA FOLHA PARA ${effectiveMonth}/${effectiveYear}.`,
             borderColor: "border-amber-500",
             bg: "bg-amber-50",
             badge: "bg-amber-100 text-amber-700"
@@ -86,8 +105,8 @@ export async function getDashboardData(month?: number, year?: number) {
         if (u.cost > 100000) {
             alerts.push({
                 type: "ALERTA DE CUSTO",
-                time: "Hoje",
-                message: `A unidade ${u.name} ultrapassou R$ 100k em custo de folha.`,
+                time: "HOJE",
+                message: `A UNIDADE ${u.name.toUpperCase()} ULTRAPASSOU R$ 100K EM CUSTO DE FOLHA.`,
                 borderColor: "border-red-500",
                 bg: "bg-red-50",
                 badge: "bg-red-100 text-red-700"
@@ -107,6 +126,6 @@ export async function getDashboardData(month?: number, year?: number) {
         },
         unitList,
         alerts,
-        period: { month: currentMonth, year: currentYear }
+        period: { month: effectiveMonth, year: effectiveYear }
     }
 }

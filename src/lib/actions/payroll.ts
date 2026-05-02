@@ -44,7 +44,20 @@ export async function savePayrollAnalysis(data: {
         ))
     }
 
+    // Marca todos os funcionários encontrados na folha como "efetuado"
+    const foundIds: string[] = (data.analysisData?.found ?? [])
+        .map((e: any) => e.id)
+        .filter(Boolean)
+
+    if (foundIds.length > 0) {
+        await supabase.from("Employee")
+            .update({ pagamento: "efetuado", updatedAt: now })
+            .in("id", foundIds)
+            .eq("companyId", companyId)
+    }
+
     revalidatePath("/folha-pagamento")
+    revalidatePath("/funcionarios")
     revalidatePath("/dashboard")
 }
 

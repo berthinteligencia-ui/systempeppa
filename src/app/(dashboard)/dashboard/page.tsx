@@ -1,7 +1,9 @@
+export const dynamic = "force-dynamic"
+
 import {
   Wallet, Users, ClipboardCheck, TrendingUp,
   ArrowUpRight, ArrowDownRight, AlertTriangle,
-  CheckCircle2, ChevronDown, Download,
+  CheckCircle2, Download,
   FileText, Landmark, ClipboardList, CreditCard,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -9,11 +11,7 @@ import { Progress } from "@/components/ui/progress"
 import { getDashboardData } from "@/lib/actions/dashboard"
 import { listNotasFiscais } from "@/lib/actions/nfs"
 import { cn } from "@/lib/utils"
-
-const MESES = [
-  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
-  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
-]
+import { PeriodSelector } from "./period-selector"
 
 function fmtBRL(n: number) {
   return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
@@ -21,13 +19,13 @@ function fmtBRL(n: number) {
 
 function StatusBadge({ status }: { status: string }) {
   if (status === "FECHADO") return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
-      <CheckCircle2 className="h-3 w-3" /> Fechado
+    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-black text-emerald-700 uppercase">
+      <CheckCircle2 className="h-3 w-3" /> FECHADO
     </span>
   )
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-700">
-      <AlertTriangle className="h-3 w-3" /> Pendente
+    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-black text-amber-700 uppercase">
+      <AlertTriangle className="h-3 w-3" /> PENDENTE
     </span>
   )
 }
@@ -49,8 +47,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   if (!data) return (
     <div className="flex flex-col items-center justify-center p-12 text-center">
       <AlertTriangle className="h-12 w-12 text-amber-500 mb-4" />
-      <h2 className="text-xl font-bold text-slate-800">Dados não disponíveis</h2>
-      <p className="text-slate-500 max-w-md mt-2">Não foi possível carregar os dados do painel executivo. Verifique sua conexão ou se você possui uma empresa associada.</p>
+      <h2 className="text-xl font-bold uppercase text-slate-800">DADOS NÃO DISPONÍVEIS</h2>
+      <p className="text-slate-500 max-w-md mt-2 uppercase">NÃO FOI POSSÍVEL CARREGAR OS DADOS DO PAINEL EXECUTIVO. VERIFIQUE SUA CONEXÃO OU SE VOCÊ POSSUI UMA EMPRESA ASSOCIADA.</p>
     </div>
   )
 
@@ -61,7 +59,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       title: "CUSTO TOTAL EMPRESA",
       value: fmtBRL(metrics.totalCost),
       trend: metrics.variation > 0 ? `+${metrics.variation.toFixed(1)}%` : `${metrics.variation.toFixed(1)}%`,
-      trendLabel: "vs mês anterior",
+      trendLabel: "VS MÊS ANTERIOR",
       up: metrics.variation >= 0,
       icon: Wallet,
       iconBg: "bg-blue-100",
@@ -70,7 +68,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     {
       title: "TOTAL DE COLABORADORES",
       value: metrics.totalEmployees.toLocaleString("pt-BR"),
-      trendLabel: "colaboradores ativos",
+      trendLabel: "COLABORADORES ATIVOS",
       icon: Users,
       iconBg: "bg-indigo-100",
       iconColor: "text-indigo-600"
@@ -78,7 +76,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     {
       title: "PAGAMENTOS PENDENTES",
       value: `${metrics.pendingPaymentsCount}`,
-      subtitle: "Colaboradores com pagamento em aberto",
+      subtitle: "COLABORADORES COM PAGAMENTO EM ABERTO",
       icon: ClipboardCheck,
       iconBg: "bg-orange-100",
       iconColor: "text-orange-600"
@@ -86,7 +84,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     {
       title: "STATUS FINANCEIRO",
       value: metrics.closingProgress === 100 ? "CONCLUÍDO" : "EM ANDAMENTO",
-      trendLabel: metrics.closingProgress === 100 ? "Tudo verificado" : "Aguardando unidades",
+      trendLabel: metrics.closingProgress === 100 ? "TUDO VERIFICADO" : "AGUARDANDO UNIDADES",
       icon: TrendingUp,
       iconBg: "bg-emerald-100",
       iconColor: "text-emerald-600"
@@ -98,18 +96,13 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       {/* Header + Filters */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-xl font-bold text-slate-800">Visão Geral Corporativa</h2>
-          <p className="text-sm text-slate-500">Consolidado de todas as unidades de negócio</p>
+          <h2 className="text-xl font-bold uppercase tracking-wide text-slate-800">Visão Geral Corporativa</h2>
+          <p className="text-sm uppercase tracking-wide font-semibold text-slate-500">Consolidado de todas as unidades de negócio</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button className="inline-flex items-center gap-1.5 rounded-lg border bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 transition-colors">
-            Competência: {MESES[period.month - 1]} / {period.year} <ChevronDown className="h-4 w-4 text-slate-400" />
-          </button>
-          <button className="inline-flex items-center gap-1.5 rounded-lg border bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 transition-colors">
-            Unidade: Todas <ChevronDown className="h-4 w-4 text-slate-400" />
-          </button>
+          <PeriodSelector month={period.month} year={period.year} />
           <Button size="sm" className="gap-1.5 bg-blue-600 hover:bg-blue-700 shadow-sm">
-            <Download className="h-4 w-4" /> Exportar
+            <Download className="h-4 w-4" /> EXPORTAR
           </Button>
         </div>
       </div>
@@ -117,7 +110,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       {/* KPI Cards */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {kpis.map((kpi) => {
-          const isMainKpi = kpi.title === "Custo Total"
+          const isMainKpi = kpi.title === "CUSTO TOTAL EMPRESA"
           return (
             <div 
               key={kpi.title} 
@@ -154,7 +147,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
               {kpi.progress !== undefined ? (
                 <div className="mt-6 space-y-2 relative z-10">
                   <Progress value={kpi.progress} className="h-2 bg-slate-100" />
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{kpi.progress}% concluído</p>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{kpi.progress}% CONCLUÍDO</p>
                 </div>
               ) : kpi.trend ? (
                 <div className="mt-6 flex items-center gap-2 relative z-10">
@@ -184,21 +177,21 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       <div className="grid gap-4 xl:grid-cols-3">
         <div className="xl:col-span-2 rounded-xl border bg-white shadow-sm overflow-hidden">
           <div className="flex items-center justify-between border-b px-5 py-4 bg-white">
-            <h3 className="font-semibold text-slate-800">Notas Fiscais</h3>
-            <a href="/nfs" className="text-sm font-semibold text-blue-600 hover:underline">Ver todas</a>
+            <h3 className="font-semibold uppercase tracking-wide text-slate-800">Notas Fiscais</h3>
+            <a href="/nfs" className="text-sm font-semibold uppercase tracking-wide text-blue-600 hover:underline">Ver todas</a>
           </div>
           <div className="overflow-x-auto">
             {nfs.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-slate-400">
                 <FileText className="h-10 w-10 mb-2 opacity-20" />
-                <p className="text-sm">Nenhuma nota fiscal cadastrada</p>
+                <p className="text-sm uppercase font-semibold">NENHUMA NOTA FISCAL CADASTRADA</p>
               </div>
             ) : (
               <table className="w-full">
                 <thead>
                   <tr className="border-b bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                    <th className="px-5 py-3 w-52">Unidade / Código</th>
-                    <th className="px-5 py-3">Fluxo de Processamento</th>
+                    <th className="px-5 py-3 w-52">UNIDADE / CÓDIGO</th>
+                    <th className="px-5 py-3">FLUXO DE PROCESSAMENTO</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -241,14 +234,14 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         <div className="space-y-4">
           <div className="rounded-xl border bg-white shadow-sm overflow-hidden h-fit">
             <div className="flex items-center justify-between border-b px-5 py-4">
-              <h3 className="font-semibold text-slate-800">Alertas e Notificações</h3>
+              <h3 className="font-semibold uppercase tracking-wide text-slate-800">Alertas e Notificações</h3>
               {alerts.length > 0 && <span className="flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white shadow-sm animate-pulse">{alerts.length}</span>}
             </div>
             <div className="divide-y max-h-[500px] overflow-auto">
               {alerts.length === 0 ? (
                 <div className="p-8 text-center">
                   <CheckCircle2 className="h-8 w-8 text-emerald-500 mx-auto mb-2 opacity-20" />
-                  <p className="text-sm text-slate-400">Nenhum alerta crítico encontrado.</p>
+                  <p className="text-sm uppercase font-semibold text-slate-400">NENHUM ALERTA CRÍTICO ENCONTRADO.</p>
                 </div>
               ) : (
                 alerts.map((a, i) => (

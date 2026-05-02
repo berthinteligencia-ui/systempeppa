@@ -298,10 +298,18 @@ export async function saveComprovantes(formData: FormData) {
         }
 
         savedCount++
+
+        if (r.dbEmployeeId) {
+            await supabase.from("Employee")
+                .update({ pagamento: "efetuado", updatedAt: new Date().toISOString() })
+                .eq("id", r.dbEmployeeId)
+                .eq("companyId", companyId)
+        }
     }
 
     revalidatePath("/comprovante")
     revalidatePath("/funcionarios")
+    revalidatePath("/dashboard")
     return { success: true, count: savedCount, duplicates: duplicatesCount }
 }
 
@@ -378,9 +386,17 @@ export async function analisarESalvarComprovante(formData: FormData) {
 
     if (insertError) throw new Error("Falha ao salvar: " + insertError.message)
 
+    if (dbEmployeeId) {
+        await supabase.from("Employee")
+            .update({ pagamento: "efetuado", updatedAt: new Date().toISOString() })
+            .eq("id", dbEmployeeId)
+            .eq("companyId", companyId)
+    }
+
     console.log("[ANALISAR] Salvo! employeeId:", dbEmployeeId ?? "null")
     revalidatePath("/comprovante")
     revalidatePath("/funcionarios")
+    revalidatePath("/dashboard")
     return { success: true, employeeName: dbEmployeeName ?? null, cpfsFound: [finalCpfToLookup].filter(Boolean) as string[] }
 }
 
@@ -442,9 +458,17 @@ export async function saveComprovanteManual(formData: FormData) {
             throw new Error("Falha ao salvar: " + insertError.message)
         }
 
+        if (employeeId) {
+            await supabase.from("Employee")
+                .update({ pagamento: "efetuado", updatedAt: new Date().toISOString() })
+                .eq("id", employeeId)
+                .eq("companyId", companyId)
+        }
+
         console.log("[SAVE_MANUAL] Sucesso!")
         revalidatePath("/funcionarios")
         revalidatePath("/comprovante")
+        revalidatePath("/dashboard")
         return { success: true }
     } catch (err: any) {
         console.error("[SAVE_MANUAL] Erro:", err?.message ?? err)
