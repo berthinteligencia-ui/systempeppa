@@ -19,7 +19,7 @@ import {
   createDepartment, updateDepartment, deleteDepartment, toggleDepartmentStatus,
 } from "@/lib/actions/departments"
 import { buildTree, flattenTree, type DeptRow } from "@/lib/utils/departments"
-import { resetDepartmentPaymentStatus } from "@/lib/actions/employees"
+import { resetDepartmentPaymentStatus, deleteUnassignedEmployees } from "@/lib/actions/employees"
 
 type Props = { departments: DeptRow[]; userRole?: string }
 
@@ -36,6 +36,20 @@ export function UnidadesClient({ departments, userRole }: Props) {
   const [search, setSearch] = useState("")
   const [loading, setLoading] = useState(false)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [deletingUnassigned, setDeletingUnassigned] = useState(false)
+
+  async function handleDeleteUnassigned() {
+    if (!confirm("Excluir todos os funcionários sem unidade? Esta ação não pode ser desfeita.")) return
+    setDeletingUnassigned(true)
+    try {
+      const { deleted } = await deleteUnassignedEmployees()
+      alert(`${deleted} funcionário(s) excluído(s).`)
+    } catch (err: any) {
+      alert("Erro: " + err.message)
+    } finally {
+      setDeletingUnassigned(false)
+    }
+  }
 
   // Build tree and flat list for indent-select
   const tree = useMemo(() => buildTree(departments), [departments])
@@ -170,9 +184,20 @@ export function UnidadesClient({ departments, userRole }: Props) {
           <h2 className="text-xl font-bold text-slate-800">Unidades</h2>
           <p className="text-sm text-slate-500">Grupos, cidades, secretarias e departamentos da empresa</p>
         </div>
-        <Button onClick={() => openCreate()} className="gap-2 bg-blue-600 hover:bg-blue-700">
-          <Plus className="h-4 w-4" /> Nova Unidade
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={handleDeleteUnassigned}
+            disabled={deletingUnassigned}
+            className="gap-2 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+          >
+            <Trash2 className="h-4 w-4" />
+            {deletingUnassigned ? "Excluindo..." : "Excluir sem unidade"}
+          </Button>
+          <Button onClick={() => openCreate()} className="gap-2 bg-blue-600 hover:bg-blue-700">
+            <Plus className="h-4 w-4" /> Nova Unidade
+          </Button>
+        </div>
       </div>
 
       {/* Busca */}

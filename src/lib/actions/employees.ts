@@ -127,6 +127,23 @@ export async function deleteEmployee(id: string) {
   revalidatePath("/funcionarios")
 }
 
+export async function deleteUnassignedEmployees() {
+  await ensureAdmin()
+  const companyId = await getCompanyId()
+  const supabase = getSupabaseAdmin()
+  const { data, error } = await supabase
+    .from("Employee")
+    .delete()
+    .eq("companyId", companyId)
+    .is("departmentId", null)
+    .select("id")
+  if (error) throw new Error(error.message)
+  revalidatePath("/funcionarios")
+  revalidatePath("/unidades")
+  revalidatePath("/dashboard")
+  return { deleted: (data ?? []).length }
+}
+
 export async function registerBatchFromPayroll(
   employees: { cpf: string; nome: string; valor: number; telefone?: string; cargo?: string; bankName?: string; bankAgency?: string; bankAccount?: string; pixKey?: string }[],
   departmentId: string
@@ -236,28 +253,68 @@ export async function importEmployees(
       }, new Map<string, typeof withCpf[0]>()).values()
     )
 
-    check(await supabase.from("Employee").upsert(
-      uniqueByCpf.map((e) => ({
-        id: randomUUID(),
-        name: toTitleCase(e.name.trim()),
-        cpf: e.cpf ? e.cpf.replace(/\D/g, "") : null,
-        phone: e.phone || null,
-        email: e.email || null,
-        position: e.position || "A definir",
-        salary: e.salary ?? 0,
-        hireDate: now,
-        companyId,
-        departmentId: e.departmentId || null,
-        bankName: e.bankName || null,
-        bankAgency: e.bankAgency || null,
-        bankAccount: e.bankAccount || null,
-        pixKey: e.pixKey || null,
-        status: "ACTIVE", // Re-activate or set as active
-        createdAt: now,
-        updatedAt: now,
-      })),
-      { onConflict: "cpf", ignoreDuplicates: false }
-    ))
+    const cleanCpfs = uniqueByCpf.map((e) => e.cpf!.replace(/\D/g, ""))
+
+    // Find which CPFs already exist to avoid updating Employee.id (PK), which would
+    // break FK references from Comprovante.employeeId → Employee.id (onUpdate: NoAction)
+    const { data: existing } = await supabase
+      .from("Employee")
+      .select("id, cpf")
+      .in("cpf", cleanCpfs)
+      .eq("companyId", companyId)
+
+    const existingCpfSet = new Set((existing ?? []).map((e) => e.cpf as string))
+
+    const toInsert = uniqueByCpf.filter((e) => !existingCpfSet.has(e.cpf!.replace(/\D/g, "")))
+    const toUpdate = uniqueByCpf.filter((e) => existingCpfSet.has(e.cpf!.replace(/\D/g, "")))
+
+    if (toInsert.length > 0) {
+      check(await supabase.from("Employee").insert(
+        toInsert.map((e) => ({
+          id: randomUUID(),
+          name: toTitleCase(e.name.trim()),
+          cpf: e.cpf!.replace(/\D/g, ""),
+          phone: e.phone || null,
+          email: e.email || null,
+          position: e.position || "A definir",
+          salary: e.salary ?? 0,
+          hireDate: now,
+          companyId,
+          departmentId: e.departmentId || null,
+          bankName: e.bankName || null,
+          bankAgency: e.bankAgency || null,
+          bankAccount: e.bankAccount || null,
+          pixKey: e.pixKey || null,
+          status: "ACTIVE",
+          createdAt: now,
+          updatedAt: now,
+        }))
+      ))
+    }
+
+    // Update existing employees without touching their id (preserves FK references)
+    await Promise.all(
+      toUpdate.map((e) =>
+        supabase
+          .from("Employee")
+          .update({
+            name: toTitleCase(e.name.trim()),
+            phone: e.phone || null,
+            email: e.email || null,
+            position: e.position || "A definir",
+            salary: e.salary ?? 0,
+            departmentId: e.departmentId || null,
+            bankName: e.bankName || null,
+            bankAgency: e.bankAgency || null,
+            bankAccount: e.bankAccount || null,
+            pixKey: e.pixKey || null,
+            status: "ACTIVE",
+            updatedAt: now,
+          })
+          .eq("cpf", e.cpf!.replace(/\D/g, ""))
+          .eq("companyId", companyId)
+      )
+    )
   }
 
   if (withoutCpf.length > 0) {
