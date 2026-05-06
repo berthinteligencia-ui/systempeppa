@@ -13,18 +13,36 @@ function extractContent(message: any): string {
     if (!message) return ""
     const raw = message.content
     if (!raw) return ""
+    // Array: n8n pode gravar [{type:"text", text:"..."}, {type:"tool_use", ...}]
+    if (Array.isArray(raw)) {
+        const parts = raw
+            .filter((p: any) => p?.type === "text" || typeof p === "string")
+            .map((p: any) => (typeof p === "string" ? p : (p.text ?? "")))
+        return parts.join("\n").trim()
+    }
     if (typeof raw !== "string") return String(raw)
+    // Tenta desembrulhar JSON: {"text": "..."}
     try {
         const parsed = JSON.parse(raw)
         if (typeof parsed?.text === "string") return parsed.text
+        if (typeof parsed?.content === "string") return parsed.content
     } catch { /* plain string */ }
     return raw
 }
 
 function extractMsgType(message: any): "human" | "ai" | "tool" {
-    const t = message?.type
-    if (t === "human") return "human"
-    if (t === "ai") return "ai"
+    // Normaliza para minúsculo e remove prefixos de classe (ex: "HumanMessage" → "human")
+    const t = (message?.type ?? "").toLowerCase()
+        .replace("message", "")
+        .replace("humanmessage", "human")
+        .replace("aimessage", "ai")
+        .trim()
+
+    // Variantes "human": human, user, humanmessage
+    if (t === "human" || t === "user") return "human"
+    // Variantes "ai": ai, assistant, bot, aimessage
+    if (t === "ai" || t === "assistant" || t === "bot") return "ai"
+    // Tudo mais (tool, function, tool_result, system, etc.) → filtrado
     return "tool"
 }
 
@@ -47,16 +65,33 @@ export async function GET(req: Request) {
             .order("id", { ascending: true })
 
         if (!n8nError && n8nRows && n8nRows.length > 0) {
-            // Valida empresa via tool response (igual à conversations route)
-            // A resposta do tool "consulta_funcionario" contém companyId do funcionário
-            const hasAccess = n8nRows.some(m => {
-                if (m.message?.type !== "tool") return false
+            // Valida empresa via tool response (consulta_funcionario retorna companyId)
+            const hasAccessViaTool = n8nRows.some(m => {
+                const msgType = (m.message?.type ?? "").toLowerCase()
+                if (msgType !== "tool" && msgType !== "function" && msgType !== "tool_result") return false
                 try {
-                    const parsed = JSON.parse(m.message.content ?? "[]")
+                    const raw = m.message.content
+                    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw
                     const arr = Array.isArray(parsed) ? parsed : [parsed]
                     return arr.some((e: any) => e?.companyId === companyId)
                 } catch { return false }
             })
+
+            // Fallback: valida se o telefone (session_id) pertence a um funcionário da empresa
+            let hasAccess = hasAccessViaTool
+            if (!hasAccess) {
+                const suffix = conversationId.replace(/\D/g, "").slice(-8)
+                if (suffix.length >= 6) {
+                    const { data: emp } = await supabaseAdmin
+                        .from("Employee")
+                        .select("id")
+                        .eq("companyId", companyId)
+                        .ilike("phone", `%${suffix}`)
+                        .limit(1)
+                        .maybeSingle()
+                    hasAccess = !!emp
+                }
+            }
 
             if (!hasAccess) {
                 return new NextResponse(JSON.stringify({ error: "Acesso negado" }), { status: 403 })
