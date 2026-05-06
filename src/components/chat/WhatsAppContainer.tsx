@@ -65,24 +65,24 @@ export function WhatsAppContainer() {
 
     return (
         <div
-            className="flex flex-col rounded-xl overflow-hidden"
-            style={{ height: "calc(100vh - 140px)", background: "#111B21", border: "1px solid #222D35" }}
+            className="flex flex-col rounded-xl overflow-hidden bg-white border border-slate-200 shadow-sm"
+            style={{ height: "calc(100vh - 140px)" }}
         >
             {/* Tabs */}
-            <div className="flex items-center gap-1 px-5 shrink-0" style={{ background: "#1F2C34", borderBottom: "1px solid #222D35" }}>
+            <div className="flex items-center gap-0.5 px-4 bg-white border-b border-slate-200 shrink-0">
                 {navItems.map(item => (
                     <button
                         key={item.id}
                         onClick={() => setView(item.id)}
                         className={cn(
-                            "flex items-center gap-2 px-4 py-3.5 text-sm font-semibold transition-colors relative",
-                            view === item.id ? "text-[#00a884]" : "text-[#8696a0] hover:text-[#d1d7db]"
+                            "flex items-center gap-1.5 px-3 py-3 text-xs font-semibold transition-colors relative",
+                            view === item.id ? "text-blue-600" : "text-slate-400 hover:text-slate-700"
                         )}
                     >
-                        <item.icon className="h-4 w-4" />
+                        <item.icon className="h-3.5 w-3.5" />
                         {item.label}
                         {view === item.id && (
-                            <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#00a884] rounded-full" />
+                            <span className="absolute bottom-0 left-1 right-1 h-0.5 bg-blue-600 rounded-full" />
                         )}
                     </button>
                 ))}
