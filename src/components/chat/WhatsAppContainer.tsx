@@ -37,12 +37,21 @@ export function WhatsAppContainer() {
         // Realtime: atualiza lista de conversas a cada nova mensagem
         const channel = supabase
             .channel("container-conversations")
-            .on("postgres_changes", { event: "INSERT", schema: "public", table: "mensagens_zap" }, () => {
-                fetchConversations()
-            })
+            .on("postgres_changes", { event: "INSERT", schema: "public", table: "mensagens_zap" }, fetchConversations)
             .subscribe()
 
-        return () => { supabase.removeChannel(channel) }
+        // Polling: 10s para garantir sincronia quando Realtime não está habilitado
+        const interval = setInterval(fetchConversations, 10000)
+
+        // Re-fetch ao voltar para a aba do browser
+        const onVisible = () => { if (document.visibilityState === "visible") fetchConversations() }
+        document.addEventListener("visibilitychange", onVisible)
+
+        return () => {
+            supabase.removeChannel(channel)
+            clearInterval(interval)
+            document.removeEventListener("visibilitychange", onVisible)
+        }
     }, [])
 
     // Conversa selecionada vinda diretamente da lista já carregada
@@ -56,24 +65,24 @@ export function WhatsAppContainer() {
 
     return (
         <div
-            className="flex flex-col bg-white rounded-xl shadow-xl overflow-hidden border border-slate-200"
-            style={{ height: "calc(100vh - 140px)" }}
+            className="flex flex-col rounded-xl overflow-hidden"
+            style={{ height: "calc(100vh - 140px)", background: "#111B21", border: "1px solid #222D35" }}
         >
             {/* Tabs */}
-            <div className="flex items-center gap-1 border-b border-slate-100 px-5 bg-white shrink-0">
+            <div className="flex items-center gap-1 px-5 shrink-0" style={{ background: "#1F2C34", borderBottom: "1px solid #222D35" }}>
                 {navItems.map(item => (
                     <button
                         key={item.id}
                         onClick={() => setView(item.id)}
                         className={cn(
                             "flex items-center gap-2 px-4 py-3.5 text-sm font-semibold transition-colors relative",
-                            view === item.id ? "text-blue-600" : "text-slate-500 hover:text-slate-700"
+                            view === item.id ? "text-[#00a884]" : "text-[#8696a0] hover:text-[#d1d7db]"
                         )}
                     >
                         <item.icon className="h-4 w-4" />
                         {item.label}
                         {view === item.id && (
-                            <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600 rounded-full" />
+                            <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#00a884] rounded-full" />
                         )}
                     </button>
                 ))}

@@ -196,18 +196,35 @@ export function WhatsAppDashboard({ onSelect }: { onSelect: (id: string) => void
         try {
             const r = await fetch("/api/whatsapp/atendimentos", { cache: "no-store" })
             if (r.ok) setAtendimentos(await r.json())
-        } catch { /* silencia erros de rede */ }
-        finally { setLoading(false); setRefreshing(false) }
+        } catch (err) {
+            console.error("[DASHBOARD] fetch atendimentos:", err)
+        } finally {
+            setLoading(false)
+            setRefreshing(false)
+        }
     }, [])
 
     useEffect(() => {
         fetchAtendimentos(true)
+
+        // Realtime: escuta inserções/atualizações em atendimentos_lisa
         const channel = supabase
             .channel("atendimentos-realtime")
             .on("postgres_changes", { event: "*", schema: "public", table: "atendimentos_lisa" }, () => fetchAtendimentos(true))
             .subscribe()
-        const interval = setInterval(() => fetchAtendimentos(true), 30000)
-        return () => { supabase.removeChannel(channel); clearInterval(interval) }
+
+        // Polling agressivo: 8s para parecer tempo real (Realtime pode não estar habilitado na tabela)
+        const interval = setInterval(() => fetchAtendimentos(true), 8000)
+
+        // Re-fetch quando o usuário retorna ao browser tab
+        const onVisible = () => { if (document.visibilityState === "visible") fetchAtendimentos(true) }
+        document.addEventListener("visibilitychange", onVisible)
+
+        return () => {
+            supabase.removeChannel(channel)
+            clearInterval(interval)
+            document.removeEventListener("visibilitychange", onVisible)
+        }
     }, [fetchAtendimentos])
 
     const counts: Record<FilterKey, number> = {
