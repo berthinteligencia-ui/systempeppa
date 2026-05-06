@@ -28,14 +28,6 @@ export function WhatsAppChatWindow({ conversation, onMessageSent }: WhatsAppChat
     const scrollRef = useRef<HTMLDivElement>(null)
     const conversationId = conversation?.id ?? null
 
-    const mapMessage = (msg: any) => ({
-        id: msg.id,
-        content: msg.conteudo,
-        senderType: msg.tipo === "lead" ? "EMPLOYEE" : "COMPANY",
-        createdAt: msg.created_at,
-        conversationId: msg.lead_id,
-    })
-
     const fetchMessages = async () => {
         if (!conversationId) return
         try {
@@ -59,32 +51,30 @@ export function WhatsAppChatWindow({ conversation, onMessageSent }: WhatsAppChat
         setInputValue("")
         if (!conversationId) return
 
+        // Busca inicial
         fetchMessages()
 
+        // ── Realtime n8n_chat_histories ──────────────────────────────────────────
+        // Sem filtro de coluna para máxima compatibilidade (funciona sem REPLICA IDENTITY FULL).
+        // O handler verifica session_id manualmente e re-busca via API para garantir
+        // formatação correta e acesso validado pelo servidor.
         const n8nChannel = supabase
-            .channel(`n8n:${conversationId}`)
+            .channel(`n8n-msgs:${conversationId}`)
             .on(
                 "postgres_changes",
-                { event: "INSERT", schema: "public", table: "n8n_chat_histories", filter: `session_id=eq.${conversationId}` },
+                { event: "INSERT", schema: "public", table: "n8n_chat_histories" },
                 (payload) => {
                     const row = payload.new as any
-                    const msg = row.message
-                    if (msg?.type === "tool") return
-                    const rawContent = msg?.content ?? ""
-                    let content = rawContent
-                    if (typeof rawContent === "string") {
-                        try { const p = JSON.parse(rawContent); if (p?.text) content = p.text } catch {}
-                    }
-                    const senderType = msg?.type === "ai" ? "COMPANY" : "EMPLOYEE"
-                    const newMsg = { id: String(row.id), content, senderType, createdAt: new Date().toISOString(), conversationId }
-                    setMessages(prev => prev.some(m => m.id === newMsg.id) ? prev : [...prev, newMsg])
+                    if (row?.session_id && row.session_id !== conversationId) return
+                    fetchMessages()
                     onMessageSent()
                 }
             )
             .subscribe()
 
+        // ── Realtime mensagens_zap (fluxo legado) ───────────────────────────────
         const zapChannel = supabase
-            .channel(`mensagens:${conversationId}`)
+            .channel(`zap-msgs:${conversationId}`)
             .on(
                 "postgres_changes",
                 { event: "INSERT", schema: "public", table: "mensagens_zap" },
@@ -97,14 +87,15 @@ export function WhatsAppChatWindow({ conversation, onMessageSent }: WhatsAppChat
                         ? row.lead_id === conversationId
                         : rowPhone.endsWith(suffix) || row.lead_id === conversationId
                     if (!matches) return
-                    const newMsg = mapMessage(row)
-                    setMessages(prev => prev.some(m => m.id === newMsg.id) ? prev : [...prev, newMsg])
+                    fetchMessages()
                     onMessageSent()
                 }
             )
             .subscribe()
 
-        const interval = setInterval(fetchMessages, 4000)
+        // ── Polling de fallback: 2s quando conversa ativa ───────────────────────
+        // Garante sincronismo mesmo se o Realtime não estiver habilitado na tabela.
+        const interval = setInterval(fetchMessages, 2000)
 
         return () => {
             supabase.removeChannel(n8nChannel)
