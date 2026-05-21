@@ -309,6 +309,8 @@ export function FuncionariosClient({
   const [isImporting, setIsImporting] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const importInputRef = useRef<HTMLInputElement>(null)
+  const [importGlobalParent, setImportGlobalParent] = useState<string>("")
+  const [importGlobalSubDept, setImportGlobalSubDept] = useState<string>("")
 
   // ── Filtering ────────────────────────────────────────────────────────────────
 
@@ -340,6 +342,15 @@ export function FuncionariosClient({
   const subUnitList = useMemo(
     () => flattenTree(selectedPrincipalNode?.children ?? [], 0) as any[],
     [selectedPrincipalNode]
+  )
+
+  const importPrincipalDepts = useMemo(
+    () => departments.filter(d => !d.parentId),
+    [departments]
+  )
+  const importSubDepts = useMemo(
+    () => importGlobalParent ? departments.filter(d => d.parentId === importGlobalParent) : [],
+    [departments, importGlobalParent]
   )
 
   const filteredEmployees = localEmployees.filter((emp) => {
@@ -703,7 +714,29 @@ ${rows.map((emp, i) => `<tr>
 
   function openImport() {
     setImportFile(null); setImportRows([]); setImportHeaders([])
+    setImportGlobalParent(""); setImportGlobalSubDept("")
     setImportOpen(true)
+  }
+
+  function handleApplyGlobalUnit() {
+    if (!importGlobalParent) return
+    const targetId = importGlobalSubDept || importGlobalParent
+
+    const getAllDescendants = (pid: string): Department[] => {
+      const kids = departments.filter(d => d.parentId === pid)
+      return [...kids, ...kids.flatMap(k => getAllDescendants(k.id))]
+    }
+    const pool = [departments.find(d => d.id === importGlobalParent)!, ...getAllDescendants(importGlobalParent)].filter(Boolean)
+
+    setImportRows(importRows.map(row => {
+      if (!row._deptName) return { ...row, departmentId: targetId }
+      const needle = row._deptName.toLowerCase().trim()
+      const hit = pool.find(d => {
+        const hay = d.name.toLowerCase().trim()
+        return hay === needle || hay.includes(needle) || needle.includes(hay)
+      })
+      return { ...row, departmentId: hit?.id ?? targetId }
+    }))
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -1379,19 +1412,36 @@ ${rows.map((emp, i) => `<tr>
 
       {/* ── Import Dialog ── */}
       <Dialog open={importOpen} onOpenChange={setImportOpen}>
-        <DialogContent className="max-w-3xl p-0 overflow-hidden flex flex-col max-h-[90vh]">
-          <DialogHeader className="px-6 pt-6 shrink-0">
-            <div className="space-y-1 text-left">
-              <DialogTitle className="flex items-center gap-2 text-xl font-black">
-                <FileUp className="h-6 w-6 text-blue-600" /> IMPORTAR FUNCIONÁRIOS
-              </DialogTitle>
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
-                VALIDE OS DADOS E SELECIONE AS UNIDADES ANTES DE CONFIRMAR.
-              </p>
+        <DialogContent className="max-w-4xl p-0 overflow-hidden flex flex-col max-h-[92vh]">
+          <DialogHeader className="px-6 pt-5 pb-4 shrink-0 border-b border-slate-100">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <DialogTitle className="flex items-center gap-2 text-xl font-black text-slate-900">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600">
+                    <FileUp className="h-4 w-4 text-white" />
+                  </div>
+                  IMPORTAR FUNCIONÁRIOS
+                </DialogTitle>
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider pl-10">
+                  Selecione a unidade pai e valide os dados antes de confirmar
+                </p>
+              </div>
+              {importRows.length > 0 && (
+                <div className="flex items-center gap-2 mr-8">
+                  <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-3 py-1">
+                    {importRows.filter(r => r.departmentId).length}/{importRows.length} mapeados
+                  </span>
+                  {importRows.some(r => !r.departmentId) && (
+                    <span className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-3 py-1">
+                      {importRows.filter(r => !r.departmentId).length} sem unidade
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           </DialogHeader>
 
-          <div className="flex-1 overflow-y-auto px-6 py-4 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4 custom-scrollbar">
             {/* Drop zone */}
             {!importFile ? (
               <div
@@ -1399,7 +1449,7 @@ ${rows.map((emp, i) => `<tr>
                 onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
                 onDragLeave={() => setIsDragging(false)}
                 onClick={() => importInputRef.current?.click()}
-                className={`flex min-h-[160px] cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed transition-all ${isDragging ? "border-blue-500 bg-blue-50" : "border-slate-200 bg-slate-50 hover:border-blue-400 hover:bg-blue-50/40"}`}
+                className={`flex min-h-[140px] cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed transition-all ${isDragging ? "border-blue-500 bg-blue-50" : "border-slate-200 bg-slate-50 hover:border-blue-400 hover:bg-blue-50/40"}`}
               >
                 <input
                   ref={importInputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
@@ -1410,25 +1460,25 @@ ${rows.map((emp, i) => `<tr>
                 <p className="mt-1 text-xs text-slate-400">.xlsx · .xls · .csv</p>
               </div>
             ) : (
-              <div className="flex items-center gap-3 rounded-xl border border-blue-100 bg-blue-50/50 px-5 py-4 shadow-sm transition-all animate-in fade-in zoom-in-95 duration-200">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600">
-                  <FileSpreadsheet className="h-6 w-6" />
+              <div className="flex items-center gap-3 rounded-xl border border-blue-100 bg-blue-50/50 px-5 py-3.5 shadow-sm transition-all animate-in fade-in zoom-in-95 duration-200">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600">
+                  <FileSpreadsheet className="h-5 w-5" />
                 </div>
                 <div className="flex-1 overflow-hidden">
                   <p className="truncate text-sm font-bold text-slate-800">{importFile.name}</p>
                   <p className="text-xs text-slate-500 font-medium">{importRows.length} registro{importRows.length !== 1 ? "s" : ""} detectado{importRows.length !== 1 ? "s" : ""}</p>
                 </div>
-                <button onClick={() => { setImportFile(null); setImportRows([]); setImportHeaders([]) }}
-                  className="rounded-lg p-2 text-slate-400 hover:bg-white hover:text-red-500 hover:shadow-sm transition-all">
-                  <X className="h-5 w-5" />
+                <button onClick={() => { setImportFile(null); setImportRows([]); setImportHeaders([]); setImportGlobalParent(""); setImportGlobalSubDept("") }}
+                  className="rounded-lg p-1.5 text-slate-400 hover:bg-white hover:text-red-500 hover:shadow-sm transition-all">
+                  <X className="h-4 w-4" />
                 </button>
               </div>
             )}
 
-            {/* Detected columns hint */}
+            {/* Detected columns */}
             {importHeaders.length > 0 && (
-              <div className="space-y-2">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">Colunas Detectadas</p>
+              <div className="space-y-1.5">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Colunas Detectadas</p>
                 <div className="flex flex-wrap gap-1.5">
                   {importHeaders.map((h, i) => (
                     <span key={i} className="inline-flex items-center rounded-md bg-white border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 shadow-sm">
@@ -1439,29 +1489,89 @@ ${rows.map((emp, i) => `<tr>
               </div>
             )}
 
+            {/* ── Global unit mapping ── */}
+            {importRows.length > 0 && (
+              <div className="rounded-xl border border-blue-200 bg-gradient-to-br from-blue-50 to-slate-50 p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-600">
+                    <Briefcase className="h-3.5 w-3.5 text-white" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-black text-slate-800 uppercase tracking-wider">Aplicar Unidade a Todos</p>
+                    <p className="text-[10px] text-slate-500">Selecione a unidade pai e os departamentos serão mapeados automaticamente pelos nomes da planilha</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Unidade Principal</p>
+                    <Select
+                      value={importGlobalParent || "none"}
+                      onValueChange={(val) => { setImportGlobalParent(val === "none" ? "" : val); setImportGlobalSubDept("") }}
+                    >
+                      <SelectTrigger className="h-9 text-xs font-medium bg-white border-slate-200">
+                        <SelectValue placeholder="Selecionar unidade..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none" className="text-slate-400 italic text-xs">Nenhuma</SelectItem>
+                        {importPrincipalDepts.map((d) => (
+                          <SelectItem key={d.id} value={d.id} className="text-sm font-medium">{d.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Sub-departamento (padrão)</p>
+                    <Select
+                      value={importGlobalSubDept || "none"}
+                      onValueChange={(val) => setImportGlobalSubDept(val === "none" ? "" : val)}
+                      disabled={!importGlobalParent || importSubDepts.length === 0}
+                    >
+                      <SelectTrigger className="h-9 text-xs font-medium bg-white border-slate-200 disabled:opacity-50">
+                        <SelectValue placeholder={importSubDepts.length === 0 ? "Sem sub-departamentos" : "Usar se não encontrar match..."} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none" className="text-slate-400 italic text-xs">Usar unidade principal como padrão</SelectItem>
+                        {importSubDepts.map((d) => (
+                          <SelectItem key={d.id} value={d.id} className="text-sm font-medium">{d.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <Button
+                  onClick={handleApplyGlobalUnit}
+                  disabled={!importGlobalParent}
+                  className="w-full h-8 bg-blue-600 hover:bg-blue-700 text-xs font-black uppercase tracking-wider gap-2"
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Mapear Automaticamente pelos Departamentos Existentes
+                </Button>
+              </div>
+            )}
+
             {/* Preview table */}
             {importRows.length > 0 && (
-              <div className="overflow-hidden rounded-xl border border-slate-200">
-                <div className="overflow-x-auto max-h-[350px]">
+              <div className="overflow-hidden rounded-xl border border-slate-200 shadow-sm">
+                <div className="overflow-x-auto max-h-[340px]">
                   <table className="w-full text-sm">
-                    <thead className="sticky top-0 bg-slate-50 z-10 shadow-sm">
-                      <tr className="border-b text-[10px] font-black uppercase tracking-widest text-slate-400 text-left">
-                        <th className="px-4 py-3">NOME / CARGO</th>
-                        <th className="px-4 py-3">CPF</th>
-                        <th className="px-5 py-3">UNIDADE / DEPARTAMENTO</th>
-                        <th className="px-4 py-3 text-right">SALÁRIO</th>
+                    <thead className="sticky top-0 bg-slate-50 z-10 border-b border-slate-200">
+                      <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400 text-left">
+                        <th className="px-4 py-3 w-[30%]">NOME / CARGO</th>
+                        <th className="px-4 py-3 w-[15%]">CPF</th>
+                        <th className="px-4 py-3 w-[40%]">UNIDADE / DEPARTAMENTO</th>
+                        <th className="px-4 py-3 w-[15%] text-right">SALÁRIO</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y bg-white">
+                    <tbody className="divide-y divide-slate-100 bg-white">
                       {importRows.map((r, i) => (
-                        <tr key={i} className="hover:bg-slate-50/50 transition-colors">
-                          <td className="px-4 py-4">
-                            <p className="font-bold text-slate-800 text-sm">{r.name}</p>
-                            <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-wide mt-0.5">{r.position?.split(' ').slice(0, 3).join(' ') || "Sem cargo"}</p>
+                        <tr key={i} className={`transition-colors ${r.departmentId ? "hover:bg-slate-50/50" : "hover:bg-amber-50/30 bg-amber-50/10"}`}>
+                          <td className="px-4 py-3">
+                            <p className="font-bold text-slate-800 text-sm leading-tight">{r.name}</p>
+                            <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mt-0.5">{r.position?.split(' ').slice(0, 3).join(' ') || "—"}</p>
                           </td>
-                          <td className="px-4 py-4 font-mono text-xs text-slate-500">{fmtCpf(r.cpf ?? null)}</td>
-                          <td className="px-4 py-4">
-                            <div className="flex flex-col gap-1.5">
+                          <td className="px-4 py-3 font-mono text-xs text-slate-500">{fmtCpf(r.cpf ?? null)}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-col gap-1">
                               <Select
                                 value={r.departmentId ?? "missing"}
                                 onValueChange={(val) => {
@@ -1470,25 +1580,38 @@ ${rows.map((emp, i) => `<tr>
                                   setImportRows(next)
                                 }}
                               >
-                                <SelectTrigger className={`h-9 text-xs font-medium transition-all ${!r.departmentId ? "border-amber-300 bg-amber-50 text-amber-900 focus:ring-amber-200" : "bg-white border-slate-200"}`}>
+                                <SelectTrigger className={`h-8 text-xs font-medium transition-all ${!r.departmentId ? "border-amber-300 bg-amber-50 text-amber-900" : "bg-white border-slate-200 text-slate-700"}`}>
                                   <SelectValue placeholder="Mapear unidade..." />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="missing" disabled className="text-slate-400 italic">Mapear unidade...</SelectItem>
-                                  {departments.map((d) => (
-                                    <SelectItem key={d.id} value={d.id} className="text-sm font-medium">{d.name}</SelectItem>
-                                  ))}
+                                  <SelectItem value="missing" disabled className="text-slate-400 italic text-xs">Mapear unidade...</SelectItem>
+                                  {importPrincipalDepts.map((parent) => {
+                                    const children = departments.filter(d => d.parentId === parent.id)
+                                    return (
+                                      <React.Fragment key={parent.id}>
+                                        <SelectItem value={parent.id} className="text-xs font-bold text-slate-700">{parent.name}</SelectItem>
+                                        {children.map(c => (
+                                          <SelectItem key={c.id} value={c.id} className="text-xs text-slate-600 pl-6">↳ {c.name}</SelectItem>
+                                        ))}
+                                      </React.Fragment>
+                                    )
+                                  })}
                                 </SelectContent>
                               </Select>
                               {r._deptName && !r.departmentId && (
-                                <div className="flex items-center gap-1.5 text-[10px] text-amber-600 font-bold bg-amber-50/50 border border-amber-100 rounded px-2 py-0.5">
+                                <div className="flex items-center gap-1 text-[10px] text-amber-600 font-bold">
                                   <AlertCircle className="h-3 w-3 shrink-0" />
-                                  <span>Planilha: &quot;{r._deptName}&quot;</span>
+                                  <span className="truncate">Planilha: &quot;{r._deptName}&quot;</span>
                                 </div>
+                              )}
+                              {r._deptName && r.departmentId && (
+                                <p className="text-[10px] text-emerald-600 font-semibold truncate">
+                                  ✓ &quot;{r._deptName}&quot;
+                                </p>
                               )}
                             </div>
                           </td>
-                          <td className="px-4 py-4 text-right">
+                          <td className="px-4 py-3 text-right">
                             <p className="font-black text-slate-900 text-sm">{fmtBRL(r.salary ?? 0)}</p>
                           </td>
                         </tr>
@@ -1500,7 +1623,7 @@ ${rows.map((emp, i) => `<tr>
             )}
 
             {importRows.length === 0 && importFile && (
-              <div className="flex flex-col items-center justify-center py-10 rounded-xl border border-amber-200 bg-amber-50 text-center mx-1">
+              <div className="flex flex-col items-center justify-center py-10 rounded-xl border border-amber-200 bg-amber-50 text-center">
                 <AlertCircle className="h-10 w-10 text-amber-500 mb-3" />
                 <p className="text-xs font-black text-amber-900 uppercase tracking-widest">NENHUM FUNCIONÁRIO DETECTADO</p>
                 <p className="mt-2 text-[10px] text-amber-700 font-bold max-w-xs mx-auto uppercase tracking-wider leading-relaxed px-4">
@@ -1510,19 +1633,29 @@ ${rows.map((emp, i) => `<tr>
             )}
           </div>
 
-          <DialogFooter className="bg-slate-50 p-6 border-t font-semibold shrink-0">
-            <Button variant="ghost" onClick={() => setImportOpen(false)} className="text-slate-500 font-black uppercase text-xs tracking-widest">CANCELAR</Button>
-            <Button
-              onClick={handleConfirmImport}
-              disabled={importRows.length === 0 || isImporting}
-              className="bg-blue-600 hover:bg-blue-700 gap-2 px-10 shadow-lg shadow-blue-600/20 font-black uppercase text-xs tracking-widest"
-            >
-              {isImporting ? (
-                <><Loader2 className="h-4 w-4 animate-spin" /> IMPORTANDO...</>
-              ) : (
-                <><CheckCircle2 className="h-4 w-4" /> IMPORTAR {importRows.length} {importRows.length === 1 ? 'FUNCIONÁRIO' : 'FUNCIONÁRIOS'}</>
+          <DialogFooter className="bg-slate-50 px-6 py-4 border-t border-slate-200 shrink-0 flex items-center justify-between">
+            <div className="text-xs text-slate-400 font-medium">
+              {importRows.length > 0 && (
+                <span>{importRows.filter(r => !r.departmentId).length > 0
+                  ? `⚠ ${importRows.filter(r => !r.departmentId).length} funcionário${importRows.filter(r => !r.departmentId).length > 1 ? "s" : ""} sem unidade definida`
+                  : "✓ Todos os funcionários têm unidade definida"
+                }</span>
               )}
-            </Button>
+            </div>
+            <div className="flex gap-3">
+              <Button variant="ghost" onClick={() => setImportOpen(false)} className="text-slate-500 font-black uppercase text-xs tracking-widest">CANCELAR</Button>
+              <Button
+                onClick={handleConfirmImport}
+                disabled={importRows.length === 0 || isImporting}
+                className="bg-blue-600 hover:bg-blue-700 gap-2 px-8 shadow-lg shadow-blue-600/20 font-black uppercase text-xs tracking-widest"
+              >
+                {isImporting ? (
+                  <><Loader2 className="h-4 w-4 animate-spin" /> IMPORTANDO...</>
+                ) : (
+                  <><CheckCircle2 className="h-4 w-4" /> IMPORTAR {importRows.length} {importRows.length === 1 ? 'FUNCIONÁRIO' : 'FUNCIONÁRIOS'}</>
+                )}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
