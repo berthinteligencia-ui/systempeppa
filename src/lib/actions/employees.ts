@@ -222,6 +222,12 @@ export async function updateEmployeesPhone(updates: { id: string; phone: string 
   revalidatePath("/funcionarios")
 }
 
+function chunkArr<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = []
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size))
+  return out
+}
+
 export async function importEmployees(
   employees: {
     name: string
@@ -244,33 +250,51 @@ export async function importEmployees(
   const withCpf = employees.filter((e) => e.cpf)
   const withoutCpf = employees.filter((e) => !e.cpf)
 
+  let inserted = 0
+  let updated = 0
+  let skippedDuplicates = 0
+
   if (withCpf.length > 0) {
-    // De-duplicate by CPF to avoid "ON CONFLICT DO UPDATE command cannot affect row a second time"
-    const uniqueByCpf = Array.from(
+    // Dedup within the spreadsheet itself (last row wins when same CPF appears twice)
+    const deduped = Array.from(
       withCpf.reduce((map, emp) => {
-        map.set(emp.cpf!, emp)
+        map.set(emp.cpf!.replace(/\D/g, ""), emp)
         return map
       }, new Map<string, typeof withCpf[0]>()).values()
     )
+    skippedDuplicates = withCpf.length - deduped.length
 
-    const cleanCpfs = uniqueByCpf.map((e) => e.cpf!.replace(/\D/g, ""))
+    const cleanCpfs = deduped.map((e) => e.cpf!.replace(/\D/g, ""))
 
-    // Find which CPFs already exist to avoid updating Employee.id (PK), which would
-    // break FK references from Comprovante.employeeId → Employee.id (onUpdate: NoAction)
-    const { data: existing } = await supabase
-      .from("Employee")
-      .select("id, cpf")
-      .in("cpf", cleanCpfs)
-      .eq("companyId", companyId)
+    // Query CPFs globally (no companyId filter) because cpf has a GLOBAL @unique constraint.
+    // We need to know which CPFs are already taken by ANY company to avoid constraint failures.
+    const existingRows: { cpf: string; companyId: string }[] = []
+    for (const chunk of chunkArr(cleanCpfs, 100)) {
+      const { data, error } = await supabase
+        .from("Employee")
+        .select("cpf, companyId")
+        .in("cpf", chunk)
+      if (error) throw new Error(`Erro ao verificar CPFs existentes: ${error.message}`)
+      existingRows.push(...(data ?? []))
+    }
 
-    const existingCpfSet = new Set((existing ?? []).map((e) => e.cpf as string))
+    // CPFs owned by THIS company → update them
+    const sameCompanyCpfs = new Set(
+      existingRows.filter((e) => e.companyId === companyId).map((e) => e.cpf as string)
+    )
+    // CPFs owned by ANOTHER company → skip entirely (inserting would violate global unique)
+    const otherCompanyCpfs = new Set(
+      existingRows.filter((e) => e.companyId !== companyId).map((e) => e.cpf as string)
+    )
 
-    const toInsert = uniqueByCpf.filter((e) => !existingCpfSet.has(e.cpf!.replace(/\D/g, "")))
-    const toUpdate = uniqueByCpf.filter((e) => existingCpfSet.has(e.cpf!.replace(/\D/g, "")))
+    const toInsert = deduped.filter((e) => !sameCompanyCpfs.has(e.cpf!.replace(/\D/g, "")) && !otherCompanyCpfs.has(e.cpf!.replace(/\D/g, "")))
+    const toUpdate = deduped.filter((e) => sameCompanyCpfs.has(e.cpf!.replace(/\D/g, "")))
+    skippedDuplicates += otherCompanyCpfs.size > 0 ? [...otherCompanyCpfs].filter(c => deduped.some(e => e.cpf!.replace(/\D/g, "") === c)).length : 0
 
-    if (toInsert.length > 0) {
+    // Insert in chunks of 100 to avoid large payload failures
+    for (const chunk of chunkArr(toInsert, 100)) {
       check(await supabase.from("Employee").insert(
-        toInsert.map((e) => ({
+        chunk.map((e) => ({
           id: randomUUID(),
           name: toTitleCase(e.name.trim()),
           cpf: e.cpf!.replace(/\D/g, ""),
@@ -290,38 +314,43 @@ export async function importEmployees(
           updatedAt: now,
         }))
       ))
+      inserted += chunk.length
     }
 
-    // Update existing employees without touching their id (preserves FK references)
-    await Promise.all(
-      toUpdate.map((e) =>
-        supabase
-          .from("Employee")
-          .update({
-            name: toTitleCase(e.name.trim()),
-            phone: e.phone || null,
-            email: e.email || null,
-            position: e.position || "A definir",
-            salary: e.salary ?? 0,
-            departmentId: e.departmentId || null,
-            bankName: e.bankName || null,
-            bankAgency: e.bankAgency || null,
-            bankAccount: e.bankAccount || null,
-            pixKey: e.pixKey || null,
-            status: "ACTIVE",
-            updatedAt: now,
-          })
-          .eq("cpf", e.cpf!.replace(/\D/g, ""))
-          .eq("companyId", companyId)
+    // Update existing employees in chunks of 50
+    for (const chunk of chunkArr(toUpdate, 50)) {
+      await Promise.all(
+        chunk.map((e) =>
+          supabase
+            .from("Employee")
+            .update({
+              name: toTitleCase(e.name.trim()),
+              phone: e.phone || null,
+              email: e.email || null,
+              position: e.position || "A definir",
+              salary: e.salary ?? 0,
+              departmentId: e.departmentId || null,
+              bankName: e.bankName || null,
+              bankAgency: e.bankAgency || null,
+              bankAccount: e.bankAccount || null,
+              pixKey: e.pixKey || null,
+              status: "ACTIVE",
+              updatedAt: now,
+            })
+            .eq("cpf", e.cpf!.replace(/\D/g, ""))
+            .eq("companyId", companyId)
+        )
       )
-    )
+      updated += chunk.length
+    }
   }
 
-  if (withoutCpf.length > 0) {
+  // Insert employees without CPF in chunks of 100
+  for (const chunk of chunkArr(withoutCpf, 100)) {
     check(await supabase.from("Employee").insert(
-      withoutCpf.map((e) => ({
+      chunk.map((e) => ({
         id: randomUUID(),
-        name: e.name,
+        name: toTitleCase(e.name.trim()),
         cpf: null,
         phone: e.phone || null,
         email: e.email || null,
@@ -339,10 +368,33 @@ export async function importEmployees(
         updatedAt: now,
       }))
     ))
+    inserted += chunk.length
   }
 
   revalidatePath("/funcionarios")
-  return { imported: employees.length }
+  return { inserted, updated, skippedDuplicates }
+}
+
+export async function validateImportCpfs(
+  cpfs: string[]
+): Promise<{ cpf: string; status: "exists_same" | "exists_other" }[]> {
+  const companyId = await getCompanyId()
+  const supabase = getSupabaseAdmin()
+  const results: { cpf: string; status: "exists_same" | "exists_other" }[] = []
+  for (const chunk of chunkArr(cpfs, 100)) {
+    const { data, error } = await supabase
+      .from("Employee")
+      .select("cpf, companyId")
+      .in("cpf", chunk)
+    if (error) throw new Error(error.message)
+    for (const row of data ?? []) {
+      results.push({
+        cpf: row.cpf as string,
+        status: (row.companyId as string) === companyId ? "exists_same" : "exists_other",
+      })
+    }
+  }
+  return results
 }
 
 export async function deleteEmployeesBatch(ids: string[]) {

@@ -2,7 +2,7 @@
 
 import { cookies } from "next/headers"
 import bcrypt from "bcryptjs"
-import { getSupabaseAdmin } from "@/lib/supabase-admin"
+import { getSupabaseAdmin, fetchFullList } from "@/lib/supabase-admin"
 
 const CONTROLE_SECRET = process.env.CONTROLE_SECRET ?? "master@"
 
@@ -41,7 +41,7 @@ export async function getCompanyDetails(companyId: string) {
     const [
         company, 
         users, 
-        employees, 
+        employeesList, 
         departments, 
         nfs, 
         payrolls, 
@@ -53,7 +53,14 @@ export async function getCompanyDetails(companyId: string) {
     ] = await Promise.all([
         supabase.from("Company").select("*").eq("id", companyId).single(),
         supabase.from("User").select("id, name, email, role, active, createdAt").eq("companyId", companyId).order("name"),
-        supabase.from("Employee").select("id, name, cpf, email, phone, position, salary, hireDate, status, createdAt, departmentId").eq("companyId", companyId).order("name"),
+        fetchFullList<any>((from, to) =>
+            supabase
+                .from("Employee")
+                .select("id, name, cpf, email, phone, position, salary, hireDate, status, createdAt, departmentId")
+                .eq("companyId", companyId)
+                .order("name")
+                .range(from, to)
+        ),
         supabase.from("Department").select("id, name, cnpj, createdAt").eq("companyId", companyId).order("name"),
         supabase.from("NotaFiscal").select("id, numero, emitente, valor, dataEmissao, descricao, status, createdAt").eq("companyId", companyId).order("dataEmissao", { ascending: false }).limit(50),
         supabase.from("PayrollAnalysis").select("id, month, year, total, status, createdAt, departmentId").eq("companyId", companyId).order("year", { ascending: false }).order("month", { ascending: false }).limit(24),
@@ -68,7 +75,7 @@ export async function getCompanyDetails(companyId: string) {
     const deptMap: Record<string, string> = {}
     ;(departments.data ?? []).forEach(d => { deptMap[d.id] = d.name })
 
-    const employeesWithDept = (employees.data ?? []).map(e => ({
+    const employeesWithDept = (employeesList ?? []).map(e => ({
         ...e,
         departmentName: e.departmentId ? (deptMap[e.departmentId] ?? "—") : "—",
     }))
@@ -96,16 +103,20 @@ export async function getCompanyDetails(companyId: string) {
 export async function getControleStats() {
     const supabase = getSupabaseAdmin()
 
-    const [companies, users, employees, logs] = await Promise.all([
+    const [companies, users, employeesList, logs] = await Promise.all([
         supabase.from("Company").select("id, name, cnpj, email, city, state, active, createdAt").order("createdAt", { ascending: false }),
         supabase.from("User").select("id, name, email, role, active, companyId, createdAt"),
-        supabase.from("Employee").select("id, companyId, active"),
+        fetchFullList<any>((from, to) =>
+            supabase
+                .from("Employee")
+                .select("id, companyId, active")
+                .range(from, to)
+        ),
         supabase.from("activity_logs").select("id, user_name, user_email, action, target, created_at, company_id").order("created_at", { ascending: false }).limit(50),
     ])
 
     const companiesList = companies.data ?? []
     const usersList = users.data ?? []
-    const employeesList = employees.data ?? []
     const logsList = logs.data ?? []
 
     const totalCompanies = companiesList.length

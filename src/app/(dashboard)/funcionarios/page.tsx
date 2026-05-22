@@ -1,4 +1,4 @@
-import { getSupabaseAdmin } from "@/lib/supabase-admin"
+import { getSupabaseAdmin, fetchFullList } from "@/lib/supabase-admin"
 
 export const dynamic = "force-dynamic"
 import { auth } from "@/lib/auth"
@@ -16,10 +16,24 @@ export default async function FuncionariosPage() {
   const supabase = getSupabaseAdmin()
   const companyId = session.user.companyId
 
-  const [{ data: rawEmployees }, { data: departments }, { data: allComprovantes }] = await Promise.all([
-    supabase.from("Employee").select("*, department:Department(*)").eq("companyId", companyId).order("name"),
+  const [rawEmployees, { data: departments }, allComprovantes] = await Promise.all([
+    fetchFullList<any>((from, to) =>
+      supabase
+        .from("Employee")
+        .select("*, department:Department(*)")
+        .eq("companyId", companyId)
+        .order("name")
+        .range(from, to)
+    ),
     supabase.from("Department").select("*").eq("companyId", companyId).order("name"),
-    supabase.from("Comprovante").select("cpf, employeeId, fileUrl, extractedAt, amount").eq("companyId", companyId).order("extractedAt", { ascending: false })
+    fetchFullList<any>((from, to) =>
+      supabase
+        .from("Comprovante")
+        .select("cpf, employeeId, fileUrl, extractedAt, amount")
+        .eq("companyId", companyId)
+        .order("extractedAt", { ascending: false })
+        .range(from, to)
+    )
   ])
 
   // Map CPF to latest fileUrl and amount

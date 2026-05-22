@@ -1,6 +1,6 @@
 "use server"
 
-import { getSupabaseAdmin } from "@/lib/supabase-admin"
+import { getSupabaseAdmin, fetchFullList } from "@/lib/supabase-admin"
 import { cookies } from "next/headers"
 import { randomUUID } from "crypto"
 import bcrypt from "bcryptjs"
@@ -84,9 +84,13 @@ export async function listAllCompanies() {
     if (error) throw new Error(error.message)
 
     // Conta usuários e funcionários ativos por empresa em batch
-    const [{ data: userRows }, { data: empRows }] = await Promise.all([
-        supabase.from("User").select("companyId"),
-        supabase.from("Employee").select("companyId").eq("status", "ACTIVE"),
+    const [userRows, empRows] = await Promise.all([
+        fetchFullList<any>((from, to) =>
+            supabase.from("User").select("companyId").range(from, to)
+        ),
+        fetchFullList<any>((from, to) =>
+            supabase.from("Employee").select("companyId").eq("status", "ACTIVE").range(from, to)
+        ),
     ])
 
     const userCount: Record<string, number> = {}

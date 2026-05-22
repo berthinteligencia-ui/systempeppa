@@ -1,6 +1,6 @@
 "use server"
 
-import { getSupabaseAdmin } from "@/lib/supabase-admin"
+import { getSupabaseAdmin, fetchFullList } from "@/lib/supabase-admin"
 import { auth } from "@/lib/auth"
 import { revalidatePath } from "next/cache"
 import { randomUUID } from "crypto"
@@ -17,21 +17,39 @@ export async function runBackup() {
         const [
             { data: company },
             { data: users },
-            { data: employees },
+            employees,
             { data: departments },
             { data: banks },
             { data: payrollAnalyses },
-            { data: conversations },
-            { data: messages },
+            conversations,
+            messages,
         ] = await Promise.all([
             supabase.from("Company").select("*, settings:Settings(*)").eq("id", companyId).maybeSingle(),
             supabase.from("User").select("*").eq("companyId", companyId),
-            supabase.from("Employee").select("*").eq("companyId", companyId),
+            fetchFullList<any>((from, to) =>
+                supabase
+                    .from("Employee")
+                    .select("*")
+                    .eq("companyId", companyId)
+                    .range(from, to)
+            ),
             supabase.from("Department").select("*").eq("companyId", companyId),
             supabase.from("Bank").select("*"),
             supabase.from("PayrollAnalysis").select("*").eq("companyId", companyId),
-            supabase.from("Conversation").select("*").eq("companyId", companyId),
-            supabase.from("Message").select("*, conversation:Conversation!inner(companyId)").eq("conversation.companyId", companyId),
+            fetchFullList<any>((from, to) =>
+                supabase
+                    .from("Conversation")
+                    .select("*")
+                    .eq("companyId", companyId)
+                    .range(from, to)
+            ),
+            fetchFullList<any>((from, to) =>
+                supabase
+                    .from("Message")
+                    .select("*, conversation:Conversation!inner(companyId)")
+                    .eq("conversation.companyId", companyId)
+                    .range(from, to)
+            ),
         ])
 
         const backupData = {

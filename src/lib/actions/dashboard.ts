@@ -1,6 +1,6 @@
 "use server"
 
-import { getSupabaseAdmin } from "@/lib/supabase-admin"
+import { getSupabaseAdmin, fetchFullList } from "@/lib/supabase-admin"
 import { auth } from "@/lib/auth"
 
 export async function getDashboardData(month?: number, year?: number) {
@@ -39,14 +39,21 @@ export async function getDashboardData(month?: number, year?: number) {
 
     const [
         { data: departments },
-        { data: activeEmps },
+        activeEmps,
         { data: currentAnalyses },
         { data: prevAnalyses },
         { count: totalEmployees },
         { count: efetivadosCount },
     ] = await Promise.all([
         supabase.from("Department").select("*").eq("companyId", companyId),
-        supabase.from("Employee").select("departmentId").eq("companyId", companyId).eq("status", "ACTIVE"),
+        fetchFullList<any>((from, to) =>
+            supabase
+                .from("Employee")
+                .select("departmentId")
+                .eq("companyId", companyId)
+                .eq("status", "ACTIVE")
+                .range(from, to)
+        ),
         supabase.from("PayrollAnalysis").select("*").eq("companyId", companyId).eq("month", effectiveMonth).eq("year", effectiveYear),
         supabase.from("PayrollAnalysis").select("*").eq("companyId", companyId).eq("month", prevMonth).eq("year", prevYear),
         supabase.from("Employee").select("*", { count: "exact", head: true }).eq("companyId", companyId).eq("status", "ACTIVE"),

@@ -1,4 +1,4 @@
-import { getSupabaseAdmin } from "@/lib/supabase-admin"
+import { getSupabaseAdmin, fetchFullList } from "@/lib/supabase-admin"
 import { auth } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { UnidadesClient } from "./client"
@@ -10,9 +10,16 @@ export default async function UnidadesPage() {
   const supabase = getSupabaseAdmin()
   const companyId = session.user.companyId
 
-  const [{ data: depts }, { data: empList }] = await Promise.all([
+  const [{ data: depts }, empList] = await Promise.all([
     supabase.from("Department").select("*").eq("companyId", companyId).order("name"),
-    supabase.from("Employee").select("departmentId").eq("companyId", companyId).eq("status", "ACTIVE"),
+    fetchFullList<any>((from, to) =>
+      supabase
+        .from("Employee")
+        .select("departmentId")
+        .eq("companyId", companyId)
+        .eq("status", "ACTIVE")
+        .range(from, to)
+    ),
   ])
 
   const allEmps = empList ?? []

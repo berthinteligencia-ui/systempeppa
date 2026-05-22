@@ -31,6 +31,7 @@ import {
   createEmployee, updateEmployee, deleteEmployee,
   deleteEmployeesBatch, importEmployees, resetDepartmentPaymentStatus,
   updateEmployeePaymentStatus, updateEmployeeStatus, reactivateAllEmployees,
+  deleteUnassignedEmployees, validateImportCpfs,
 } from "@/lib/actions/employees"
 import { getEmployeeComprovantes, deleteComprovante, saveComprovanteManual } from "@/lib/actions/comprovante"
 import { buildTree, flattenTree, toTitleCase } from "@/lib/utils/departments"
@@ -51,6 +52,12 @@ type ImportRow = {
   name: string; cpf?: string; phone?: string; email?: string
   position?: string; salary?: number; departmentId?: string; _deptName?: string
   bankName?: string; bankAgency?: string; bankAccount?: string; pixKey?: string
+}
+
+type RowIssue = {
+  type: "dup_in_file" | "conflict_other" | "will_update" | "no_unit" | "zero_salary"
+  label: string
+  severity: "error" | "warning"
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -100,11 +107,11 @@ function fmtPhone(p: string | null) {
 
 // Column detection for import
 const NAME_COLS = ["nome", "name", "funcionario", "funcionário", "colaborador", "empregado", "nome completo", "trabalhador"]
-const CPF_COLS = ["cpf", "doc", "documento", "cpf/cnpj", "registro", "matricula", "matrícula", "identidade"]
+const CPF_COLS = ["cpf", "doc", "documento", "cpf/cnpj"]
 const PHONE_COLS = ["telefone", "fone", "celular", "cel", "phone", "whatsapp", "zap", "contato"]
 const EMAIL_COLS = ["email", "e-mail", "mail", "correio", "endereço eletrônico"]
 const POSITION_COLS = ["cargo", "position", "funcao", "função", "ocupacao", "ocupação", "atividade", "setor/função"]
-const SALARY_COLS = ["salario", "salário", "salary", "remuneracao", "remuneração", "vencimento", "pagamento", "valor", "base", "líquido", "bruto", "status", "st", "sttatus"]
+const SALARY_COLS = ["salario", "salário", "salary", "remuneracao", "remuneração", "vencimento", "valor", "base", "líquido", "bruto"]
 const DEPT_COLS = ["unidade", "departamento", "setor", "department", "dept", "lotacao", "lotação", "filial", "estabelecimento"]
 const BANK_COLS = ["banco", "bank", "instituicao", "instituição"]
 const AGENCY_COLS = ["agencia", "agência", "agency", "ag"]
@@ -233,6 +240,7 @@ export function FuncionariosClient({
   const [resetPagamentoOpen, setResetPagamentoOpen] = useState(false)
   const [resetPagamentoDept, setResetPagamentoDept] = useState<string>("")
   const [reativarTodosOpen, setReativarTodosOpen] = useState(false)
+  const [deleteUnassignedOpen, setDeleteUnassignedOpen] = useState(false)
 
   // Optimistic local employee list for instant pagamento updates
   const [localEmployees, setLocalEmployees] = useState<Employee[]>(employees)
@@ -311,6 +319,9 @@ export function FuncionariosClient({
   const importInputRef = useRef<HTMLInputElement>(null)
   const [importGlobalParent, setImportGlobalParent] = useState<string>("")
   const [importGlobalSubDept, setImportGlobalSubDept] = useState<string>("")
+  const [rowIssues, setRowIssues] = useState<Map<number, RowIssue[]>>(new Map())
+  const [isValidating, setIsValidating] = useState(false)
+  const [validationDone, setValidationDone] = useState(false)
 
   // ── Filtering ────────────────────────────────────────────────────────────────
 
@@ -359,7 +370,9 @@ export function FuncionariosClient({
       emp.name.toLowerCase().includes(s) ||
       (emp.cpf && emp.cpf.includes(s))
 
-    const matchesDept = !deptFilterIds || (emp.departmentId != null && deptFilterIds.has(emp.departmentId))
+    const matchesDept = filterPrincipal === "unassigned"
+      ? emp.departmentId == null
+      : !deptFilterIds || (emp.departmentId != null && deptFilterIds.has(emp.departmentId))
     const matchesPagamento = filterPagamento === "all" || normalizePag(emp.pagamento) === filterPagamento
     const matchesStatus = filterStatus === "all" || emp.status === filterStatus
 
@@ -499,6 +512,21 @@ export function FuncionariosClient({
     } finally {
       setLoading(false)
       router.refresh()
+    }
+  }
+
+  async function handleDeleteUnassigned() {
+    setLoading(true)
+    try {
+      const result = await deleteUnassignedEmployees()
+      setLocalEmployees(prev => prev.filter(e => e.departmentId != null))
+      setDeleteUnassignedOpen(false)
+      alert(`${result.deleted} funcionário${result.deleted !== 1 ? "s" : ""} sem unidade excluído${result.deleted !== 1 ? "s" : ""}.`)
+      router.refresh()
+    } catch (err: any) {
+      alert("Erro: " + err.message)
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -696,26 +724,137 @@ ${rows.map((emp, i) => `<tr>
     const f = e.dataTransfer.files[0]; if (f) handleImportFile(f)
   }, [departments])
 
+  const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null)
+
   async function handleConfirmImport() {
     if (!importRows.length) return
+    if (!importGlobalParent) {
+      alert("Por favor, selecione a unidade principal dos funcionários antes de importar.")
+      return
+    }
     setIsImporting(true)
+    setImportProgress(null)
+
+    const rows = importRows.map(({ _deptName: _, ...r }) => r)
+    const BATCH = 100
+    const batches: typeof rows[] = []
+    for (let i = 0; i < rows.length; i += BATCH) batches.push(rows.slice(i, i + BATCH))
+
+    let totalInserted = 0
+    let totalUpdated = 0
+    let totalSkipped = 0
+
     try {
-      const result = await importEmployees(importRows.map(({ _deptName: _, ...r }) => r))
-      alert(`${result.imported} funcionário${result.imported !== 1 ? "s" : ""} importado${result.imported !== 1 ? "s" : ""} com sucesso!`)
+      for (let b = 0; b < batches.length; b++) {
+        setImportProgress({ done: b * BATCH, total: rows.length })
+        const result = await importEmployees(batches[b])
+        totalInserted += result.inserted
+        totalUpdated += result.updated
+        totalSkipped += result.skippedDuplicates
+      }
+      setImportProgress({ done: rows.length, total: rows.length })
+
+      const parts = [`${totalInserted} novo${totalInserted !== 1 ? "s" : ""}`]
+      if (totalUpdated > 0) parts.push(`${totalUpdated} atualizado${totalUpdated !== 1 ? "s" : ""}`)
+      if (totalSkipped > 0) parts.push(`${totalSkipped} ignorado${totalSkipped !== 1 ? "s" : ""} (CPF conflitante)`)
+      alert(`Importação concluída: ${parts.join(", ")}.`)
       setImportOpen(false)
       setImportFile(null)
       setImportRows([])
     } catch (err: any) {
-      alert("Erro ao importar: " + err.message)
+      alert(`Erro no lote ${Math.ceil((importProgress?.done ?? 0) / BATCH) + 1}: ${err.message}`)
     } finally {
       setIsImporting(false)
+      setImportProgress(null)
     }
   }
 
   function openImport() {
     setImportFile(null); setImportRows([]); setImportHeaders([])
     setImportGlobalParent(""); setImportGlobalSubDept("")
+    setRowIssues(new Map()); setValidationDone(false)
     setImportOpen(true)
+  }
+
+  function invalidateValidation() {
+    setRowIssues(new Map())
+    setValidationDone(false)
+  }
+
+  async function handleValidate() {
+    setIsValidating(true)
+    try {
+      const issues = new Map<number, RowIssue[]>()
+      const addIssue = (i: number, issue: RowIssue) => {
+        if (!issues.has(i)) issues.set(i, [])
+        issues.get(i)!.push(issue)
+      }
+
+      // 1. CPF duplicado dentro da própria planilha
+      const cpfIdxMap = new Map<string, number[]>()
+      importRows.forEach((r, i) => {
+        if (r.cpf) {
+          const c = r.cpf.replace(/\D/g, "")
+          if (!cpfIdxMap.has(c)) cpfIdxMap.set(c, [])
+          cpfIdxMap.get(c)!.push(i)
+        }
+      })
+      cpfIdxMap.forEach((indices) => {
+        if (indices.length > 1)
+          indices.slice(0, -1).forEach(i =>
+            addIssue(i, { type: "dup_in_file", label: "CPF duplicado na planilha", severity: "error" })
+          )
+      })
+
+      // 2. CPFs já existentes no banco
+      const cpfsToCheck = importRows
+        .map((r, i) => ({ i, cpf: r.cpf?.replace(/\D/g, "") }))
+        .filter((x): x is { i: number; cpf: string } => !!x.cpf)
+      if (cpfsToCheck.length > 0) {
+        const dbResults = await validateImportCpfs(cpfsToCheck.map(x => x.cpf))
+        const dbMap = new Map(dbResults.map(r => [r.cpf, r.status]))
+        cpfsToCheck.forEach(({ i, cpf }) => {
+          const s = dbMap.get(cpf)
+          if (s === "exists_other")
+            addIssue(i, { type: "conflict_other", label: "CPF pertence a outra empresa — será ignorado", severity: "error" })
+          else if (s === "exists_same")
+            addIssue(i, { type: "will_update", label: "Já cadastrado — será atualizado", severity: "warning" })
+        })
+      }
+
+      // 3. Sem unidade
+      importRows.forEach((r, i) => {
+        if (!r.departmentId)
+          addIssue(i, { type: "no_unit", label: "Sem unidade definida", severity: "warning" })
+      })
+
+      // 4. Salário zero
+      importRows.forEach((r, i) => {
+        if (!r.salary || r.salary === 0)
+          addIssue(i, { type: "zero_salary", label: "Salário R$ 0,00", severity: "warning" })
+      })
+
+      setRowIssues(issues)
+      setValidationDone(true)
+    } catch (err: any) {
+      alert("Erro na validação: " + err.message)
+    } finally {
+      setIsValidating(false)
+    }
+  }
+
+  function removeImportRow(i: number) {
+    setImportRows(prev => prev.filter((_, idx) => idx !== i))
+    invalidateValidation()
+  }
+
+  function removeAllErrorRows() {
+    const errorIdx = new Set<number>()
+    rowIssues.forEach((issues, i) => {
+      if (issues.some(iss => iss.severity === "error")) errorIdx.add(i)
+    })
+    setImportRows(prev => prev.filter((_, i) => !errorIdx.has(i)))
+    invalidateValidation()
   }
 
   function handleApplyGlobalUnit() {
@@ -795,6 +934,13 @@ ${rows.map((emp, i) => `<tr>
                 <CheckCircle2 className="h-4 w-4 text-emerald-500" />
                 <span>Ativar Todos</span>
               </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => setDeleteUnassignedOpen(true)}
+                className="gap-2 cursor-pointer text-red-700 focus:text-red-700"
+              >
+                <Trash2 className="h-4 w-4 text-red-500" />
+                <span>Excluir Sem Unidade</span>
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
 
@@ -836,6 +982,7 @@ ${rows.map((emp, i) => `<tr>
             className="h-10 min-w-[180px] rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
           >
             <option value="all">Todas as unidades</option>
+            <option value="unassigned">Sem unidade</option>
             {principalTree.map((root: any) => (
               <option key={root.id} value={root.id}>
                 {toTitleCase(root.name)}
@@ -844,7 +991,7 @@ ${rows.map((emp, i) => `<tr>
           </select>
 
           {/* Nível 2 — Sub-unidade (aparece só quando uma principal está selecionada) */}
-          {filterPrincipal !== "all" && subUnitList.length > 0 && (
+          {filterPrincipal !== "all" && filterPrincipal !== "unassigned" && subUnitList.length > 0 && (
             <select
               value={filterDept}
               onChange={e => setFilterDept(e.target.value)}
@@ -1468,7 +1615,7 @@ ${rows.map((emp, i) => `<tr>
                   <p className="truncate text-sm font-bold text-slate-800">{importFile.name}</p>
                   <p className="text-xs text-slate-500 font-medium">{importRows.length} registro{importRows.length !== 1 ? "s" : ""} detectado{importRows.length !== 1 ? "s" : ""}</p>
                 </div>
-                <button onClick={() => { setImportFile(null); setImportRows([]); setImportHeaders([]); setImportGlobalParent(""); setImportGlobalSubDept("") }}
+                <button onClick={() => { setImportFile(null); setImportRows([]); setImportHeaders([]); setImportGlobalParent(""); setImportGlobalSubDept(""); invalidateValidation() }}
                   className="rounded-lg p-1.5 text-slate-400 hover:bg-white hover:text-red-500 hover:shadow-sm transition-all">
                   <X className="h-4 w-4" />
                 </button>
@@ -1549,6 +1696,44 @@ ${rows.map((emp, i) => `<tr>
               </div>
             )}
 
+            {/* ── Validation ── */}
+            {importRows.length > 0 && (
+              <div className="space-y-2">
+                {!validationDone ? (
+                  <button
+                    onClick={handleValidate}
+                    disabled={isValidating}
+                    className="w-full flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 py-3 text-xs font-black uppercase tracking-wider text-slate-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50/40 transition-all disabled:opacity-60"
+                  >
+                    {isValidating ? <><Loader2 className="h-4 w-4 animate-spin" /> VERIFICANDO DIVERGÊNCIAS...</> : <><AlertCircle className="h-4 w-4" /> VERIFICAR DIVERGÊNCIAS ANTES DE IMPORTAR</>}
+                  </button>
+                ) : (() => {
+                  const errorCount = [...rowIssues.values()].filter(iss => iss.some(i => i.severity === "error")).length
+                  const warnCount = [...rowIssues.values()].filter(iss => iss.every(i => i.severity === "warning")).length
+                  const okCount = importRows.length - rowIssues.size
+                  return (
+                    <div className={`rounded-xl border px-4 py-3 flex items-center gap-3 flex-wrap ${errorCount > 0 ? "border-red-200 bg-red-50" : warnCount > 0 ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}>
+                      <div className="flex-1 flex flex-wrap gap-2 items-center">
+                        {errorCount > 0 && <span className="text-xs font-black text-red-700 bg-red-100 border border-red-200 rounded-full px-3 py-1">{errorCount} erro{errorCount > 1 ? "s" : ""} crítico{errorCount > 1 ? "s" : ""}</span>}
+                        {warnCount > 0 && <span className="text-xs font-black text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-3 py-1">{warnCount} aviso{warnCount > 1 ? "s" : ""}</span>}
+                        {okCount > 0 && <span className="text-xs font-black text-emerald-700 bg-emerald-100 border border-emerald-200 rounded-full px-3 py-1">{okCount} sem problemas</span>}
+                      </div>
+                      <div className="flex gap-2">
+                        {errorCount > 0 && (
+                          <button onClick={removeAllErrorRows} className="text-xs font-black text-red-700 bg-white border border-red-300 rounded-lg px-3 py-1.5 hover:bg-red-600 hover:text-white transition-all">
+                            Remover {errorCount} com erro
+                          </button>
+                        )}
+                        <button onClick={handleValidate} disabled={isValidating} className="text-xs font-black text-slate-600 bg-white border border-slate-200 rounded-lg px-3 py-1.5 hover:bg-slate-100 transition-all">
+                          {isValidating ? <Loader2 className="h-3 w-3 animate-spin" /> : "Reverificar"}
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })()}
+              </div>
+            )}
+
             {/* Preview table */}
             {importRows.length > 0 && (
               <div className="overflow-hidden rounded-xl border border-slate-200 shadow-sm">
@@ -1556,18 +1741,37 @@ ${rows.map((emp, i) => `<tr>
                   <table className="w-full text-sm">
                     <thead className="sticky top-0 bg-slate-50 z-10 border-b border-slate-200">
                       <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400 text-left">
-                        <th className="px-4 py-3 w-[30%]">NOME / CARGO</th>
-                        <th className="px-4 py-3 w-[15%]">CPF</th>
-                        <th className="px-4 py-3 w-[40%]">UNIDADE / DEPARTAMENTO</th>
-                        <th className="px-4 py-3 w-[15%] text-right">SALÁRIO</th>
+                        <th className="px-4 py-3 w-[28%]">NOME / CARGO</th>
+                        <th className="px-4 py-3 w-[14%]">CPF</th>
+                        <th className="px-4 py-3 w-[36%]">UNIDADE / DEPARTAMENTO</th>
+                        <th className="px-4 py-3 w-[14%] text-right">SALÁRIO</th>
+                        <th className="px-2 py-3 w-[8%]"></th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 bg-white">
-                      {importRows.map((r, i) => (
-                        <tr key={i} className={`transition-colors ${r.departmentId ? "hover:bg-slate-50/50" : "hover:bg-amber-50/30 bg-amber-50/10"}`}>
+                      {importRows.map((r, i) => {
+                        const issues = rowIssues.get(i) ?? []
+                        const hasError = issues.some(iss => iss.severity === "error")
+                        const hasWarn = issues.some(iss => iss.severity === "warning")
+                        const rowCls = hasError
+                          ? "bg-red-50/60 hover:bg-red-50"
+                          : hasWarn
+                          ? "bg-amber-50/40 hover:bg-amber-50/60"
+                          : "hover:bg-slate-50/50"
+                        return (
+                        <tr key={i} className={`transition-colors ${rowCls}`}>
                           <td className="px-4 py-3">
                             <p className="font-bold text-slate-800 text-sm leading-tight">{r.name}</p>
                             <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mt-0.5">{r.position?.split(' ').slice(0, 3).join(' ') || "—"}</p>
+                            {issues.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {issues.map((iss, j) => (
+                                  <span key={j} className={`inline-flex items-center gap-0.5 text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-wide ${iss.severity === "error" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}>
+                                    {iss.severity === "error" ? "✕" : "!"} {iss.label}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                           </td>
                           <td className="px-4 py-3 font-mono text-xs text-slate-500">{fmtCpf(r.cpf ?? null)}</td>
                           <td className="px-4 py-3">
@@ -1578,6 +1782,7 @@ ${rows.map((emp, i) => `<tr>
                                   const next = [...importRows]
                                   next[i] = { ...next[i], departmentId: val === "missing" ? undefined : val }
                                   setImportRows(next)
+                                  invalidateValidation()
                                 }}
                               >
                                 <SelectTrigger className={`h-8 text-xs font-medium transition-all ${!r.departmentId ? "border-amber-300 bg-amber-50 text-amber-900" : "bg-white border-slate-200 text-slate-700"}`}>
@@ -1605,17 +1810,25 @@ ${rows.map((emp, i) => `<tr>
                                 </div>
                               )}
                               {r._deptName && r.departmentId && (
-                                <p className="text-[10px] text-emerald-600 font-semibold truncate">
-                                  ✓ &quot;{r._deptName}&quot;
-                                </p>
+                                <p className="text-[10px] text-emerald-600 font-semibold truncate">✓ &quot;{r._deptName}&quot;</p>
                               )}
                             </div>
                           </td>
                           <td className="px-4 py-3 text-right">
-                            <p className="font-black text-slate-900 text-sm">{fmtBRL(r.salary ?? 0)}</p>
+                            <p className={`font-black text-sm ${hasError ? "text-red-400 line-through" : "text-slate-900"}`}>{fmtBRL(r.salary ?? 0)}</p>
+                          </td>
+                          <td className="px-2 py-3 text-center">
+                            <button
+                              onClick={() => removeImportRow(i)}
+                              className="rounded-md p-1 text-slate-300 hover:bg-red-100 hover:text-red-600 transition-all"
+                              title="Remover linha"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
                           </td>
                         </tr>
-                      ))}
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1634,23 +1847,28 @@ ${rows.map((emp, i) => `<tr>
           </div>
 
           <DialogFooter className="bg-slate-50 px-6 py-4 border-t border-slate-200 shrink-0 flex items-center justify-between">
-            <div className="text-xs text-slate-400 font-medium">
-              {importRows.length > 0 && (
-                <span>{importRows.filter(r => !r.departmentId).length > 0
+            <div className="text-xs font-semibold">
+              {!importGlobalParent && importRows.length > 0 ? (
+                <span className="text-red-500 flex items-center gap-1">
+                  <AlertCircle className="h-3.5 w-3.5" />
+                  Selecione a Unidade Principal para habilitar a importação
+                </span>
+              ) : importRows.length > 0 ? (
+                <span className="text-slate-400 font-medium">{importRows.filter(r => !r.departmentId).length > 0
                   ? `⚠ ${importRows.filter(r => !r.departmentId).length} funcionário${importRows.filter(r => !r.departmentId).length > 1 ? "s" : ""} sem unidade definida`
                   : "✓ Todos os funcionários têm unidade definida"
                 }</span>
-              )}
+              ) : null}
             </div>
             <div className="flex gap-3">
               <Button variant="ghost" onClick={() => setImportOpen(false)} className="text-slate-500 font-black uppercase text-xs tracking-widest">CANCELAR</Button>
               <Button
                 onClick={handleConfirmImport}
-                disabled={importRows.length === 0 || isImporting}
+                disabled={importRows.length === 0 || isImporting || !importGlobalParent}
                 className="bg-blue-600 hover:bg-blue-700 gap-2 px-8 shadow-lg shadow-blue-600/20 font-black uppercase text-xs tracking-widest"
               >
                 {isImporting ? (
-                  <><Loader2 className="h-4 w-4 animate-spin" /> IMPORTANDO...</>
+                  <><Loader2 className="h-4 w-4 animate-spin" /> {importProgress ? `${importProgress.done}/${importProgress.total}...` : "PREPARANDO..."}</>
                 ) : (
                   <><CheckCircle2 className="h-4 w-4" /> IMPORTAR {importRows.length} {importRows.length === 1 ? 'FUNCIONÁRIO' : 'FUNCIONÁRIOS'}</>
                 )}
@@ -1761,6 +1979,25 @@ ${rows.map((emp, i) => `<tr>
               }}
             >
               Ativar Todos
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ── Excluir Sem Unidade Confirm ── */}
+      <AlertDialog open={deleteUnassignedOpen} onOpenChange={setDeleteUnassignedOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir funcionários sem unidade?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Todos os funcionários <strong>sem unidade/departamento definido</strong> serão excluídos permanentemente.
+              Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteUnassigned} disabled={loading} className="bg-red-600 hover:bg-red-700">
+              Excluir todos sem unidade
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
