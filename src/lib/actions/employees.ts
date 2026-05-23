@@ -375,6 +375,23 @@ export async function importEmployees(
   return { inserted, updated, skippedDuplicates }
 }
 
+export async function deleteEmployeesByCpfs(cpfs: string[]) {
+  await ensureAdmin()
+  const supabase = getSupabaseAdmin()
+  let deleted = 0
+  for (const chunk of chunkArr(cpfs, 100)) {
+    const { data, error } = await supabase
+      .from("Employee")
+      .delete()
+      .in("cpf", chunk)
+      .select("id")
+    if (error) throw new Error(error.message)
+    deleted += (data ?? []).length
+  }
+  revalidatePath("/funcionarios")
+  return { deleted }
+}
+
 export async function validateImportCpfs(
   cpfs: string[]
 ): Promise<{ cpf: string; status: "exists_same" | "exists_other" }[]> {

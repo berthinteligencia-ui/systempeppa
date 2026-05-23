@@ -31,7 +31,7 @@ import {
   createEmployee, updateEmployee, deleteEmployee,
   deleteEmployeesBatch, importEmployees, resetDepartmentPaymentStatus,
   updateEmployeePaymentStatus, updateEmployeeStatus, reactivateAllEmployees,
-  deleteUnassignedEmployees, validateImportCpfs,
+  deleteUnassignedEmployees, validateImportCpfs, deleteEmployeesByCpfs,
 } from "@/lib/actions/employees"
 import { getEmployeeComprovantes, deleteComprovante, saveComprovanteManual } from "@/lib/actions/comprovante"
 import { buildTree, flattenTree, toTitleCase } from "@/lib/utils/departments"
@@ -322,6 +322,8 @@ export function FuncionariosClient({
   const [rowIssues, setRowIssues] = useState<Map<number, RowIssue[]>>(new Map())
   const [isValidating, setIsValidating] = useState(false)
   const [validationDone, setValidationDone] = useState(false)
+  const [deleteConflictOpen, setDeleteConflictOpen] = useState(false)
+  const [isDeletingConflicts, setIsDeletingConflicts] = useState(false)
 
   // ── Filtering ────────────────────────────────────────────────────────────────
 
@@ -774,6 +776,31 @@ ${rows.map((emp, i) => `<tr>
     setImportGlobalParent(""); setImportGlobalSubDept("")
     setRowIssues(new Map()); setValidationDone(false)
     setImportOpen(true)
+  }
+
+  const conflictCpfs = (() => {
+    const cpfs: string[] = []
+    rowIssues.forEach((issues, i) => {
+      if (issues.some(iss => iss.type === "conflict_other")) {
+        const cpf = importRows[i]?.cpf?.replace(/\D/g, "")
+        if (cpf) cpfs.push(cpf)
+      }
+    })
+    return cpfs
+  })()
+
+  async function handleDeleteConflicts() {
+    setIsDeletingConflicts(true)
+    try {
+      const result = await deleteEmployeesByCpfs(conflictCpfs)
+      setDeleteConflictOpen(false)
+      await handleValidate()
+      alert(`${result.deleted} funcionário${result.deleted !== 1 ? "s" : ""} excluído${result.deleted !== 1 ? "s" : ""} do banco.`)
+    } catch (err: any) {
+      alert("Erro ao excluir: " + err.message)
+    } finally {
+      setIsDeletingConflicts(false)
+    }
   }
 
   function invalidateValidation() {
@@ -1745,9 +1772,14 @@ ${rows.map((emp, i) => `<tr>
                         <button onClick={downloadErrorRows} className="flex items-center gap-1.5 text-xs font-black text-slate-700 bg-white border border-slate-300 rounded-lg px-3 py-1.5 hover:bg-slate-50 transition-all">
                           <FileDown className="h-3.5 w-3.5" /> Baixar planilha
                         </button>
+                        {conflictCpfs.length > 0 && (
+                          <button onClick={() => setDeleteConflictOpen(true)} className="flex items-center gap-1.5 text-xs font-black text-red-700 bg-white border border-red-300 rounded-lg px-3 py-1.5 hover:bg-red-600 hover:text-white transition-all">
+                            <Trash2 className="h-3.5 w-3.5" /> Excluir {conflictCpfs.length} do banco
+                          </button>
+                        )}
                         {errorCount > 0 && (
                           <button onClick={removeAllErrorRows} className="text-xs font-black text-red-700 bg-white border border-red-300 rounded-lg px-3 py-1.5 hover:bg-red-600 hover:text-white transition-all">
-                            Remover {errorCount} com erro
+                            Remover {errorCount} da lista
                           </button>
                         )}
                         <button onClick={handleValidate} disabled={isValidating} className="text-xs font-black text-slate-600 bg-white border border-slate-200 rounded-lg px-3 py-1.5 hover:bg-slate-100 transition-all">
@@ -2024,6 +2056,26 @@ ${rows.map((emp, i) => `<tr>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={handleDeleteUnassigned} disabled={loading} className="bg-red-600 hover:bg-red-700">
               Excluir todos sem unidade
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ── Excluir CPFs conflitantes do banco ── */}
+      <AlertDialog open={deleteConflictOpen} onOpenChange={setDeleteConflictOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir {conflictCpfs.length} funcionários do banco?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esses funcionários estão cadastrados em outra empresa no sistema e estão bloqueando a importação.
+              Excluí-los irá <strong>removê-los permanentemente</strong> de qualquer empresa que os contenha.
+              Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeletingConflicts}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteConflicts} disabled={isDeletingConflicts} className="bg-red-600 hover:bg-red-700">
+              {isDeletingConflicts ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Excluindo...</> : `Excluir ${conflictCpfs.length} funcionários`}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
