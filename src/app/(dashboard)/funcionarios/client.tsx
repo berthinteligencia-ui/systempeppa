@@ -857,6 +857,29 @@ ${rows.map((emp, i) => `<tr>
     invalidateValidation()
   }
 
+  function downloadErrorRows() {
+    const rows: Record<string, unknown>[] = []
+    rowIssues.forEach((issues, i) => {
+      const r = importRows[i]
+      if (!r) return
+      rows.push({
+        "Nome": r.name,
+        "CPF": fmtCpf(r.cpf ?? null),
+        "Cargo": r.position || "",
+        "Salário": r.salary ?? 0,
+        "Unidade": departments.find(d => d.id === r.departmentId)?.name ?? r._deptName ?? "",
+        "Erros": issues.filter(iss => iss.severity === "error").map(iss => iss.label).join("; "),
+        "Avisos": issues.filter(iss => iss.severity === "warning").map(iss => iss.label).join("; "),
+      })
+    })
+    if (!rows.length) return
+    const ws = XLSX.utils.json_to_sheet(rows)
+    ws["!cols"] = [{ wch: 35 }, { wch: 16 }, { wch: 25 }, { wch: 12 }, { wch: 30 }, { wch: 45 }, { wch: 35 }]
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, "Divergências")
+    XLSX.writeFile(wb, `divergencias-${new Date().toLocaleDateString("pt-BR").replace(/\//g, "-")}.xlsx`)
+  }
+
   function handleApplyGlobalUnit() {
     if (!importGlobalParent) return
     const targetId = importGlobalSubDept || importGlobalParent
@@ -1718,7 +1741,10 @@ ${rows.map((emp, i) => `<tr>
                         {warnCount > 0 && <span className="text-xs font-black text-amber-700 bg-amber-100 border border-amber-200 rounded-full px-3 py-1">{warnCount} aviso{warnCount > 1 ? "s" : ""}</span>}
                         {okCount > 0 && <span className="text-xs font-black text-emerald-700 bg-emerald-100 border border-emerald-200 rounded-full px-3 py-1">{okCount} sem problemas</span>}
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 flex-wrap">
+                        <button onClick={downloadErrorRows} className="flex items-center gap-1.5 text-xs font-black text-slate-700 bg-white border border-slate-300 rounded-lg px-3 py-1.5 hover:bg-slate-50 transition-all">
+                          <FileDown className="h-3.5 w-3.5" /> Baixar planilha
+                        </button>
                         {errorCount > 0 && (
                           <button onClick={removeAllErrorRows} className="text-xs font-black text-red-700 bg-white border border-red-300 rounded-lg px-3 py-1.5 hover:bg-red-600 hover:text-white transition-all">
                             Remover {errorCount} com erro
