@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, Fragment } from "react"
 import {
   Plus, Pencil, Trash2, Building2, FileSpreadsheet, Search,
   Power, RotateCcw, ChevronDown, ChevronRight, FolderOpen, Folder, Crown,
@@ -8,6 +8,9 @@ import {
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
@@ -443,18 +446,40 @@ export function UnidadesClient({ departments, userRole }: Props) {
                   Unidade pai
                   <span className="ml-1 text-slate-300 font-normal normal-case">(opcional)</span>
                 </label>
-                <select
-                  value={parentId}
-                  onChange={e => setParentId(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                <Select
+                  value={parentId || "__none__"}
+                  onValueChange={v => setParentId(v === "__none__" ? "" : v)}
                 >
-                  <option value="">— Nenhum (raiz) —</option>
-                  {parentOptions(editing?.id).map(opt => (
-                    <option key={opt.id} value={opt.id}>
-                      {"  ".repeat(opt.depth)}{opt.depth > 0 ? "↳ " : ""}{opt.name}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="— Nenhum (raiz) —" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__" textValue="Nenhum (raiz)">
+                      <span className="text-slate-400 italic">— Nenhum (raiz) —</span>
+                    </SelectItem>
+                    {parentOptions(editing?.id).map(opt => (
+                      <SelectItem key={opt.id} value={opt.id} textValue={opt.name}>
+                        {opt.depth === 0 ? (
+                          <div className="flex items-center gap-2 py-0.5">
+                            <Crown className="h-3.5 w-3.5 shrink-0 text-indigo-500" />
+                            <span className="font-bold text-indigo-800">{opt.name}</span>
+                            <span className="ml-1 rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-indigo-600">
+                              Principal
+                            </span>
+                          </div>
+                        ) : (
+                          <div
+                            className="flex items-center gap-1 py-0.5"
+                            style={{ paddingLeft: (opt.depth - 1) * 16 + 12 }}
+                          >
+                            <span className="text-slate-400 text-xs">↳</span>
+                            <span className="text-slate-700">{opt.name}</span>
+                          </div>
+                        )}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <p className="text-[11px] text-slate-400">
                   Selecione para criar como sub-grupo de uma unidade existente.
                 </p>

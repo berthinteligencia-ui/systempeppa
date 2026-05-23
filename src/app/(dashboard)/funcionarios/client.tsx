@@ -38,7 +38,7 @@ import { buildTree, flattenTree, toTitleCase } from "@/lib/utils/departments"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Department = { id: string; name: string; parentId?: string | null; children?: Department[] }
+type Department = { id: string; name: string; parentId?: string | null; nivel?: string | null; children?: Department[] }
 type Employee = {
   id: string; name: string; cpf: string | null; email: string | null
   phone: string | null; position: string; salary: number | string
@@ -103,6 +103,32 @@ function fmtPhone(p: string | null) {
   if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`
   if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`
   return p
+}
+
+function getAbsoluteRoot(dept: Department | null, allDepts: Department[]): string {
+  if (!dept) return ""
+  const map = new Map(allDepts.map(d => [d.id, d]))
+  let cur: Department = dept
+  while (cur.parentId) {
+    const parent = map.get(cur.parentId)
+    if (!parent) break
+    cur = parent
+  }
+  return cur.name
+}
+
+function getPrincipalUnit(dept: Department | null, allDepts: Department[]): string {
+  if (!dept) return ""
+  if (dept.nivel === "PRINCIPAL") return dept.name
+  const map = new Map(allDepts.map(d => [d.id, d]))
+  let cur: Department = dept
+  while (cur.parentId) {
+    const parent = map.get(cur.parentId)
+    if (!parent) break
+    if (parent.nivel === "PRINCIPAL") return parent.name
+    cur = parent
+  }
+  return cur.name
 }
 
 // Column detection for import
@@ -609,7 +635,7 @@ export function FuncionariosClient({
 <p class="sub">Gerado em ${new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" })} · ${rows.length} funcionário${rows.length !== 1 ? "s" : ""}${filterDept !== "all" ? ` · ${departments.find(d => d.id === filterDept)?.name ?? ""}` : filterPrincipal !== "all" ? ` · ${departments.find(d => d.id === filterPrincipal)?.name ?? ""} (todos)` : ""}${filterPagamento !== "all" ? ` · Pagamento: ${pagamentoMap[filterPagamento]?.label ?? filterPagamento}` : ""}</p>
 <table>
 <thead><tr>
-  <th>#</th><th>Nome</th><th>CPF</th><th>Cargo</th><th>Unidade</th><th>Telefone</th><th>Salário</th><th>Status</th><th>Pagamento</th>
+  <th>#</th><th>Nome</th><th>CPF</th><th>Cargo</th><th>Grupo</th><th>Unidade</th><th>Telefone</th><th>Salário</th><th>Status</th><th>Pagamento</th>
 </tr></thead>
 <tbody>
 ${rows.map((emp, i) => `<tr>
@@ -617,7 +643,8 @@ ${rows.map((emp, i) => `<tr>
   <td>${toTitleCase(emp.name)}</td>
   <td>${fmtCpf(emp.cpf)}</td>
   <td>${emp.position}</td>
-  <td>${emp.department?.name ?? "—"}</td>
+  <td>${getAbsoluteRoot(emp.department, departments)}</td>
+  <td>${getPrincipalUnit(emp.department, departments)}</td>
   <td>${fmtPhone(emp.phone)}</td>
   <td>${fmtBRL(Number(emp.salary))}</td>
   <td><span class="badge ${emp.status}">${statusMap[emp.status as keyof typeof statusMap]?.label ?? emp.status}</span></td>
@@ -636,7 +663,8 @@ ${rows.map((emp, i) => `<tr>
       "Nome": toTitleCase(emp.name),
       "CPF": fmtCpf(emp.cpf),
       "Cargo": emp.position,
-      "Unidade": emp.department?.name ?? "",
+      "Grupo": getAbsoluteRoot(emp.department, departments),
+      "Unidade": getPrincipalUnit(emp.department, departments),
       "E-mail": emp.email ?? "",
       "Telefone": fmtPhone(emp.phone),
       "Salário": Number(emp.salary),
@@ -649,7 +677,7 @@ ${rows.map((emp, i) => `<tr>
       "Chave PIX": emp.pixKey ?? "",
     }))
     const ws = XLSX.utils.json_to_sheet(data)
-    ws["!cols"] = [{ wch: 35 }, { wch: 16 }, { wch: 22 }, { wch: 20 }, { wch: 28 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 20 }, { wch: 10 }, { wch: 15 }, { wch: 25 }]
+    ws["!cols"] = [{ wch: 35 }, { wch: 16 }, { wch: 22 }, { wch: 22 }, { wch: 26 }, { wch: 28 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 20 }, { wch: 10 }, { wch: 15 }, { wch: 25 }, { wch: 25 }]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, "Funcionários")
     const raw = XLSX.write(wb, { bookType: "xlsx", type: "array" })
