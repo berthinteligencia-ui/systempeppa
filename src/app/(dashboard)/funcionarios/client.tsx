@@ -117,15 +117,15 @@ function getAbsoluteRoot(dept: Department | null, allDepts: Department[]): strin
   return cur.name
 }
 
-function getPrincipalUnit(dept: Department | null, allDepts: Department[]): string {
+function getSecondLevelUnit(dept: Department | null, allDepts: Department[]): string {
   if (!dept) return ""
-  if (dept.nivel === "PRINCIPAL") return dept.name
+  if (!dept.parentId) return dept.name
   const map = new Map(allDepts.map(d => [d.id, d]))
   let cur: Department = dept
   while (cur.parentId) {
     const parent = map.get(cur.parentId)
     if (!parent) break
-    if (parent.nivel === "PRINCIPAL") return parent.name
+    if (!parent.parentId) return cur.name  // cur is direct child of root → it's the "Unidade"
     cur = parent
   }
   return cur.name
@@ -644,7 +644,7 @@ ${rows.map((emp, i) => `<tr>
   <td>${fmtCpf(emp.cpf)}</td>
   <td>${emp.position}</td>
   <td>${getAbsoluteRoot(emp.department, departments)}</td>
-  <td>${getPrincipalUnit(emp.department, departments)}</td>
+  <td>${getSecondLevelUnit(emp.department, departments)}</td>
   <td>${fmtPhone(emp.phone)}</td>
   <td>${fmtBRL(Number(emp.salary))}</td>
   <td><span class="badge ${emp.status}">${statusMap[emp.status as keyof typeof statusMap]?.label ?? emp.status}</span></td>
@@ -664,7 +664,7 @@ ${rows.map((emp, i) => `<tr>
       "CPF": fmtCpf(emp.cpf),
       "Cargo": emp.position,
       "Grupo": getAbsoluteRoot(emp.department, departments),
-      "Unidade": getPrincipalUnit(emp.department, departments),
+      "Unidade": getSecondLevelUnit(emp.department, departments),
       "E-mail": emp.email ?? "",
       "Telefone": fmtPhone(emp.phone),
       "Salário": Number(emp.salary),
