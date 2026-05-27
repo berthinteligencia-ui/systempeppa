@@ -904,9 +904,19 @@ export function FolhaPagamentoClient({
         } finally { setIsLoadingHistory(false) }
     }
 
-    const filteredHistory = historyFilterUnit
-        ? history.filter(h => h.departmentId === historyFilterUnit)
-        : history
+    const filteredHistory = useMemo(() => {
+        if (!historyFilterUnit) return history
+        // Build a set containing the unit itself and ALL its descendants
+        const ids = new Set<string>([historyFilterUnit])
+        const addDesc = (pid: string) => {
+            departments.filter(d => d.parentId === pid).forEach(d => {
+                ids.add(d.id)
+                addDesc(d.id)
+            })
+        }
+        addDesc(historyFilterUnit)
+        return history.filter(h => h.departmentId != null && ids.has(h.departmentId))
+    }, [history, historyFilterUnit, departments])
 
     async function loadAnalysis(id: string) {
         setIsLoadingHistory(true)
@@ -2586,9 +2596,17 @@ export function FolhaPagamentoClient({
             )}
 
             {/* ─── History dialog ─── */}
-            <Dialog open={isHistoryOpen} onOpenChange={setIsHistoryOpen}>
+            <Dialog open={isHistoryOpen} onOpenChange={v => { setIsHistoryOpen(v); if (!v) setHistoryFilterUnit(null) }}>
                 <DialogContent className="max-w-2xl">
-                    <DialogHeader><DialogTitle>Histórico de Fechamentos</DialogTitle></DialogHeader>
+                    <DialogHeader>
+                        <DialogTitle>Histórico de Fechamentos</DialogTitle>
+                        {historyFilterUnit && (
+                            <p className="text-xs text-slate-400 mt-0.5">
+                                Filtrando por: <span className="font-semibold text-slate-600">{departments.find(d => d.id === historyFilterUnit)?.name ?? historyFilterUnit}</span>
+                                <button onClick={() => setHistoryFilterUnit(null)} className="ml-2 text-blue-500 hover:underline">ver todos</button>
+                            </p>
+                        )}
+                    </DialogHeader>
                     <div className="py-4">
                         {isLoadingHistory ? (
                             <div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin text-blue-500" /></div>
