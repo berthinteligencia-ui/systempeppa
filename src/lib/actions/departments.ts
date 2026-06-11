@@ -52,6 +52,7 @@ export async function createDepartment(data: { name: string; cnpj?: string; pare
     }
   }
   revalidatePath("/unidades")
+  return { id: base.id }
 }
 
 export async function updateDepartment(id: string, data: { name: string; cnpj?: string; parentId?: string | null; nivel?: string }) {
@@ -90,14 +91,37 @@ export async function deleteDepartment(id: string) {
   const companyId = await getCompanyId()
   const supabase = getSupabaseAdmin()
 
-  // Move children to root before deleting (ignore error if parentId column doesn't exist yet)
+  const descendants = await getDescendantIds(id, companyId)
+  const allDeptIds = [id, ...descendants]
+
+  // Delete all Employees in these departments
+  check(await supabase.from("Employee")
+    .delete()
+    .in("departmentId", allDeptIds)
+    .eq("companyId", companyId))
+
+  // Delete all PayrollAnalysis (closures) in these departments
+  check(await supabase.from("PayrollAnalysis")
+    .delete()
+    .in("departmentId", allDeptIds)
+    .eq("companyId", companyId))
+
+  // Break parentId references among departments we are deleting to avoid foreign key issues
   await supabase.from("Department")
     .update({ parentId: null, updatedAt: new Date().toISOString() })
-    .eq("parentId", id)
+    .in("id", allDeptIds)
     .eq("companyId", companyId)
 
-  check(await supabase.from("Department").delete().eq("id", id).eq("companyId", companyId))
+  // Delete all these departments
+  check(await supabase.from("Department")
+    .delete()
+    .in("id", allDeptIds)
+    .eq("companyId", companyId))
+
   revalidatePath("/unidades")
+  revalidatePath("/funcionarios")
+  revalidatePath("/folha-pagamento")
+  revalidatePath("/dashboard")
 }
 
 export async function toggleDepartmentStatus(id: string, active: boolean) {

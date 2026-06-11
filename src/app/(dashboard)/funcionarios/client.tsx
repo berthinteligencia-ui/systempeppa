@@ -33,6 +33,7 @@ import {
   updateEmployeePaymentStatus, updateEmployeeStatus, reactivateAllEmployees,
   deleteUnassignedEmployees, validateImportCpfs, deleteEmployeesByCpfs,
 } from "@/lib/actions/employees"
+import { createDepartment } from "@/lib/actions/departments"
 import { getEmployeeComprovantes, deleteComprovante, saveComprovanteManual } from "@/lib/actions/comprovante"
 import { buildTree, flattenTree, toTitleCase } from "@/lib/utils/departments"
 
@@ -46,12 +47,14 @@ type Employee = {
   department: Department | null; lastReceiptUrl?: string | null
   lastReceiptAmount?: number | null
   bankName?: string; bankAgency?: string; bankAccount?: string; pixKey?: string
+  birthDate?: Date | string | null; motherName?: string | null
 }
 
 type ImportRow = {
   name: string; cpf?: string; phone?: string; email?: string
   position?: string; salary?: number; departmentId?: string; _deptName?: string
   bankName?: string; bankAgency?: string; bankAccount?: string; pixKey?: string
+  birthDate?: string; motherName?: string
 }
 
 type RowIssue = {
@@ -84,6 +87,7 @@ const empty = {
   name: "", position: "", salary: "", hireDate: "", departmentId: "",
   cpf: "", email: "", phone: "", status: "ACTIVE", pagamento: "pendente",
   bankName: "", bankAgency: "", bankAccount: "", pixKey: "",
+  birthDate: "", motherName: "",
 }
 
 function fmtBRL(n: number) {
@@ -138,11 +142,14 @@ const PHONE_COLS = ["telefone", "fone", "celular", "cel", "phone", "whatsapp", "
 const EMAIL_COLS = ["email", "e-mail", "mail", "correio", "endereço eletrônico"]
 const POSITION_COLS = ["cargo", "position", "funcao", "função", "ocupacao", "ocupação", "atividade", "setor/função"]
 const SALARY_COLS = ["salario", "salário", "salary", "remuneracao", "remuneração", "vencimento", "valor", "base", "líquido", "bruto"]
-const DEPT_COLS = ["unidade", "departamento", "setor", "department", "dept", "lotacao", "lotação", "filial", "estabelecimento"]
+const UNIDADE_COLS = ["unidade", "unit", "filial", "estabelecimento", "unidade/departamento"]
+const DEPAR_COLS = ["departamento", "department", "setor", "dept", "lotacao", "lotação"]
 const BANK_COLS = ["banco", "bank", "instituicao", "instituição"]
 const AGENCY_COLS = ["agencia", "agência", "agency", "ag"]
 const ACCOUNT_COLS = ["conta", "account", "ct"]
 const PIX_COLS = ["pix", "chave pix", "pix key", "chave"]
+const BIRTH_COLS = ["data de nascimento", "nascimento", "data nascimento", "aniversario", "aniversário", "birthdate", "birth_date"]
+const MOTHER_COLS = ["nome da mae", "nome da mãe", "mae", "mãe", "mothername", "mother_name", "genitora"]
 
 function matchCol(header: string, candidates: string[]) {
   const h = header.toLowerCase().trim().replace(/\s+/g, " ")
@@ -158,22 +165,26 @@ function detectImportCols(headers: string[]) {
     emailIdx: find(EMAIL_COLS),
     positionIdx: find(POSITION_COLS),
     salaryIdx: find(SALARY_COLS),
-    deptIdx: find(DEPT_COLS),
     bankIdx: find(BANK_COLS),
     agencyIdx: find(AGENCY_COLS),
     accountIdx: find(ACCOUNT_COLS),
     pixIdx: find(PIX_COLS),
+    birthIdx: find(BIRTH_COLS),
+    motherIdx: find(MOTHER_COLS),
+    unidadeIdx: find(UNIDADE_COLS),
+    deparIdx: find(DEPAR_COLS),
   }
 }
 
 function parseImportRows(rawRows: Record<string, unknown>[], headers: string[], departments: Department[]): ImportRow[] {
   const { 
-    nameIdx, cpfIdx, phoneIdx, emailIdx, positionIdx, salaryIdx, deptIdx,
-    bankIdx, agencyIdx, accountIdx, pixIdx
+    nameIdx, cpfIdx, phoneIdx, emailIdx, positionIdx, salaryIdx,
+    bankIdx, agencyIdx, accountIdx, pixIdx, birthIdx, motherIdx,
+    unidadeIdx, deparIdx
   } = detectImportCols(headers)
   if (nameIdx === -1) return []
 
-  const deptByName = new Map(departments.map((d) => [d.name.toLowerCase().trim(), d.id]))
+  const deptMap = new Map(departments.map((d) => [d.id, d]))
 
   return rawRows
     .map((r) => {
@@ -220,11 +231,43 @@ function parseImportRows(rawRows: Record<string, unknown>[], headers: string[], 
 
       let departmentId: string | undefined
       let _deptName: string | undefined
-      if (deptIdx !== -1) {
-        const dName = String(r[headers[deptIdx]] ?? "").trim().toUpperCase()
-        if (dName) {
-          _deptName = dName
-          departmentId = deptByName.get(dName.toLowerCase()) ?? undefined
+
+      const rawUnidade = unidadeIdx !== -1 ? String(r[headers[unidadeIdx]] ?? "").trim().toUpperCase() : ""
+      const rawDepartamento = deparIdx !== -1 ? String(r[headers[deparIdx]] ?? "").trim().toUpperCase() : ""
+
+      if (rawUnidade || rawDepartamento) {
+        _deptName = [rawUnidade, rawDepartamento].filter(Boolean).join(" / ")
+
+        const uniName = rawUnidade.toLowerCase()
+        const depName = rawDepartamento.toLowerCase()
+
+        // 1. Try to find a department matching 'Departamento' whose parent matches 'Unidade'
+        if (uniName && depName) {
+          const matchedDep = departments.find(d => {
+            if (d.name.toLowerCase() !== depName) return false
+            if (!d.parentId) return false
+            const parent = deptMap.get(d.parentId)
+            return parent && parent.name.toLowerCase() === uniName
+          })
+          if (matchedDep) {
+            departmentId = matchedDep.id
+          }
+        }
+
+        // 2. Fallback: Try to find by Departamento name alone
+        if (!departmentId && depName) {
+          const matchedDep = departments.find(d => d.name.toLowerCase() === depName)
+          if (matchedDep) {
+            departmentId = matchedDep.id
+          }
+        }
+
+        // 3. Fallback: Try to find by Unidade name alone (typically the root)
+        if (!departmentId && uniName) {
+          const matchedUni = departments.find(d => d.name.toLowerCase() === uniName)
+          if (matchedUni) {
+            departmentId = matchedUni.id
+          }
         }
       }
 
@@ -233,9 +276,46 @@ function parseImportRows(rawRows: Record<string, unknown>[], headers: string[], 
       const bankAccount = accountIdx !== -1 ? String(r[headers[accountIdx]] ?? "").trim() || undefined : undefined
       const pixKey = pixIdx !== -1 ? String(r[headers[pixIdx]] ?? "").trim().toUpperCase() || undefined : undefined
 
+      // Parse birthDate
+      const birthRaw = birthIdx !== -1 ? r[headers[birthIdx]] : undefined
+      let birthDate: string | undefined = undefined
+      if (birthRaw) {
+        if (birthRaw instanceof Date) {
+          birthDate = birthRaw.toISOString().split("T")[0]
+        } else {
+          const birthStr = String(birthRaw).trim()
+          if (birthStr) {
+            const num = Number(birthStr)
+            if (!isNaN(num) && num > 0) {
+              const d = new Date((num - 25569) * 86400 * 1000)
+              if (!isNaN(d.getTime())) {
+                birthDate = d.toISOString().split("T")[0]
+              }
+            } else {
+              let d = new Date(birthStr)
+              if (isNaN(d.getTime()) && birthStr.includes("/")) {
+                const parts = birthStr.split("/")
+                if (parts.length === 3) {
+                  const day = parts[0].padStart(2, "0")
+                  const month = parts[1].padStart(2, "0")
+                  const year = parts[2]
+                  d = new Date(`${year}-${month}-${day}`)
+                }
+              }
+              if (!isNaN(d.getTime())) {
+                birthDate = d.toISOString().split("T")[0]
+              }
+            }
+          }
+        }
+      }
+
+      // Parse motherName
+      const motherName = motherIdx !== -1 ? String(r[headers[motherIdx]] ?? "").trim().toUpperCase() || undefined : undefined
+
       return { 
         name, cpf, phone, email, position, salary, departmentId, _deptName,
-        bankName, bankAgency, bankAccount, pixKey
+        bankName, bankAgency, bankAccount, pixKey, birthDate, motherName
       }
     })
     .filter(Boolean) as ImportRow[]
@@ -435,6 +515,8 @@ export function FuncionariosClient({
       position: emp.position,
       salary: String(emp.salary),
       hireDate: new Date(emp.hireDate).toISOString().split("T")[0],
+      birthDate: emp.birthDate && !isNaN(new Date(emp.birthDate).getTime()) ? new Date(emp.birthDate).toISOString().split("T")[0] : "",
+      motherName: emp.motherName ?? "",
       departmentId: emp.departmentId ?? "",
       cpf: emp.cpf ?? "",
       email: emp.email ?? "",
@@ -458,6 +540,8 @@ export function FuncionariosClient({
         position: form.position.trim().toUpperCase() || "A DEFINIR",
         salary: parseFloat(form.salary),
         hireDate: form.hireDate || new Date().toISOString().split("T")[0],
+        birthDate: form.birthDate || null,
+        motherName: form.motherName.trim() || null,
         departmentId: form.departmentId || undefined,
         cpf: form.cpf || undefined,
         email: form.email || undefined,
@@ -635,7 +719,7 @@ export function FuncionariosClient({
 <p class="sub">Gerado em ${new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" })} · ${rows.length} funcionário${rows.length !== 1 ? "s" : ""}${filterDept !== "all" ? ` · ${departments.find(d => d.id === filterDept)?.name ?? ""}` : filterPrincipal !== "all" ? ` · ${departments.find(d => d.id === filterPrincipal)?.name ?? ""} (todos)` : ""}${filterPagamento !== "all" ? ` · Pagamento: ${pagamentoMap[filterPagamento]?.label ?? filterPagamento}` : ""}</p>
 <table>
 <thead><tr>
-  <th>#</th><th>Nome</th><th>CPF</th><th>Cargo</th><th>Grupo</th><th>Unidade</th><th>Telefone</th><th>Salário</th><th>Status</th><th>Pagamento</th>
+  <th>#</th><th>Nome</th><th>CPF</th><th>Cargo</th><th>Unidade</th><th>Departamento</th><th>Telefone</th><th>Salário</th><th>Status</th><th>Pagamento</th>
 </tr></thead>
 <tbody>
 ${rows.map((emp, i) => `<tr>
@@ -663,8 +747,8 @@ ${rows.map((emp, i) => `<tr>
       "Nome": toTitleCase(emp.name),
       "CPF": fmtCpf(emp.cpf),
       "Cargo": emp.position,
-      "Grupo": getAbsoluteRoot(emp.department, departments),
-      "Unidade": getSecondLevelUnit(emp.department, departments),
+      "Unidade": getAbsoluteRoot(emp.department, departments),
+      "Departamento": getSecondLevelUnit(emp.department, departments),
       "E-mail": emp.email ?? "",
       "Telefone": fmtPhone(emp.phone),
       "Salário": Number(emp.salary),
@@ -699,12 +783,15 @@ ${rows.map((emp, i) => `<tr>
       {
         "Nome": "João da Silva",
         "CPF": "000.000.000-00",
+        "Data de Nascimento": "15/05/1990",
+        "Nome da Mãe": "Maria da Silva",
         "Cargo": "Auxiliar Administrativo",
         "E-mail": "joao@empresa.com",
         "Telefone": "(11) 99999-9999",
         "Salário": 2000,
         "Data Admissão": "01/01/2024",
-        "Unidade/Departamento": "Administrativo",
+        "Unidade": "CONDEUBA",
+        "Departamento": "Secretaria de Meio Ambiente",
         "Banco": "NUBANK",
         "Agência": "0001",
         "Conta": "1234567-8",
@@ -712,7 +799,23 @@ ${rows.map((emp, i) => `<tr>
       },
     ]
     const ws = XLSX.utils.json_to_sheet(template)
-    ws["!cols"] = [{ wch: 35 }, { wch: 16 }, { wch: 25 }, { wch: 28 }, { wch: 20 }, { wch: 12 }, { wch: 16 }, { wch: 25 }, { wch: 15 }, { wch: 10 }, { wch: 15 }, { wch: 25 }]
+    ws["!cols"] = [
+      { wch: 35 }, // Nome
+      { wch: 16 }, // CPF
+      { wch: 20 }, // Data de Nascimento
+      { wch: 30 }, // Nome da Mãe
+      { wch: 25 }, // Cargo
+      { wch: 28 }, // E-mail
+      { wch: 20 }, // Telefone
+      { wch: 12 }, // Salário
+      { wch: 16 }, // Data Admissão
+      { wch: 25 }, // Unidade
+      { wch: 25 }, // Departamento
+      { wch: 15 }, // Banco
+      { wch: 10 }, // Agência
+      { wch: 15 }, // Conta
+      { wch: 25 }  // Chave PIX
+    ]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, "Funcionários")
     const raw = XLSX.write(wb, { bookType: "xlsx", type: "array" })
@@ -917,22 +1020,99 @@ ${rows.map((emp, i) => `<tr>
     rowIssues.forEach((issues, i) => {
       const r = importRows[i]
       if (!r) return
+      
+      const mappedDept = departments.find(d => d.id === r.departmentId)
+      let outUnidade = ""
+      let outDepto = ""
+      if (mappedDept) {
+        outUnidade = getAbsoluteRoot(mappedDept, departments)
+        outDepto = getSecondLevelUnit(mappedDept, departments)
+        if (outUnidade === outDepto) {
+          outDepto = ""
+        }
+      } else if (r._deptName) {
+        const parts = r._deptName.split(" / ")
+        outUnidade = parts[0] || ""
+        outDepto = parts[1] || ""
+      }
+
       rows.push({
         "Nome": r.name,
         "CPF": fmtCpf(r.cpf ?? null),
+        "Data de Nascimento": r.birthDate ? fmtDate(r.birthDate) : "",
+        "Nome da Mãe": r.motherName ?? "",
         "Cargo": r.position || "",
         "Salário": r.salary ?? 0,
-        "Unidade": departments.find(d => d.id === r.departmentId)?.name ?? r._deptName ?? "",
+        "Unidade": outUnidade,
+        "Departamento": outDepto,
         "Erros": issues.filter(iss => iss.severity === "error").map(iss => iss.label).join("; "),
         "Avisos": issues.filter(iss => iss.severity === "warning").map(iss => iss.label).join("; "),
       })
     })
     if (!rows.length) return
     const ws = XLSX.utils.json_to_sheet(rows)
-    ws["!cols"] = [{ wch: 35 }, { wch: 16 }, { wch: 25 }, { wch: 12 }, { wch: 30 }, { wch: 45 }, { wch: 35 }]
+    ws["!cols"] = [
+      { wch: 35 }, // Nome
+      { wch: 16 }, // CPF
+      { wch: 20 }, // Data de Nascimento
+      { wch: 30 }, // Nome da Mãe
+      { wch: 25 }, // Cargo
+      { wch: 12 }, // Salário
+      { wch: 25 }, // Unidade
+      { wch: 25 }, // Departamento
+      { wch: 45 }, // Erros
+      { wch: 35 }  // Avisos
+    ]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, "Divergências")
     XLSX.writeFile(wb, `divergencias-${new Date().toLocaleDateString("pt-BR").replace(/\//g, "-")}.xlsx`)
+  }
+
+  async function handleCreateNewPrincipalUnit() {
+    const name = prompt("Digite o nome da nova Unidade Principal (ex: QUEIMADAS):")
+    if (!name) return
+    const cleanName = name.trim().toUpperCase()
+    if (!cleanName) return
+
+    try {
+      setLoading(true)
+      const res = await createDepartment({ name: cleanName, nivel: "PRINCIPAL" })
+      if (res && res.id) {
+        setImportGlobalParent(res.id)
+        setImportGlobalSubDept("")
+      }
+      router.refresh()
+      alert(`Unidade "${cleanName}" criada com sucesso!`)
+    } catch (err: any) {
+      alert("Erro ao criar unidade: " + err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleCreateNewSubDept() {
+    if (!importGlobalParent) {
+      alert("Selecione a Unidade Principal primeiro.")
+      return
+    }
+    const name = prompt("Digite o nome do novo Sub-departamento (ex: Administrativo):")
+    if (!name) return
+    const cleanName = name.trim()
+    if (!cleanName) return
+
+    try {
+      setLoading(true)
+      const res = await createDepartment({ name: cleanName, nivel: "SUBUNIDADE", parentId: importGlobalParent })
+      if (res && res.id) {
+        setImportGlobalSubDept(res.id)
+      }
+      router.refresh()
+      alert(`Departamento "${cleanName}" criado com sucesso!`)
+    } catch (err: any) {
+      alert("Erro ao criar departamento: " + err.message)
+    } finally {
+      setLoading(false)
+    }
   }
 
   function handleApplyGlobalUnit() {
@@ -1053,7 +1233,7 @@ ${rows.map((emp, i) => `<tr>
             />
           </div>
 
-          {/* Nível 1 — Unidade Principal */}
+          {/* Nível 1 — Unidade */}
           <select
             value={filterPrincipal}
             onChange={e => { setFilterPrincipal(e.target.value); setFilterDept("all") }}
@@ -1068,14 +1248,14 @@ ${rows.map((emp, i) => `<tr>
             ))}
           </select>
 
-          {/* Nível 2 — Sub-unidade (aparece só quando uma principal está selecionada) */}
+          {/* Nível 2 — Departamento (aparece só quando uma unidade está selecionada) */}
           {filterPrincipal !== "all" && filterPrincipal !== "unassigned" && subUnitList.length > 0 && (
             <select
               value={filterDept}
               onChange={e => setFilterDept(e.target.value)}
               className="h-10 min-w-[180px] rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-900 shadow-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
             >
-              <option value="all">↳ Todas as sub-unidades</option>
+              <option value="all">↳ Todos os departamentos</option>
               {subUnitList.map((sub: any) => (
                 <option key={sub.id} value={sub.id}>
                   {"   ".repeat(sub.depth)}↳ {sub.name.toUpperCase()}
@@ -1177,9 +1357,18 @@ ${rows.map((emp, i) => `<tr>
                         <span className="font-semibold text-slate-700">{emp.position?.split(' ').slice(0, 3).join(' ')}</span>
                       </div>
                       
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-500 text-xs uppercase tracking-wider font-bold">Unidade</span>
-                        <span className="font-semibold text-slate-700">{emp.department?.name || "—"}</span>
+                      <div className="flex items-center justify-between gap-4 min-w-0">
+                        <span className="text-slate-500 text-xs uppercase tracking-wider font-bold shrink-0">Unidade</span>
+                        <span className="font-semibold text-slate-700 truncate uppercase text-right" title={(getAbsoluteRoot(emp.department, departments) || "—").toUpperCase()}>
+                          {(getAbsoluteRoot(emp.department, departments) || "—").toUpperCase()}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-4 min-w-0">
+                        <span className="text-slate-500 text-xs uppercase tracking-wider font-bold shrink-0">Departamento</span>
+                        <span className="font-semibold text-slate-700 truncate uppercase text-right" title={(getSecondLevelUnit(emp.department, departments) || "—").toUpperCase()}>
+                          {(getSecondLevelUnit(emp.department, departments) || "—").toUpperCase()}
+                        </span>
                       </div>
 
                       <div className="flex items-center justify-between">
@@ -1510,13 +1699,23 @@ ${rows.map((emp, i) => `<tr>
                       className="h-11 bg-slate-50/50 border-slate-200 focus:bg-white transition-all font-medium" />
                   </div>
                   <div className="space-y-1.5">
+                    <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Data de Nascimento / Aniversário</Label>
+                    <Input type="date" value={form.birthDate} onChange={(e) => set("birthDate", e.target.value)} 
+                      className="h-11 bg-slate-50/50 border-slate-200 focus:bg-white transition-all font-medium" />
+                  </div>
+                  <div className="space-y-1.5">
                     <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">E-mail</Label>
                     <Input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} 
                       className="h-11 bg-slate-50/50 border-slate-200 focus:bg-white transition-all font-medium" />
                   </div>
-                  <div className="space-y-1.5 md:col-span-2">
+                  <div className="space-y-1.5">
                     <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Telefone</Label>
                     <Input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="(00) 00000-0000" 
+                      className="h-11 bg-slate-50/50 border-slate-200 focus:bg-white transition-all font-medium" />
+                  </div>
+                  <div className="md:col-span-2 space-y-1.5">
+                    <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Nome da Mãe</Label>
+                    <Input value={form.motherName} onChange={(e) => set("motherName", e.target.value)} 
                       className="h-11 bg-slate-50/50 border-slate-200 focus:bg-white transition-all font-medium" />
                   </div>
                 </div>
@@ -1728,7 +1927,16 @@ ${rows.map((emp, i) => `<tr>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Unidade Principal</p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Unidade Principal</p>
+                      <button
+                        type="button"
+                        onClick={handleCreateNewPrincipalUnit}
+                        className="text-[9px] font-black text-blue-600 hover:text-blue-700 hover:underline uppercase transition-all"
+                      >
+                        + Criar Nova
+                      </button>
+                    </div>
                     <Select
                       value={importGlobalParent || "none"}
                       onValueChange={(val) => { setImportGlobalParent(val === "none" ? "" : val); setImportGlobalSubDept("") }}
@@ -1745,7 +1953,18 @@ ${rows.map((emp, i) => `<tr>
                     </Select>
                   </div>
                   <div className="space-y-1">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Sub-departamento (padrão)</p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Sub-departamento (padrão)</p>
+                      {importGlobalParent && (
+                        <button
+                          type="button"
+                          onClick={handleCreateNewSubDept}
+                          className="text-[9px] font-black text-blue-600 hover:text-blue-700 hover:underline uppercase transition-all"
+                        >
+                          + Novo Depto
+                        </button>
+                      )}
+                    </div>
                     <Select
                       value={importGlobalSubDept || "none"}
                       onValueChange={(val) => setImportGlobalSubDept(val === "none" ? "" : val)}
@@ -1849,6 +2068,13 @@ ${rows.map((emp, i) => `<tr>
                           <td className="px-4 py-3">
                             <p className="font-bold text-slate-800 text-sm leading-tight">{r.name}</p>
                             <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mt-0.5">{r.position?.split(' ').slice(0, 3).join(' ') || "—"}</p>
+                            {(r.birthDate || r.motherName) && (
+                              <p className="text-[9px] text-slate-400 mt-0.5 font-medium">
+                                {r.birthDate ? `Nasc: ${fmtDate(r.birthDate)}` : ""}
+                                {r.birthDate && r.motherName ? " · " : ""}
+                                {r.motherName ? `Mãe: ${r.motherName}` : ""}
+                              </p>
+                            )}
                             {issues.length > 0 && (
                               <div className="flex flex-wrap gap-1 mt-1">
                                 {issues.map((iss, j) => (

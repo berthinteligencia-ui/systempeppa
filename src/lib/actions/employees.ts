@@ -26,6 +26,8 @@ export async function createEmployee(data: {
   position: string
   salary: number
   hireDate: string
+  birthDate?: string | null
+  motherName?: string | null
   departmentId?: string
   cpf?: string
   email?: string
@@ -46,6 +48,8 @@ export async function createEmployee(data: {
     ...data,
     name: toTitleCase(data.name.trim()),
     cpf: cleanCpf,
+    birthDate: data.birthDate ? new Date(data.birthDate).toISOString() : null,
+    motherName: data.motherName ? data.motherName.trim() : null,
     pagamento: (data.pagamento || "pendente").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""),
     hireDate: new Date(data.hireDate).toISOString(),
     departmentId: data.departmentId || null,
@@ -63,6 +67,8 @@ export async function updateEmployee(
     position: string
     salary: number
     hireDate: string
+    birthDate?: string | null
+    motherName?: string | null
     departmentId?: string
     cpf?: string
     email?: string
@@ -82,6 +88,8 @@ export async function updateEmployee(
     ...data,
     name: toTitleCase(data.name.trim()),
     cpf: cleanCpf,
+    birthDate: data.birthDate ? new Date(data.birthDate).toISOString() : null,
+    motherName: data.motherName ? data.motherName.trim() : null,
     pagamento: data.pagamento ? data.pagamento.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : undefined,
     hireDate: data.hireDate ? new Date(data.hireDate).toISOString() : undefined,
     departmentId: data.departmentId || null,
@@ -241,6 +249,8 @@ export async function importEmployees(
     bankAgency?: string
     bankAccount?: string
     pixKey?: string
+    birthDate?: string | null
+    motherName?: string | null
   }[]
 ) {
   const companyId = await getCompanyId()
@@ -303,6 +313,8 @@ export async function importEmployees(
           position: e.position || "A definir",
           salary: e.salary ?? 0,
           hireDate: now,
+          birthDate: e.birthDate ? new Date(e.birthDate).toISOString() : null,
+          motherName: e.motherName ? e.motherName.trim() : null,
           companyId,
           departmentId: e.departmentId || null,
           bankName: e.bankName || null,
@@ -322,23 +334,25 @@ export async function importEmployees(
       await Promise.all(
         chunk.map((e) =>
           supabase
-            .from("Employee")
-            .update({
-              name: toTitleCase(e.name.trim()),
-              phone: e.phone || null,
-              email: e.email || null,
-              position: e.position || "A definir",
-              salary: e.salary ?? 0,
-              departmentId: e.departmentId || null,
-              bankName: e.bankName || null,
-              bankAgency: e.bankAgency || null,
-              bankAccount: e.bankAccount || null,
-              pixKey: e.pixKey || null,
-              status: "ACTIVE",
-              updatedAt: now,
-            })
-            .eq("cpf", e.cpf!.replace(/\D/g, ""))
-            .eq("companyId", companyId)
+             .from("Employee")
+             .update({
+               name: toTitleCase(e.name.trim()),
+               phone: e.phone || null,
+               email: e.email || null,
+               position: e.position || "A definir",
+               salary: e.salary ?? 0,
+               birthDate: e.birthDate ? new Date(e.birthDate).toISOString() : null,
+               motherName: e.motherName ? e.motherName.trim() : null,
+               departmentId: e.departmentId || null,
+               bankName: e.bankName || null,
+               bankAgency: e.bankAgency || null,
+               bankAccount: e.bankAccount || null,
+               pixKey: e.pixKey || null,
+               status: "ACTIVE",
+               updatedAt: now,
+             })
+             .eq("cpf", e.cpf!.replace(/\D/g, ""))
+             .eq("companyId", companyId)
         )
       )
       updated += chunk.length
@@ -357,6 +371,8 @@ export async function importEmployees(
         position: e.position || "A definir",
         salary: e.salary ?? 0,
         hireDate: now,
+        birthDate: e.birthDate ? new Date(e.birthDate).toISOString() : null,
+        motherName: e.motherName ? e.motherName.trim() : null,
         companyId,
         departmentId: e.departmentId || null,
         bankName: e.bankName || null,

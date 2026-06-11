@@ -4,6 +4,7 @@ import { useState, useMemo, Fragment } from "react"
 import {
   Plus, Pencil, Trash2, Building2, FileSpreadsheet, Search,
   Power, RotateCcw, ChevronDown, ChevronRight, FolderOpen, Folder, Crown,
+  FileText,
 } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
@@ -162,6 +163,116 @@ export function UnidadesClient({ departments, userRole }: Props) {
     finally { setLoading(false) }
   }
 
+  function handleExportPDF() {
+    const win = window.open("", "_blank")!
+    const rootUnits = flatList.filter(d => !d.parentId)
+    const grandTotal = rootUnits.reduce((sum, d) => sum + d._count.employees, 0)
+    
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>Relatório de Unidades e Departamentos</title>
+<style>
+  body { font-family: Arial, sans-serif; font-size: 12px; color: #1e293b; margin: 24px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p.sub { font-size: 11px; color: #64748b; margin: 0 0 16px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; margin-bottom: 24px; }
+  th { background: #f1f5f9; font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
+       padding: 8px 10px; text-align: left; border-bottom: 2px solid #e2e8f0; }
+  td { padding: 8px 10px; border-bottom: 1px solid #e2e8f0; }
+  tr:last-child td { border-bottom: none; }
+  .badge { display: inline-block; border-radius: 999px; padding: 1px 8px; font-size: 10px; font-weight: 600; }
+  .active { background:#d1fae5; color:#065f46; }
+  .inactive { background:#fee2e2; color:#991b1b; }
+  .principal { 
+    background-color: #eef2ff !important; 
+    color: #1e1b4b !important; 
+    -webkit-print-color-adjust: exact !important; 
+    print-color-adjust: exact !important;
+  }
+  .principal td {
+    font-weight: 800 !important;
+    font-size: 12px !important;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    border-bottom: 2px solid #c7d2fe !important;
+    padding: 10px 10px !important;
+  }
+  .indent-1 { padding-left: 24px; }
+  .indent-2 { padding-left: 38px; }
+  .indent-3 { padding-left: 52px; }
+  .total-row { font-weight: bold; background-color: #f1f5f9; border-top: 2px solid #e2e8f0; }
+  .page-break { page-break-before: always; }
+  .section-title { font-size: 14px; font-weight: bold; color: #3b82f6; margin-top: 24px; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }
+  @media print { body { margin: 0; } }
+</style></head><body>
+
+<!-- PAGINA 1: RESUMO POR UNIDADE -->
+<h1>Relatório de Colaboradores por Unidade e Departamento</h1>
+<p class="sub">Gerado em ${new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" })} · Total Geral: ${grandTotal} colaborador${grandTotal !== 1 ? "es" : ""}</p>
+
+<div class="section-title">Resumo por Unidade</div>
+<table>
+<thead><tr>
+  <th>Unidade Principal</th>
+  <th>CNPJ</th>
+  <th>Status</th>
+  <th style="text-align: center;">Total de Colaboradores</th>
+</tr></thead>
+<tbody>
+${rootUnits.map((dept) => `
+  <tr class="principal">
+    <td>${dept.name}</td>
+    <td>${dept.cnpj || "—"}</td>
+    <td><span class="badge ${dept.active ? "active" : "inactive"}">${dept.active ? "ATIVO" : "INATIVO"}</span></td>
+    <td style="text-align: center; font-weight: bold;">${dept._count.employees}</td>
+  </tr>
+`).join("")}
+<tr class="total-row">
+  <td colspan="3">TOTAL GERAL DE COLABORADORES</td>
+  <td style="text-align: center;">${grandTotal}</td>
+</tr>
+</tbody></table>
+
+<!-- QUEBRA DE PAGINA -->
+<div class="page-break"></div>
+
+<!-- PAGINA 2: DETALHAMENTO POR DEPARTAMENTO -->
+<h1>Relatório de Colaboradores por Unidade e Departamento</h1>
+<p class="sub">Gerado em ${new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" })} · Total Geral: ${grandTotal} colaborador${grandTotal !== 1 ? "es" : ""}</p>
+
+<div class="section-title">Detalhamento por Departamento</div>
+<table>
+<thead><tr>
+  <th>Unidade / Departamento</th>
+  <th>Nível</th>
+  <th>CNPJ</th>
+  <th>Status</th>
+  <th style="text-align: center;">Colaboradores</th>
+</tr></thead>
+<tbody>
+${flatList.map((dept) => {
+  const isPrincipal = !dept.parentId
+  const indentClass = dept.depth > 0 ? `indent-${Math.min(dept.depth, 3)}` : ""
+  const prefix = dept.depth > 0 ? "↳ " : ""
+  
+  return `<tr class="${isPrincipal ? "principal" : ""}">
+    <td class="${indentClass}">${prefix}${dept.name}</td>
+    <td>${isPrincipal ? "Unidade" : "Departamento"}</td>
+    <td>${dept.cnpj || "—"}</td>
+    <td><span class="badge ${dept.active ? "active" : "inactive"}">${dept.active ? "ATIVO" : "INATIVO"}</span></td>
+    <td style="text-align: center; font-weight: bold;">${dept._count.employees}</td>
+  </tr>`
+}).join("")}
+<tr class="total-row">
+  <td colspan="4">TOTAL GERAL DE COLABORADORES</td>
+  <td style="text-align: center;">${grandTotal}</td>
+</tr>
+</tbody></table>
+
+</body></html>`)
+    win.document.close()
+    setTimeout(() => win.print(), 400)
+  }
+
   // Options for parent selector (cannot select self or descendants)
   function parentOptions(excludeId?: string) {
     if (!excludeId) return flatList
@@ -196,6 +307,13 @@ export function UnidadesClient({ departments, userRole }: Props) {
           >
             <Trash2 className="h-4 w-4" />
             {deletingUnassigned ? "Excluindo..." : "Excluir sem unidade"}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleExportPDF}
+            className="gap-2 border-slate-200 text-slate-700 hover:bg-slate-50"
+          >
+            <FileText className="h-4 w-4 text-slate-500" /> Exportar PDF
           </Button>
           <Button onClick={() => openCreate()} className="gap-2 bg-blue-600 hover:bg-blue-700">
             <Plus className="h-4 w-4" /> Nova Unidade
@@ -239,17 +357,17 @@ export function UnidadesClient({ departments, userRole }: Props) {
                 const isGroup = hasChildren(dept.id)
                 const isExpanded = expanded.has(dept.id)
                 const indent = dept.depth * 24
-                const isPrincipal = (dept.nivel ?? "SUBUNIDADE") === "PRINCIPAL"
+                const isPrincipal = !dept.parentId
 
                 return (
                   <tr
                     key={dept.id}
                     className={`transition-colors ${!dept.active ? "opacity-60" : ""} ${
-                      isPrincipal ? "bg-indigo-50/40" : "hover:bg-slate-50"
+                      isPrincipal ? "bg-indigo-50 border-y border-indigo-100 hover:bg-indigo-100/40 font-semibold" : "hover:bg-slate-50/50"
                     }`}
                   >
                     {/* Nome com indentação e expand toggle */}
-                    <td className="px-5 py-3.5">
+                    <td className={`px-5 py-3.5 relative ${isPrincipal ? "before:absolute before:left-0 before:top-0 before:bottom-0 before:w-[4px] before:bg-indigo-600" : ""}`}>
                       <div className="flex items-center gap-2" style={{ paddingLeft: indent }}>
                         {isGroup ? (
                           <button
@@ -266,39 +384,39 @@ export function UnidadesClient({ departments, userRole }: Props) {
 
                         <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
                           isPrincipal
-                            ? "bg-indigo-100"
-                            : dept.active ? "bg-blue-100" : "bg-slate-100"
+                            ? "bg-gradient-to-br from-indigo-500 to-indigo-600 text-white shadow-md shadow-indigo-500/20"
+                            : dept.active ? "bg-blue-50 border border-blue-100 text-blue-600" : "bg-slate-100 text-slate-400"
                         }`}>
                           {isPrincipal
                             ? (isGroup
                               ? (isExpanded
-                                ? <FolderOpen className="h-4 w-4 text-indigo-600" />
-                                : <Folder className="h-4 w-4 text-indigo-600" />)
-                              : <Crown className="h-4 w-4 text-indigo-600" />)
-                            : <Building2 className={`h-4 w-4 ${dept.active ? "text-blue-600" : "text-slate-400"}`} />
+                                ? <FolderOpen className="h-4 w-4 text-white" />
+                                : <Folder className="h-4 w-4 text-white" />)
+                              : <Crown className="h-4 w-4 text-white" />)
+                            : <Building2 className="h-4 w-4" />
                           }
                         </div>
 
                         <div>
                           <div className="flex items-center gap-2">
-                            <span className={`font-medium ${dept.active ? "text-slate-800" : "text-slate-500 line-through"} ${
-                              isPrincipal ? "font-semibold text-slate-900" : ""
+                            <span className={`${dept.active ? "" : "line-through"} ${
+                              isPrincipal ? "font-black text-indigo-950 text-[13px] tracking-wide uppercase" : "font-medium text-slate-700 text-xs"
                             }`}>
                               {dept.name}
                             </span>
                             {isPrincipal && (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-700">
+                              <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-indigo-700">
                                 <Crown className="h-2.5 w-2.5" /> Principal
                               </span>
                             )}
                             {isPrincipal && isGroup && (
-                              <span className="text-[10px] text-indigo-400 font-medium">
+                              <span className="text-[10px] text-indigo-400 font-semibold">
                                 {departments.filter(d => d.parentId === dept.id).length} sub
                               </span>
                             )}
                           </div>
                           {!isPrincipal && dept.parentId && (
-                            <p className="text-[10px] text-slate-400">
+                            <p className="text-[10px] text-slate-400 font-medium">
                               {departments.find(d => d.id === dept.parentId)?.name}
                             </p>
                           )}
@@ -314,12 +432,14 @@ export function UnidadesClient({ departments, userRole }: Props) {
                       </span>
                     </td>
 
-                    <td className="px-5 py-3.5 text-slate-500">
+                    <td className="px-5 py-3.5 text-slate-500 font-medium">
                       {dept.cnpj || <span className="text-slate-300">—</span>}
                     </td>
 
-                    <td className="px-5 py-3.5 text-center text-slate-500">
-                      {dept._count.employees}
+                    <td className="px-5 py-3.5 text-center">
+                      <span className={isPrincipal ? "font-black text-indigo-950 bg-indigo-100/60 px-2.5 py-1 rounded-md text-[11px]" : "font-semibold text-slate-500 text-xs"}>
+                        {dept._count.employees}
+                      </span>
                     </td>
 
                     <td className="px-5 py-3.5">
@@ -514,7 +634,7 @@ export function UnidadesClient({ departments, userRole }: Props) {
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir &quot;{deleteName}&quot;?</AlertDialogTitle>
             <AlertDialogDescription>
-              Sub-unidades desta serão movidas para a raiz. Funcionários e fechamentos vinculados serão mantidos.
+              Esta ação excluirá permanentemente esta unidade, todas as suas sub-unidades, bem como os funcionários e fechamentos de pagamento vinculados a elas.
               Esta ação não pode ser desfeita.
             </AlertDialogDescription>
           </AlertDialogHeader>
