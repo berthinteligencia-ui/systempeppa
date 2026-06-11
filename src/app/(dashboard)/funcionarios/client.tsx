@@ -55,6 +55,8 @@ type ImportRow = {
   position?: string; salary?: number; departmentId?: string; _deptName?: string
   bankName?: string; bankAgency?: string; bankAccount?: string; pixKey?: string
   birthDate?: string; motherName?: string
+  unidade?: string
+  departamento?: string
 }
 
 type RowIssue = {
@@ -315,7 +317,9 @@ function parseImportRows(rawRows: Record<string, unknown>[], headers: string[], 
 
       return { 
         name, cpf, phone, email, position, salary, departmentId, _deptName,
-        bankName, bankAgency, bankAccount, pixKey, birthDate, motherName
+        bankName, bankAgency, bankAccount, pixKey, birthDate, motherName,
+        unidade: rawUnidade || undefined,
+        departamento: rawDepartamento || undefined
       }
     })
     .filter(Boolean) as ImportRow[]
@@ -868,7 +872,15 @@ ${rows.map((emp, i) => `<tr>
     setIsImporting(true)
     setImportProgress(null)
 
-    const rows = importRows.map(({ _deptName: _, ...r }) => r)
+    const rows = importRows.map(({ _deptName: _, ...r }) => {
+      if (!r.departmentId && !r.unidade && !r.departamento) {
+        return {
+          ...r,
+          departmentId: importGlobalSubDept || importGlobalParent || undefined
+        }
+      }
+      return r
+    })
     const BATCH = 100
     const batches: typeof rows[] = []
     for (let i = 0; i < rows.length; i += BATCH) batches.push(rows.slice(i, i + BATCH))
@@ -970,20 +982,58 @@ ${rows.map((emp, i) => `<tr>
         .filter((x): x is { i: number; cpf: string } => !!x.cpf)
       if (cpfsToCheck.length > 0) {
         const dbResults = await validateImportCpfs(cpfsToCheck.map(x => x.cpf))
-        const dbMap = new Map(dbResults.map(r => [r.cpf, r.status]))
+        const dbMap = new Map(dbResults.map(r => [r.cpf, r]))
         cpfsToCheck.forEach(({ i, cpf }) => {
-          const s = dbMap.get(cpf)
-          if (s === "exists_other")
-            addIssue(i, { type: "conflict_other", label: "CPF pertence a outra empresa — será ignorado", severity: "error" })
-          else if (s === "exists_same")
-            addIssue(i, { type: "will_update", label: "Já cadastrado — será atualizado", severity: "warning" })
+          const dbInfo = dbMap.get(cpf)
+          if (dbInfo) {
+            if (dbInfo.status === "exists_other") {
+              addIssue(i, { type: "conflict_other", label: "CPF pertence a outra empresa — será ignorado", severity: "error" })
+            } else if (dbInfo.status === "exists_same") {
+              const existingDeptId = dbInfo.departmentId
+              
+              const row = importRows[i]
+              const sheetPath = row.departmentId
+                ? (() => {
+                    const mappedDept = departments.find(d => d.id === row.departmentId)
+                    const p = mappedDept?.parentId ? departments.find(d => d.id === mappedDept.parentId) : null
+                    return [p?.name, mappedDept?.name].filter((s): s is string => !!s).map(s => s.trim().toUpperCase()).join(" / ")
+                  })()
+                : [row.unidade, row.departamento].filter((s): s is string => !!s).map(s => s.trim().toUpperCase()).join(" / ")
+
+              if (existingDeptId) {
+                const currentDept = departments.find(d => d.id === existingDeptId)
+                const currentParent = currentDept?.parentId ? departments.find(d => d.id === currentDept.parentId) : null
+                const dbPath = [currentParent?.name, currentDept?.name].filter((s): s is string => !!s).map(s => s.trim().toUpperCase()).join(" / ")
+
+                if (sheetPath && dbPath !== sheetPath) {
+                  addIssue(i, {
+                    type: "will_update",
+                    label: `Divergência: Cadastrado em "${dbPath}" mas a planilha indica "${sheetPath}" — será atualizado`,
+                    severity: "warning"
+                  })
+                } else {
+                  addIssue(i, { type: "will_update", label: "Já cadastrado — será atualizado", severity: "warning" })
+                }
+              } else {
+                addIssue(i, { type: "will_update", label: "Já cadastrado sem unidade — será atualizado e vinculado", severity: "warning" })
+              }
+            }
+          }
         })
       }
 
       // 3. Sem unidade
       importRows.forEach((r, i) => {
-        if (!r.departmentId)
-          addIssue(i, { type: "no_unit", label: "Sem unidade definida", severity: "warning" })
+        if (!r.departmentId) {
+          if (r.unidade || r.departamento) {
+            // Se tiver unidade/departamento na planilha, o backend criará automaticamente.
+          } else if (importGlobalParent) {
+            r.departmentId = importGlobalSubDept || importGlobalParent
+            addIssue(i, { type: "will_update", label: "Unidade em branco — atribuída unidade padrão", severity: "warning" })
+          } else {
+            addIssue(i, { type: "no_unit", label: "Sem unidade definida", severity: "warning" })
+          }
+        }
       })
 
       // 4. Salário zero
@@ -2047,10 +2097,11 @@ ${rows.map((emp, i) => `<tr>
                     <thead className="sticky top-0 bg-slate-50 z-10 border-b border-slate-200">
                       <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400 text-left">
                         <th className="px-4 py-3 w-[28%]">NOME / CARGO</th>
-                        <th className="px-4 py-3 w-[14%]">CPF</th>
-                        <th className="px-4 py-3 w-[36%]">UNIDADE / DEPARTAMENTO</th>
-                        <th className="px-4 py-3 w-[14%] text-right">SALÁRIO</th>
-                        <th className="px-2 py-3 w-[8%]"></th>
+                        <th className="px-4 py-3 w-[12%]">CPF</th>
+                        <th className="px-4 py-3 w-[22%]">UNIDADE</th>
+                        <th className="px-4 py-3 w-[22%]">DEPARTAMENTO</th>
+                        <th className="px-4 py-3 w-[12%] text-right">SALÁRIO</th>
+                        <th className="px-2 py-3 w-[4%]"></th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 bg-white">
@@ -2063,6 +2114,16 @@ ${rows.map((emp, i) => `<tr>
                           : hasWarn
                           ? "bg-amber-50/40 hover:bg-amber-50/60"
                           : "hover:bg-slate-50/50"
+
+                        const currentDept = departments.find(d => d.id === r.departmentId)
+                        const isSub = !!(currentDept && currentDept.parentId)
+                        const principalId = (isSub ? currentDept?.parentId : r.departmentId) || "missing"
+                        const subDeptId = (isSub ? r.departmentId : "none") || "none"
+
+                        const availableSubDepts = principalId !== "missing"
+                          ? departments.filter(d => d.parentId === principalId)
+                          : []
+
                         return (
                         <tr key={i} className={`transition-colors ${rowCls}`}>
                           <td className="px-4 py-3">
@@ -2089,7 +2150,7 @@ ${rows.map((emp, i) => `<tr>
                           <td className="px-4 py-3">
                             <div className="flex flex-col gap-1">
                               <Select
-                                value={r.departmentId ?? "missing"}
+                                value={principalId}
                                 onValueChange={(val) => {
                                   const next = [...importRows]
                                   next[i] = { ...next[i], departmentId: val === "missing" ? undefined : val }
@@ -2097,32 +2158,57 @@ ${rows.map((emp, i) => `<tr>
                                   invalidateValidation()
                                 }}
                               >
-                                <SelectTrigger className={`h-8 text-xs font-medium transition-all ${!r.departmentId ? "border-amber-300 bg-amber-50 text-amber-900" : "bg-white border-slate-200 text-slate-700"}`}>
-                                  <SelectValue placeholder="Mapear unidade..." />
+                                <SelectTrigger className={`h-8 text-xs font-medium transition-all ${principalId === "missing" ? "border-amber-300 bg-amber-50 text-amber-900" : "bg-white border-slate-200 text-slate-700"}`}>
+                                  <SelectValue placeholder="Unidade..." />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="missing" disabled className="text-slate-400 italic text-xs">Mapear unidade...</SelectItem>
-                                  {importPrincipalDepts.map((parent) => {
-                                    const children = departments.filter(d => d.parentId === parent.id)
-                                    return (
-                                      <React.Fragment key={parent.id}>
-                                        <SelectItem value={parent.id} className="text-xs font-bold text-slate-700">{parent.name}</SelectItem>
-                                        {children.map(c => (
-                                          <SelectItem key={c.id} value={c.id} className="text-xs text-slate-600 pl-6">↳ {c.name}</SelectItem>
-                                        ))}
-                                      </React.Fragment>
-                                    )
-                                  })}
+                                  <SelectItem value="missing" disabled className="text-slate-400 italic text-xs">Unidade...</SelectItem>
+                                  {importPrincipalDepts.map((parent) => (
+                                    <SelectItem key={parent.id} value={parent.id} className="text-xs font-semibold text-slate-700">{parent.name}</SelectItem>
+                                  ))}
                                 </SelectContent>
                               </Select>
-                              {r._deptName && !r.departmentId && (
+                              {r.unidade && !r.departmentId && (
                                 <div className="flex items-center gap-1 text-[10px] text-amber-600 font-bold">
                                   <AlertCircle className="h-3 w-3 shrink-0" />
-                                  <span className="truncate">Planilha: &quot;{r._deptName}&quot;</span>
+                                  <span className="truncate">Planilha: &quot;{r.unidade}&quot; (Criará)</span>
                                 </div>
                               )}
-                              {r._deptName && r.departmentId && (
-                                <p className="text-[10px] text-emerald-600 font-semibold truncate">✓ &quot;{r._deptName}&quot;</p>
+                              {r.unidade && r.departmentId && (
+                                <p className="text-[10px] text-emerald-600 font-semibold truncate">✓ &quot;{r.unidade}&quot;</p>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-col gap-1">
+                              <Select
+                                value={subDeptId}
+                                onValueChange={(val) => {
+                                  const next = [...importRows]
+                                  next[i] = { ...next[i], departmentId: val === "none" ? (principalId === "missing" ? undefined : principalId) : val }
+                                  setImportRows(next)
+                                  invalidateValidation()
+                                }}
+                                disabled={principalId === "missing"}
+                              >
+                                <SelectTrigger className="h-8 text-xs font-medium bg-white border-slate-200 text-slate-700 disabled:opacity-50">
+                                  <SelectValue placeholder="Nenhum (unidade principal)" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none" className="text-slate-400 italic text-xs">Nenhum (unidade principal)</SelectItem>
+                                  {availableSubDepts.map((c) => (
+                                    <SelectItem key={c.id} value={c.id} className="text-xs text-slate-600">{c.name}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              {r.departamento && !r.departmentId && (
+                                <div className="flex items-center gap-1 text-[10px] text-amber-600 font-bold">
+                                  <AlertCircle className="h-3 w-3 shrink-0" />
+                                  <span className="truncate">Planilha: &quot;{r.departamento}&quot; (Criará)</span>
+                                </div>
+                              )}
+                              {r.departamento && r.departmentId && isSub && (
+                                <p className="text-[10px] text-emerald-600 font-semibold truncate">✓ &quot;{r.departamento}&quot;</p>
                               )}
                             </div>
                           </td>

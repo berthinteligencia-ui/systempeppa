@@ -236,6 +236,114 @@ function chunkArr<T>(arr: T[], size: number): T[][] {
   return out
 }
 
+function formatCpf(c: string | null | undefined) {
+  if (!c || c.length !== 11) return c ?? "—"
+  return `${c.slice(0, 3)}.${c.slice(3, 6)}.${c.slice(6, 9)}-${c.slice(9)}`
+}
+
+function getDeptPathInList(deptId: string | null, depts: any[]): string {
+  if (!deptId) return ""
+  const dept = depts.find(d => d.id === deptId)
+  if (!dept) return ""
+  const parent = dept.parentId ? depts.find(d => d.id === dept.parentId) : null
+  return [parent?.name, dept.name].filter((s): s is string => !!s).map(s => s.trim().toUpperCase()).join(" / ")
+}
+
+async function getOrCreateDepartmentPath(
+  companyId: string,
+  unidadeName?: string,
+  departamentoName?: string
+): Promise<string | null> {
+  const supabase = getSupabaseAdmin()
+  const now = new Date().toISOString()
+
+  const uName = unidadeName?.trim().toUpperCase()
+  const dName = departamentoName?.trim()
+
+  if (!uName && !dName) return null
+
+  const insertDept = async (id: string, name: string, parentId: string | null) => {
+    const base = {
+      id,
+      name,
+      companyId,
+      parentId,
+      createdAt: now,
+      updatedAt: now
+    }
+    const { error } = await supabase.from("Department").insert({ ...base, nivel: parentId ? "SUBUNIDADE" : "PRINCIPAL" })
+    if (error) {
+      if (error.message?.includes("nivel") || error.message?.includes("cache")) {
+        const { error: fallbackErr } = await supabase.from("Department").insert(base)
+        if (fallbackErr) throw new Error(fallbackErr.message)
+      } else {
+        throw new Error(error.message)
+      }
+    }
+  }
+
+  // Case 1: Only departamento is provided
+  if (!uName && dName) {
+    const cleanName = dName.toUpperCase()
+    const { data: dept, error: selErr } = await supabase
+      .from("Department")
+      .select("id")
+      .eq("companyId", companyId)
+      .is("parentId", null)
+      .ilike("name", cleanName)
+      .maybeSingle()
+    if (selErr) throw new Error(selErr.message)
+    if (dept) return dept.id
+
+    const newId = randomUUID()
+    await insertDept(newId, cleanName, null)
+    return newId
+  }
+
+  let parentId: string | null = null
+  if (uName) {
+    const { data: parentDept, error: selErr } = await supabase
+      .from("Department")
+      .select("id")
+      .eq("companyId", companyId)
+      .is("parentId", null)
+      .ilike("name", uName)
+      .maybeSingle()
+
+    if (selErr) throw new Error(selErr.message)
+
+    if (parentDept) {
+      parentId = parentDept.id
+    } else {
+      const newParentId = randomUUID()
+      await insertDept(newParentId, uName, null)
+      parentId = newParentId
+    }
+  }
+
+  if (dName && parentId) {
+    const { data: subDept, error: selErr } = await supabase
+      .from("Department")
+      .select("id")
+      .eq("companyId", companyId)
+      .eq("parentId", parentId)
+      .ilike("name", dName)
+      .maybeSingle()
+
+    if (selErr) throw new Error(selErr.message)
+
+    if (subDept) {
+      return subDept.id
+    } else {
+      const newSubId = randomUUID()
+      await insertDept(newSubId, dName, parentId)
+      return newSubId
+    }
+  }
+
+  return parentId
+}
+
 export async function importEmployees(
   employees: {
     name: string
@@ -251,11 +359,21 @@ export async function importEmployees(
     pixKey?: string
     birthDate?: string | null
     motherName?: string | null
+    unidade?: string
+    departamento?: string
   }[]
 ) {
   const companyId = await getCompanyId()
   const supabase = getSupabaseAdmin()
   const now = new Date().toISOString()
+
+  // Fetch all departments once to use for in-memory resolution & comparison
+  const { data: dbDepts, error: deptsError } = await supabase
+    .from("Department")
+    .select("*")
+    .eq("companyId", companyId)
+  if (deptsError) throw new Error(`Erro ao buscar departamentos: ${deptsError.message}`)
+  const deptsList = dbDepts ?? []
 
   const withCpf = employees.filter((e) => e.cpf)
   const withoutCpf = employees.filter((e) => !e.cpf)
@@ -263,6 +381,20 @@ export async function importEmployees(
   let inserted = 0
   let updated = 0
   let skippedDuplicates = 0
+
+  const resolvedDeptsCache = new Map<string, string>()
+  const getOrCreateDeptWithCache = async (unidade?: string, departamento?: string) => {
+    const key = [unidade, departamento].filter((s): s is string => !!s).map(s => s.trim().toUpperCase()).join(" / ")
+    if (!key) return null
+    if (resolvedDeptsCache.has(key)) {
+      return resolvedDeptsCache.get(key)!
+    }
+    const deptId = await getOrCreateDepartmentPath(companyId, unidade, departamento)
+    if (deptId) {
+      resolvedDeptsCache.set(key, deptId)
+    }
+    return deptId
+  }
 
   if (withCpf.length > 0) {
     // Dedup within the spreadsheet itself (last row wins when same CPF appears twice)
@@ -277,15 +409,43 @@ export async function importEmployees(
     const cleanCpfs = deduped.map((e) => e.cpf!.replace(/\D/g, ""))
 
     // Query CPFs globally (no companyId filter) because cpf has a GLOBAL @unique constraint.
-    // We need to know which CPFs are already taken by ANY company to avoid constraint failures.
-    const existingRows: { cpf: string; companyId: string }[] = []
+    const existingRows: { cpf: string; companyId: string; departmentId: string | null }[] = []
     for (const chunk of chunkArr(cleanCpfs, 100)) {
       const { data, error } = await supabase
         .from("Employee")
-        .select("cpf, companyId")
+        .select("cpf, companyId, departmentId")
         .in("cpf", chunk)
       if (error) throw new Error(`Erro ao verificar CPFs existentes: ${error.message}`)
       existingRows.push(...(data ?? []))
+    }
+
+    // Resolve departments and check for divergence
+    for (const e of deduped) {
+      const cleanCpf = e.cpf!.replace(/\D/g, "")
+      const existingEmp = existingRows.find(r => r.cpf === cleanCpf)
+
+      if (existingEmp && existingEmp.companyId === companyId) {
+        const sheetPath = e.departmentId
+          ? getDeptPathInList(e.departmentId, deptsList)
+          : [e.unidade, e.departamento].filter((s): s is string => !!s).map(s => s.trim().toUpperCase()).join(" / ")
+
+        const dbPath = getDeptPathInList(existingEmp.departmentId, deptsList)
+
+        if (existingEmp.departmentId !== null && sheetPath && dbPath !== sheetPath) {
+          e.departmentId = e.departmentId || await getOrCreateDeptWithCache(e.unidade, e.departamento) || undefined
+        } else if (existingEmp.departmentId === null && sheetPath) {
+          e.departmentId = e.departmentId || await getOrCreateDeptWithCache(e.unidade, e.departamento) || undefined
+        } else if (existingEmp.departmentId !== null) {
+          e.departmentId = existingEmp.departmentId
+        }
+      } else if (!existingEmp) {
+        const sheetPath = e.departmentId
+          ? getDeptPathInList(e.departmentId, deptsList)
+          : [e.unidade, e.departamento].filter((s): s is string => !!s).map(s => s.trim().toUpperCase()).join(" / ")
+        if (sheetPath) {
+          e.departmentId = await getOrCreateDeptWithCache(e.unidade, e.departamento) || undefined
+        }
+      }
     }
 
     // CPFs owned by THIS company → update them
@@ -359,6 +519,16 @@ export async function importEmployees(
     }
   }
 
+  // Resolve departments for employees without CPF
+  for (const e of withoutCpf) {
+    const sheetPath = e.departmentId
+      ? getDeptPathInList(e.departmentId, deptsList)
+      : [e.unidade, e.departamento].filter((s): s is string => !!s).map(s => s.trim().toUpperCase()).join(" / ")
+    if (!e.departmentId && sheetPath) {
+      e.departmentId = await getOrCreateDeptWithCache(e.unidade, e.departamento) || undefined
+    }
+  }
+
   // Insert employees without CPF in chunks of 100
   for (const chunk of chunkArr(withoutCpf, 100)) {
     check(await supabase.from("Employee").insert(
@@ -410,20 +580,21 @@ export async function deleteEmployeesByCpfs(cpfs: string[]) {
 
 export async function validateImportCpfs(
   cpfs: string[]
-): Promise<{ cpf: string; status: "exists_same" | "exists_other" }[]> {
+): Promise<{ cpf: string; status: "exists_same" | "exists_other"; departmentId?: string | null }[]> {
   const companyId = await getCompanyId()
   const supabase = getSupabaseAdmin()
-  const results: { cpf: string; status: "exists_same" | "exists_other" }[] = []
+  const results: { cpf: string; status: "exists_same" | "exists_other"; departmentId?: string | null }[] = []
   for (const chunk of chunkArr(cpfs, 100)) {
     const { data, error } = await supabase
       .from("Employee")
-      .select("cpf, companyId")
+      .select("cpf, companyId, departmentId")
       .in("cpf", chunk)
     if (error) throw new Error(error.message)
     for (const row of data ?? []) {
       results.push({
         cpf: row.cpf as string,
         status: (row.companyId as string) === companyId ? "exists_same" : "exists_other",
+        departmentId: (row.companyId as string) === companyId ? (row.departmentId as string | null) : undefined,
       })
     }
   }
