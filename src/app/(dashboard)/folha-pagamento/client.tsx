@@ -214,6 +214,9 @@ export function FolhaPagamentoClient({
     const [historyFilterUnit, setHistoryFilterUnit] = useState<string | null>(null)
     const [viewFilter, setViewFilter] = useState("GERAL")
     const [excludedRows, setExcludedRows] = useState<ExcludedRow[]>([])
+    const activeMissing = useMemo(() => {
+        return missing.filter(m => !excludedRows.some(ex => ex.cpf === m.cpf && ex.sheet === m.sheet && ex.nome === m.nome))
+    }, [missing, excludedRows])
     const [pendingExclude, setPendingExclude] = useState<{ row: AnalyzedRow; autoReason: string } | null>(null)
     const [excludeReasonInput, setExcludeReasonInput] = useState("")
     const [isErrorCorrectionOpen, setIsErrorCorrectionOpen] = useState(false)
@@ -420,7 +423,7 @@ export function FolhaPagamentoClient({
         }
 
         // Filtra apenas quem tem nome e CPF preenchidos (garantia extra)
-        const toRegister = missing.filter(m => m.nome && m.cpf)
+        const toRegister = activeMissing.filter(m => m.nome && m.cpf)
         
         if (toRegister.length === 0) {
             alert("Não existem novos funcionários válidos para cadastrar automaticamente.");
@@ -731,7 +734,7 @@ export function FolhaPagamentoClient({
 
     async function executeSaveClosing(missingOverride?: MissingRow[]) {
         if (!result) return
-        const missingToSave = missingOverride ?? missing
+        const missingToSave = missingOverride ?? activeMissing
         setIsSaving(true)
         try {
             await savePayrollAnalysis({
@@ -1182,9 +1185,9 @@ export function FolhaPagamentoClient({
     const resultRows: AnalyzedRow[] = result
         ? [
             ...result.found.map(r => ({ ...r, status: "found" as const })),
-            ...missing.map(r => ({ ...r, status: "missing" as const })),
+            ...activeMissing.map(r => ({ ...r, status: "missing" as const })),
             ...(result.extras || []).map(r => ({ ...r, cpf: r.cpfCnpj, status: "extra" as const })),
-        ] : []
+        ].filter(r => !excludedRows.some(ex => ex.cpf === r.cpf && ex.sheet === r.sheet && ex.nome === r.nome)) : []
 
     const { duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet } = useMemo(() => {
         const counts = new Map<string, number>()
@@ -1279,7 +1282,7 @@ export function FolhaPagamentoClient({
     const errorGroups = useMemo(() => {
         if (!result) return { unregistered: [], invalidCpfs: [], nameMismatches: [], valueMismatches: [], duplicates: [], extras: [], missingBanks: [] }
         
-        const unregistered = missing.map(r => ({ ...r, status: "missing" as const, errorType: "unregistered" as const }))
+        const unregistered = activeMissing.map(r => ({ ...r, status: "missing" as const, errorType: "unregistered" as const }))
         const invalidCpfs = resultRows.filter(r => (r as any).isInvalidCpf).map(r => ({ ...r, errorType: "invalidCpf" as const } as any))
         const nameMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).nameMismatch).map(r => ({ ...r, status: "found" as const, errorType: "nameMismatch" as const } as any))
         const valueMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).valueMismatch).map(r => ({ ...r, status: "found" as const, errorType: "valueMismatch" as const } as any))
@@ -1292,10 +1295,10 @@ export function FolhaPagamentoClient({
             duplicateNomeSet.has(((r as any).nome || "").toLowerCase().trim())
         ).map(r => ({ ...r, errorType: "duplicate" as const } as any))
         
-        const extras = (result.extras || []).map(r => ({ ...r, status: "extra" as const, cpf: (r as any).cpfCnpj || "", errorType: "extra" as const } as any))
+        const extras = resultRows.filter(r => r.status === "extra").map(r => ({ ...r, status: "extra" as const, cpf: (r as any).cpf || "", errorType: "extra" as const } as any))
 
         return { unregistered, invalidCpfs, nameMismatches, valueMismatches, duplicates, extras, missingBanks }
-    }, [result, resultRows, missing, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet, missingBankCount])
+    }, [result, resultRows, activeMissing, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet, missingBankCount])
 
     const totalDiversions = useMemo(() => {
         if (!result) return 0
@@ -1811,14 +1814,14 @@ export function FolhaPagamentoClient({
                         )
 
                         // ESTADO 2 — Só faltam cadastros (erros bloqueantes zerados) → cadastrar e fechar
-                        if (nonRegistrationBlockingErrors === 0 && missing.length > 0) return (
+                        if (nonRegistrationBlockingErrors === 0 && activeMissing.length > 0) return (
                             <div className="mx-5 mt-4 rounded-xl border border-blue-200 bg-blue-50 p-4 animate-in fade-in duration-300">
                                 <div className="flex items-center gap-2 mb-3">
                                     <div className="size-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
                                         <UserPlus className="h-4 w-4 text-blue-600" />
                                     </div>
                                     <div>
-                                        <p className="text-sm font-bold text-blue-900">Erros conferidos — {missing.length} funcionário{missing.length !== 1 ? "s" : ""} aguardando cadastro</p>
+                                        <p className="text-sm font-bold text-blue-900">Erros conferidos — {activeMissing.length} funcionário{activeMissing.length !== 1 ? "s" : ""} aguardando cadastro</p>
                                         <p className="text-[11px] text-blue-700">
                                             Todos os erros foram revisados. Cadastre os colaboradores abaixo e feche a folha em um único passo.
                                             {(nameMismatchCount > 0 || valMismatchCount > 0 || missingBankCount > 0) && (
@@ -1852,7 +1855,7 @@ export function FolhaPagamentoClient({
                                     <div>
                                         <h3 className="text-sm font-bold text-amber-900">Atenção Necessária ({totalDiversions})</h3>
                                         <p className="text-[11px] text-amber-700">
-                                            {missing.length > 0 && `${missing.length} não cadastrados. `}
+                                            {activeMissing.length > 0 && `${activeMissing.length} não cadastrados. `}
                                             {invalidCpfCount > 0 && `${invalidCpfCount} CPF(s) inválidos. `}
                                             {nameMismatchCount > 0 && `${nameMismatchCount} divergências de nome. `}
                                             {valMismatchCount > 0 && `${valMismatchCount} divergências de valor. `}
@@ -1865,7 +1868,7 @@ export function FolhaPagamentoClient({
                                 <div className="flex gap-2 flex-wrap">
                                     <button onClick={() => {
                                             const tabs = [
-                                                { id: "unregistered", count: missing.length },
+                                                { id: "unregistered", count: activeMissing.length },
                                                 { id: "invalidCpfs", count: invalidCpfCount },
                                                 { id: "duplicates", count: errorGroups.duplicates.length },
                                                 { id: "nameMismatches", count: nameMismatchCount },
@@ -1907,7 +1910,7 @@ export function FolhaPagamentoClient({
                                     <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
                                         <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600 mb-1">Folha Fechada</p>
                                         <p className="text-2xl font-black text-emerald-800">{fmtBRL(totalFolha)}</p>
-                                        <p className="text-[11px] text-emerald-600 mt-1">{result.found.length + missing.length} colaborador{result.found.length + missing.length !== 1 ? "es" : ""}</p>
+                                        <p className="text-[11px] text-emerald-600 mt-1">{result.found.length + activeMissing.length} colaborador{result.found.length + activeMissing.length !== 1 ? "es" : ""}</p>
                                     </div>
                                     <div className="rounded-xl border border-red-200 bg-red-50 p-4">
                                         <p className="text-[10px] font-black uppercase tracking-widest text-red-500 mb-1">Total Excluído</p>
