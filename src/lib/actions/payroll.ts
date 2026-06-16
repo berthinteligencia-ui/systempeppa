@@ -37,28 +37,39 @@ export async function savePayrollAnalysis(data: {
 
     let savedId: string
 
-    if (data.id) {
-        // Re-save de uma folha já existente → atualiza o registro pelo ID
-        check(await supabase.from("PayrollAnalysis").update(payload).eq("id", data.id).eq("companyId", companyId))
-        savedId = data.id
-    } else {
-        // Nova folha → sempre insere um novo registro
-        savedId = randomUUID()
-        const insertResult = await supabase.from("PayrollAnalysis").insert(
-            { ...payload, id: savedId, departmentId: data.departmentId ?? null, createdAt: now }
-        )
-        if (insertResult.error) {
-            // Se falhou por unique constraint, dropa o índice e tenta novamente
-            if (insertResult.error.message?.includes("unique") || insertResult.error.code === "23505") {
-                await query(`DROP INDEX IF EXISTS "PayrollAnalysis_month_year_departmentId_companyId_key"`)
-                savedId = randomUUID()
-                check(await supabase.from("PayrollAnalysis").insert(
-                    { ...payload, id: savedId, departmentId: data.departmentId ?? null, createdAt: now }
-                ))
-            } else {
-                throw new Error(insertResult.error.message ?? String(insertResult.error))
-            }
+    let targetId = data.id
+
+    if (!targetId) {
+        // Verifica se já existe um fechamento para o mesmo mês, ano, departamento e empresa
+        let queryBuilder = supabase
+            .from("PayrollAnalysis")
+            .select("id")
+            .eq("month", data.month)
+            .eq("year", data.year)
+            .eq("companyId", companyId)
+
+        if (data.departmentId) {
+            queryBuilder = queryBuilder.eq("departmentId", data.departmentId)
+        } else {
+            queryBuilder = queryBuilder.is("departmentId", null)
         }
+
+        const { data: existingRecord } = await queryBuilder.maybeSingle()
+        if (existingRecord) {
+            targetId = existingRecord.id
+        }
+    }
+
+    if (targetId) {
+        // Re-save de uma folha já existente → atualiza o registro pelo ID
+        check(await supabase.from("PayrollAnalysis").update(payload).eq("id", targetId).eq("companyId", companyId))
+        savedId = targetId
+    } else {
+        // Nova folha → insere um novo registro
+        savedId = randomUUID()
+        check(await supabase.from("PayrollAnalysis").insert(
+            { ...payload, id: savedId, departmentId: data.departmentId ?? null, createdAt: now }
+        ))
     }
 
     // Reativa funcionários encontrados na folha, mas mantém pagamento como pendente

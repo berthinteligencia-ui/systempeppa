@@ -113,26 +113,37 @@ async function main() {
 
   for (const period of periods) {
     for (const dept of departments) {
-      await prisma.payrollAnalysis.upsert({
+      const existing = await prisma.payrollAnalysis.findFirst({
         where: {
-          month_year_unit_company: {
-            month: period.month,
-            year: period.year,
-            departmentId: dept.id,
-            companyId: company.id
-          }
-        },
-        update: {},
-        create: {
           month: period.month,
           year: period.year,
           departmentId: dept.id,
-          companyId: company.id,
-          total: (Math.random() * 50000 + 10000).toFixed(2),
-          status: "OPEN",
-          data: { found: 10, missing: 0, extras: 0, sheetSummary: {} }
+          companyId: company.id
         }
       })
+
+      if (existing) {
+        await prisma.payrollAnalysis.update({
+          where: { id: existing.id },
+          data: {
+            total: (Math.random() * 50000 + 10000).toFixed(2),
+            status: "OPEN",
+            data: { found: 10, missing: 0, extras: 0, sheetSummary: {} }
+          }
+        })
+      } else {
+        await prisma.payrollAnalysis.create({
+          data: {
+            month: period.month,
+            year: period.year,
+            departmentId: dept.id,
+            companyId: company.id,
+            total: (Math.random() * 50000 + 10000).toFixed(2),
+            status: "OPEN",
+            data: { found: 10, missing: 0, extras: 0, sheetSummary: {} }
+          }
+        })
+      }
     }
   }
 
