@@ -684,13 +684,14 @@ export async function resetMonthlyStatus() {
   const now = new Date().toISOString()
   
   check(await supabase.from("Employee")
-    .update({ 
+    .update({
       status: "INACTIVE",
-      updatedAt: now 
+      pagamento: "pendente",
+      updatedAt: now
     })
     .eq("companyId", companyId)
   )
-  
+
   return { success: true }
 }
 

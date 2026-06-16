@@ -44,14 +44,14 @@ export async function savePayrollAnalysis(data: {
         ))
     }
 
-    // Marca todos os funcionários encontrados na folha como "efetuado"
+    // Reativa funcionários encontrados na folha, mas mantém pagamento como pendente
     const foundIds: string[] = (data.analysisData?.found ?? [])
         .map((e: any) => e.id)
         .filter(Boolean)
 
     if (foundIds.length > 0) {
         await supabase.from("Employee")
-            .update({ pagamento: "efetuado", updatedAt: now })
+            .update({ status: "ACTIVE", pagamento: "pendente", updatedAt: now })
             .in("id", foundIds)
             .eq("companyId", companyId)
     }
