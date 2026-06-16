@@ -378,6 +378,10 @@ export async function importEmployees(
   const withCpf = employees.filter((e) => e.cpf)
   const withoutCpf = employees.filter((e) => !e.cpf)
 
+  if (withoutCpf.length > 0) {
+    throw new Error("Erro de importação: O CPF é obrigatório para todos os funcionários.")
+  }
+
   let inserted = 0
   let updated = 0
   let skippedDuplicates = 0
@@ -492,28 +496,36 @@ export async function importEmployees(
     // Update existing employees in chunks of 50
     for (const chunk of chunkArr(toUpdate, 50)) {
       await Promise.all(
-        chunk.map((e) =>
-          supabase
+        chunk.map((e) => {
+          const updateData: any = {
+            name: toTitleCase(e.name.trim()),
+            status: "ACTIVE",
+            updatedAt: now,
+          }
+          if (e.phone !== undefined && e.phone !== "") updateData.phone = e.phone
+          if (e.email !== undefined && e.email !== "") updateData.email = e.email
+          if (e.position !== undefined && e.position !== "") updateData.position = e.position
+          if (e.salary !== undefined && e.salary > 0) updateData.salary = e.salary
+          if (e.birthDate !== undefined && e.birthDate !== null && e.birthDate !== "") {
+            updateData.birthDate = new Date(e.birthDate).toISOString()
+          }
+          if (e.motherName !== undefined && e.motherName !== null && e.motherName !== "") {
+            updateData.motherName = e.motherName.trim()
+          }
+          if (e.departmentId !== undefined) {
+            updateData.departmentId = e.departmentId || null
+          }
+          if (e.bankName !== undefined && e.bankName !== "") updateData.bankName = e.bankName
+          if (e.bankAgency !== undefined && e.bankAgency !== "") updateData.bankAgency = e.bankAgency
+          if (e.bankAccount !== undefined && e.bankAccount !== "") updateData.bankAccount = e.bankAccount
+          if (e.pixKey !== undefined && e.pixKey !== "") updateData.pixKey = e.pixKey
+
+          return supabase
              .from("Employee")
-             .update({
-               name: toTitleCase(e.name.trim()),
-               phone: e.phone || null,
-               email: e.email || null,
-               position: e.position || "A definir",
-               salary: e.salary ?? 0,
-               birthDate: e.birthDate ? new Date(e.birthDate).toISOString() : null,
-               motherName: e.motherName ? e.motherName.trim() : null,
-               departmentId: e.departmentId || null,
-               bankName: e.bankName || null,
-               bankAgency: e.bankAgency || null,
-               bankAccount: e.bankAccount || null,
-               pixKey: e.pixKey || null,
-               status: "ACTIVE",
-               updatedAt: now,
-             })
+             .update(updateData)
              .eq("cpf", e.cpf!.replace(/\D/g, ""))
              .eq("companyId", companyId)
-        )
+        })
       )
       updated += chunk.length
     }
@@ -580,21 +592,48 @@ export async function deleteEmployeesByCpfs(cpfs: string[]) {
 
 export async function validateImportCpfs(
   cpfs: string[]
-): Promise<{ cpf: string; status: "exists_same" | "exists_other"; departmentId?: string | null }[]> {
+): Promise<{
+  cpf: string;
+  status: "exists_same" | "exists_other";
+  departmentId?: string | null;
+  name?: string;
+  phone?: string | null;
+  email?: string | null;
+  position?: string;
+  salary?: number;
+  birthDate?: string | null;
+  motherName?: string | null;
+  bankName?: string | null;
+  bankAgency?: string | null;
+  bankAccount?: string | null;
+  pixKey?: string | null;
+}[]> {
   const companyId = await getCompanyId()
   const supabase = getSupabaseAdmin()
-  const results: { cpf: string; status: "exists_same" | "exists_other"; departmentId?: string | null }[] = []
+  const results: any[] = []
   for (const chunk of chunkArr(cpfs, 100)) {
     const { data, error } = await supabase
       .from("Employee")
-      .select("cpf, companyId, departmentId")
+      .select("cpf, companyId, departmentId, name, phone, email, position, salary, birthDate, motherName, bankName, bankAgency, bankAccount, pixKey")
       .in("cpf", chunk)
     if (error) throw new Error(error.message)
     for (const row of data ?? []) {
+      const isSame = (row.companyId as string) === companyId
       results.push({
         cpf: row.cpf as string,
-        status: (row.companyId as string) === companyId ? "exists_same" : "exists_other",
-        departmentId: (row.companyId as string) === companyId ? (row.departmentId as string | null) : undefined,
+        status: isSame ? "exists_same" : "exists_other",
+        departmentId: isSame ? (row.departmentId as string | null) : undefined,
+        name: isSame ? row.name : undefined,
+        phone: isSame ? row.phone : undefined,
+        email: isSame ? row.email : undefined,
+        position: isSame ? row.position : undefined,
+        salary: isSame ? Number(row.salary) : undefined,
+        birthDate: isSame ? row.birthDate : undefined,
+        motherName: isSame ? row.motherName : undefined,
+        bankName: isSame ? row.bankName : undefined,
+        bankAgency: isSame ? row.bankAgency : undefined,
+        bankAccount: isSame ? row.bankAccount : undefined,
+        pixKey: isSame ? row.pixKey : undefined,
       })
     }
   }

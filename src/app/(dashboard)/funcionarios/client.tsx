@@ -60,7 +60,7 @@ type ImportRow = {
 }
 
 type RowIssue = {
-  type: "dup_in_file" | "conflict_other" | "will_update" | "no_unit" | "zero_salary"
+  type: "dup_in_file" | "conflict_other" | "will_update" | "no_unit" | "zero_salary" | "missing_cpf"
   label: string
   severity: "error" | "warning"
 }
@@ -865,10 +865,6 @@ ${rows.map((emp, i) => `<tr>
 
   async function handleConfirmImport() {
     if (!importRows.length) return
-    if (!importGlobalParent) {
-      alert("Por favor, selecione a unidade principal dos funcionários antes de importar.")
-      return
-    }
     setIsImporting(true)
     setImportProgress(null)
 
@@ -960,6 +956,13 @@ ${rows.map((emp, i) => `<tr>
         issues.get(i)!.push(issue)
       }
 
+      // 0. CPF obrigatório
+      importRows.forEach((r, i) => {
+        if (!r.cpf) {
+          addIssue(i, { type: "missing_cpf", label: "CPF é obrigatório", severity: "error" })
+        }
+      })
+
       // 1. CPF duplicado dentro da própria planilha
       const cpfIdxMap = new Map<string, number[]>()
       importRows.forEach((r, i) => {
@@ -989,9 +992,64 @@ ${rows.map((emp, i) => `<tr>
             if (dbInfo.status === "exists_other") {
               addIssue(i, { type: "conflict_other", label: "CPF pertence a outra empresa — será ignorado", severity: "error" })
             } else if (dbInfo.status === "exists_same") {
-              const existingDeptId = dbInfo.departmentId
-              
               const row = importRows[i]
+              const divergencies: string[] = []
+
+              // 1. Nome
+              if (row.name && dbInfo.name && row.name.trim().toUpperCase() !== dbInfo.name.trim().toUpperCase()) {
+                divergencies.push(`Nome: "${dbInfo.name}" vs "${row.name}"`)
+              }
+              // 2. Cargo
+              if (row.position && dbInfo.position && row.position.trim().toUpperCase() !== dbInfo.position.trim().toUpperCase()) {
+                divergencies.push(`Cargo: "${dbInfo.position}" vs "${row.position}"`)
+              }
+              // 3. Salário
+              if (row.salary !== undefined && dbInfo.salary !== undefined && Math.abs(Number(row.salary) - Number(dbInfo.salary)) > 0.01) {
+                divergencies.push(`Salário: R$ ${Number(dbInfo.salary).toFixed(2)} vs R$ ${Number(row.salary).toFixed(2)}`)
+              }
+              // 4. Telefone
+              const cleanRowPhone = row.phone ? row.phone.replace(/\D/g, "") : ""
+              const cleanDbPhone = dbInfo.phone ? dbInfo.phone.replace(/\D/g, "") : ""
+              if (cleanRowPhone && cleanDbPhone && cleanRowPhone !== cleanDbPhone) {
+                divergencies.push(`Telefone: "${dbInfo.phone}" vs "${row.phone}"`)
+              }
+              // 5. E-mail
+              if (row.email && dbInfo.email && row.email.trim().toLowerCase() !== dbInfo.email.trim().toLowerCase()) {
+                divergencies.push(`E-mail: "${dbInfo.email}" vs "${row.email}"`)
+              }
+              // 6. Data de Nascimento
+              const dbBirthDateOnly = dbInfo.birthDate ? dbInfo.birthDate.split("T")[0] : ""
+              const rowBirthDateOnly = row.birthDate ? row.birthDate.split("T")[0] : ""
+              if (rowBirthDateOnly && dbBirthDateOnly && rowBirthDateOnly !== dbBirthDateOnly) {
+                const fmtDateStr = (dStr: string) => {
+                  const parts = dStr.split("-")
+                  return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : dStr
+                }
+                divergencies.push(`Nascimento: "${fmtDateStr(dbBirthDateOnly)}" vs "${fmtDateStr(rowBirthDateOnly)}"`)
+              }
+              // 7. Nome da Mãe
+              if (row.motherName && dbInfo.motherName && row.motherName.trim().toUpperCase() !== dbInfo.motherName.trim().toUpperCase()) {
+                divergencies.push(`Mãe: "${dbInfo.motherName}" vs "${row.motherName}"`)
+              }
+              // 8. Banco
+              if (row.bankName && dbInfo.bankName && row.bankName.trim().toUpperCase() !== dbInfo.bankName.trim().toUpperCase()) {
+                divergencies.push(`Banco: "${dbInfo.bankName}" vs "${row.bankName}"`)
+              }
+              // 9. Agência
+              if (row.bankAgency && dbInfo.bankAgency && row.bankAgency.trim() !== dbInfo.bankAgency.trim()) {
+                divergencies.push(`Agência: "${dbInfo.bankAgency}" vs "${row.bankAgency}"`)
+              }
+              // 10. Conta
+              if (row.bankAccount && dbInfo.bankAccount && row.bankAccount.trim() !== dbInfo.bankAccount.trim()) {
+                divergencies.push(`Conta: "${dbInfo.bankAccount}" vs "${row.bankAccount}"`)
+              }
+              // 11. Chave PIX
+              if (row.pixKey && dbInfo.pixKey && row.pixKey.trim().toUpperCase() !== dbInfo.pixKey.trim().toUpperCase()) {
+                divergencies.push(`PIX: "${dbInfo.pixKey}" vs "${row.pixKey}"`)
+              }
+
+              // 12. Unidade / Departamento
+              const existingDeptId = dbInfo.departmentId
               const sheetPath = row.departmentId
                 ? (() => {
                     const mappedDept = departments.find(d => d.id === row.departmentId)
@@ -1006,16 +1064,20 @@ ${rows.map((emp, i) => `<tr>
                 const dbPath = [currentParent?.name, currentDept?.name].filter((s): s is string => !!s).map(s => s.trim().toUpperCase()).join(" / ")
 
                 if (sheetPath && dbPath !== sheetPath) {
+                  divergencies.push(`Unidade/Depto: "${dbPath}" vs "${sheetPath}"`)
+                }
+              }
+
+              if (divergencies.length > 0) {
+                divergencies.forEach((div) => {
                   addIssue(i, {
                     type: "will_update",
-                    label: `Divergência: Cadastrado em "${dbPath}" mas a planilha indica "${sheetPath}" — será atualizado`,
+                    label: `Divergência: ${div} — será atualizado`,
                     severity: "warning"
                   })
-                } else {
-                  addIssue(i, { type: "will_update", label: "Já cadastrado — será atualizado", severity: "warning" })
-                }
+                })
               } else {
-                addIssue(i, { type: "will_update", label: "Já cadastrado sem unidade — será atualizado e vinculado", severity: "warning" })
+                addIssue(i, { type: "will_update", label: "Já cadastrado — sem divergências", severity: "warning" })
               }
             }
           }
@@ -2246,10 +2308,10 @@ ${rows.map((emp, i) => `<tr>
 
           <DialogFooter className="bg-slate-50 px-6 py-4 border-t border-slate-200 shrink-0 flex items-center justify-between">
             <div className="text-xs font-semibold">
-              {!importGlobalParent && importRows.length > 0 ? (
+              {validationDone && [...rowIssues.values()].some(iss => iss.some(i => i.severity === "error")) ? (
                 <span className="text-red-500 flex items-center gap-1">
                   <AlertCircle className="h-3.5 w-3.5" />
-                  Selecione a Unidade Principal para habilitar a importação
+                  Resolva os erros críticos de validação para habilitar a importação
                 </span>
               ) : importRows.length > 0 ? (
                 <span className="text-slate-400 font-medium">{importRows.filter(r => !r.departmentId).length > 0
@@ -2262,7 +2324,7 @@ ${rows.map((emp, i) => `<tr>
               <Button variant="ghost" onClick={() => setImportOpen(false)} className="text-slate-500 font-black uppercase text-xs tracking-widest">CANCELAR</Button>
               <Button
                 onClick={handleConfirmImport}
-                disabled={importRows.length === 0 || isImporting || !importGlobalParent}
+                disabled={importRows.length === 0 || isImporting || (validationDone && [...rowIssues.values()].some(iss => iss.some(i => i.severity === "error")))}
                 className="bg-blue-600 hover:bg-blue-700 gap-2 px-8 shadow-lg shadow-blue-600/20 font-black uppercase text-xs tracking-widest"
               >
                 {isImporting ? (

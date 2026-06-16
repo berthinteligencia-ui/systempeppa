@@ -569,8 +569,8 @@ export async function POST(req: NextRequest) {
                 const dbSalary = Number(e.salary || 0)
                 
                 // Name mismatch check
-                const normSheet = r.nome.toLowerCase().replace(/\s+/g, " ").trim()
-                const normDb = dbName.toLowerCase().replace(/\s+/g, " ").trim()
+                const normSheet = r.nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim()
+                const normDb = dbName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim()
                 const nameMismatch = normSheet !== normDb && !normDb.includes(normSheet) && !normSheet.includes(normDb)
 
                 // Value mismatch check

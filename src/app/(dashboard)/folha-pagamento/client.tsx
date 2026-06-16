@@ -1078,6 +1078,7 @@ export function FolhaPagamentoClient({
             return 6
         }
         const allExportRows = viewFilter === "EXCLUIDOS" ? [] :
+            viewFilter === "NOVOS" ? [...sortedResultRows].filter(r => r.status === "missing") :
             [...sortedResultRows].sort((a, b) => {
                 const pa = exportPriority(a), pb = exportPriority(b)
                 if (pa !== pb) return pa - pb
@@ -1259,6 +1260,8 @@ export function FolhaPagamentoClient({
             base = sortedResultRows.filter(r => normalizeBankName(r.bankName) === "Não identificado")
         } else if (viewFilter === "CAIXA") {
             base = sortedResultRows.filter(r => (r.bankName || "").toUpperCase().startsWith("CAIXA"))
+        } else if (viewFilter === "NOVOS") {
+            base = sortedResultRows.filter(r => r.status === "missing")
         } else if (viewFilter !== "GERAL" && viewFilter !== "EXCLUIDOS") {
             base = sortedResultRows.filter(r => (r.bankName || "").toUpperCase() === viewFilter)
         }
@@ -1647,6 +1650,7 @@ export function FolhaPagamentoClient({
                                         { value: "RESUMO", label: "Resumo" },
                                         { value: "GERAL", label: "Geral" },
                                         { value: "EXCLUIDOS", label: "Excluídos" },
+                                        { value: "NOVOS", label: "Novos (Não cadastrados)" },
                                         { value: "BANCO", label: "Banco (Todos)" },
                                         { value: "NAO_IDENTIFICADO", label: "Banco não identificado" },
                                         { value: "MENTORE", label: "Mentore" },
