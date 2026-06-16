@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server"
 import * as XLSX from "xlsx"
 import { getSupabaseAdmin } from "@/lib/supabase-admin"
 import { auth } from "@/lib/auth"
+import { isNameMatch } from "@/lib/utils/nameComparison"
+
 
 // ── Bank name normalization ───────────────────────────────────────────────────
 
@@ -569,9 +571,7 @@ export async function POST(req: NextRequest) {
                 const dbSalary = Number(e.salary || 0)
                 
                 // Name mismatch check
-                const normSheet = r.nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim()
-                const normDb = dbName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim()
-                const nameMismatch = normSheet !== normDb && !normDb.includes(normSheet) && !normSheet.includes(normDb)
+                const nameMismatch = !isNameMatch(r.nome, dbName)
 
                 // Value mismatch check
                 const valueMismatch = Math.abs(r.valor - dbSalary) > 0.01

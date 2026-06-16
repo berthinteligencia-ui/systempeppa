@@ -36,6 +36,8 @@ import {
 import { createDepartment } from "@/lib/actions/departments"
 import { getEmployeeComprovantes, deleteComprovante, saveComprovanteManual } from "@/lib/actions/comprovante"
 import { buildTree, flattenTree, toTitleCase } from "@/lib/utils/departments"
+import { isNameMatch } from "@/lib/utils/nameComparison"
+
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -996,7 +998,7 @@ ${rows.map((emp, i) => `<tr>
               const divergencies: string[] = []
 
               // 1. Nome
-              if (row.name && dbInfo.name && row.name.trim().toUpperCase() !== dbInfo.name.trim().toUpperCase()) {
+              if (row.name && dbInfo.name && !isNameMatch(row.name, dbInfo.name)) {
                 divergencies.push(`Nome: "${dbInfo.name}" vs "${row.name}"`)
               }
               // 2. Cargo
