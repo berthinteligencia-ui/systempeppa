@@ -575,7 +575,7 @@ export function FolhaPagamentoClient({
         setMissing(newMissing)
     }
 
-    function doExcludeRowsBatch(rows: AnalyzedRow[], observacao: string) {
+    function doExcludeRowsBatch(rows: AnalyzedRow[], observacao: string | ((row: AnalyzedRow) => string)) {
         if (!result || rows.length === 0) return
 
         const newResult = { ...result }
@@ -617,7 +617,11 @@ export function FolhaPagamentoClient({
             const existing = new Set(prev.map(r => `${r.cpf}::${r.sheet}::${r.nome}`))
             const toAdd = rows
                 .filter(r => !existing.has(`${r.cpf}::${r.sheet}::${r.nome}`))
-                .map(r => ({ ...r, status: "excluded" as any, observacao }))
+                .map(r => ({
+                    ...r,
+                    status: "excluded" as any,
+                    observacao: typeof observacao === "function" ? observacao(r) : observacao,
+                }))
             return [...prev, ...toAdd]
         })
     }
@@ -1283,7 +1287,7 @@ export function FolhaPagamentoClient({
         }
 
         return selectedSheet ? base.filter(r => r.sheet === selectedSheet) : base
-    }, [viewFilter, sortedResultRows, excludedRows, selectedSheet, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet])
+    }, [viewFilter, sortedResultRows, excludedRows, selectedSheet, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet, newlyRegisteredCpfs])
 
     const missingBankCount = resultRows.filter(r => (r as any).isMissingBank && !ignoredBankCpfs.includes(r.cpf)).length
     const invalidCpfCount = resultRows.filter(r => (r as any).isInvalidCpf).length
@@ -2850,8 +2854,21 @@ export function FolhaPagamentoClient({
                                                 <button
                                                     onClick={() => {
                                                         const rows = errorGroups[activeErrorTab].filter(r => selectedErrorRows.includes(`${r.sheet}::${r.cpf || (r as any).nome}`))
-                                                        if (confirm(`Remover ${rows.length} registros selecionados?`)) {
-                                                            doExcludeRowsBatch(rows as any[], "Remoção em lote via ferramenta de correção")
+                                                        const tabLabel: Record<string, string> = {
+                                                            unregistered:   "Não cadastrado no sistema",
+                                                            invalidCpfs:    "CPF inválido",
+                                                            duplicates:     "Duplicidade de CPF na planilha",
+                                                            nameMismatches: "Divergência de nome",
+                                                            valueMismatches:"Divergência de valor",
+                                                            extras:         "Sem CPF identificado",
+                                                            missingBanks:   "Dados bancários ausentes",
+                                                        }
+                                                        const fallback = tabLabel[activeErrorTab] ?? "Remoção em lote"
+                                                        if (confirm(`Remover ${rows.length} registros selecionados?\nMotivo: "${fallback}"`)) {
+                                                            doExcludeRowsBatch(
+                                                                rows as any[],
+                                                                (row: any) => detectExcludeReason(row) || fallback,
+                                                            )
                                                             setSelectedErrorRows([])
                                                         }
                                                     }}
