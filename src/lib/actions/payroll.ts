@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { getSupabaseAdmin, check } from "@/lib/supabase-admin"
+import { query } from "@/lib/db"
 import { auth } from "@/lib/auth"
 import { randomUUID } from "crypto"
 
@@ -43,9 +44,21 @@ export async function savePayrollAnalysis(data: {
     } else {
         // Nova folha → sempre insere um novo registro
         savedId = randomUUID()
-        check(await supabase.from("PayrollAnalysis").insert(
+        const insertResult = await supabase.from("PayrollAnalysis").insert(
             { ...payload, id: savedId, departmentId: data.departmentId ?? null, createdAt: now }
-        ))
+        )
+        if (insertResult.error) {
+            // Se falhou por unique constraint, dropa o índice e tenta novamente
+            if (insertResult.error.message?.includes("unique") || insertResult.error.code === "23505") {
+                await query(`DROP INDEX IF EXISTS "PayrollAnalysis_month_year_departmentId_companyId_key"`)
+                savedId = randomUUID()
+                check(await supabase.from("PayrollAnalysis").insert(
+                    { ...payload, id: savedId, departmentId: data.departmentId ?? null, createdAt: now }
+                ))
+            } else {
+                throw new Error(insertResult.error.message ?? String(insertResult.error))
+            }
+        }
     }
 
     // Reativa funcionários encontrados na folha, mas mantém pagamento como pendente
