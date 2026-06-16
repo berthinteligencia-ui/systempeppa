@@ -212,6 +212,8 @@ export function FolhaPagamentoClient({
     const [isHistoryOpen, setIsHistoryOpen] = useState(false)
     const [isLoadingHistory, setIsLoadingHistory] = useState(false)
     const [historyFilterUnit, setHistoryFilterUnit] = useState<string | null>(null)
+    const [showSaveModal, setShowSaveModal] = useState(false)
+    const [folhaNome, setFolhaNome] = useState("")
     const [viewFilter, setViewFilter] = useState("GERAL")
     const [excludedRows, setExcludedRows] = useState<ExcludedRow[]>([])
     const activeMissing = useMemo(() => {
@@ -742,7 +744,7 @@ export function FolhaPagamentoClient({
         setMissing(newMissing)
     }
 
-    async function executeSaveClosing(missingOverride?: MissingRow[]) {
+    async function executeSaveClosing(nome: string, missingOverride?: MissingRow[]) {
         if (!result) return
         const missingToSave = missingOverride ?? activeMissing
         setIsSaving(true)
@@ -753,6 +755,7 @@ export function FolhaPagamentoClient({
                 departmentId: unidade || null,
                 total: result.total,
                 analysisData: {
+                    nome,
                     found: result.found,
                     missing: missingToSave,
                     extras: result.extras || [],
@@ -763,19 +766,15 @@ export function FolhaPagamentoClient({
             if (selectedNfId) {
                 await updateNotaFiscalStatus(selectedNfId, "ANALISADA")
             }
-            alert("Folha fechada com sucesso!")
+            alert("Folha salva com sucesso!")
         } catch (err: any) {
             alert("Erro ao salvar: " + err.message)
         } finally { setIsSaving(false) }
     }
 
-    async function handleSaveClosing() {
+    function handleSaveClosing() {
         if (!result) return
-        if (totalDiversions > 0) {
-            alert(`Não é possível fechar a unidade. Existem ${totalDiversions} pendências (funcionários não encontrados, sem CPF, CPFs inválidos ou duplicados) que precisam ser resolvidas ou excluídas antes de finalizar.`)
-            return
-        }
-        await executeSaveClosing()
+        setShowSaveModal(true)
     }
 
     async function handleReconcileName(row: FoundRow) {
@@ -941,12 +940,13 @@ export function FolhaPagamentoClient({
                 const dept = departments.find(d => d.id === deptId)
                 setAnalysisId(data.id); setMes(String(data.month)); setAno(String(data.year)); setUnidade(deptId)
                 setUnidadePrincipal(dept?.parentId ?? deptId)
-                setResult({ 
-                    found: ad.found || [], 
-                    missing: ad.missing || [], 
-                    extras: ad.extras || [], 
-                    total: Number(data.total), 
-                    sheetSummary: ad.sheetSummary || [] 
+                setFolhaNome(ad.nome || "")
+                setResult({
+                    found: ad.found || [],
+                    missing: ad.missing || [],
+                    extras: ad.extras || [],
+                    total: Number(data.total),
+                    sheetSummary: ad.sheetSummary || []
                 })
                 setMissing(ad.missing || [])
                 setExcludedRows(ad.excluded || [])
@@ -1930,6 +1930,10 @@ export function FolhaPagamentoClient({
                                             className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-60 transition-colors">
                                             <Users className="h-3.5 w-3.5" /> Ignorar e continuar
                                         </button>
+                                        <button onClick={() => setShowSaveModal(true)} disabled={isSaving || registering}
+                                            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60 transition-colors">
+                                            <Save className="h-3.5 w-3.5" /> Salvar com erros
+                                        </button>
                                     </div>
                                 </div>
 
@@ -2679,6 +2683,76 @@ export function FolhaPagamentoClient({
                 </div>
             )}
 
+            {/* ─── Save Modal ─── */}
+            <Dialog open={showSaveModal} onOpenChange={v => { setShowSaveModal(v) }}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Save className="h-5 w-5 text-emerald-600" />
+                            Fechar Folha de Pagamento
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="py-2 space-y-4">
+                        <div className="space-y-1.5">
+                            <Label htmlFor="folha-nome" className="text-sm font-semibold text-slate-700">
+                                Nome da Folha <span className="text-red-500">*</span>
+                            </Label>
+                            <Input
+                                id="folha-nome"
+                                placeholder="Ex: Folha Junho 2025 — Matriz"
+                                value={folhaNome}
+                                onChange={e => setFolhaNome(e.target.value)}
+                                onKeyDown={e => {
+                                    if (e.key === "Enter" && folhaNome.trim()) {
+                                        setShowSaveModal(false)
+                                        executeSaveClosing(folhaNome.trim())
+                                    }
+                                }}
+                                autoFocus
+                                className="text-sm"
+                            />
+                        </div>
+
+                        {totalDiversions > 0 && (
+                            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 flex items-start gap-2">
+                                <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                                <div>
+                                    <p className="text-xs font-bold text-amber-800">{totalDiversions} pendência{totalDiversions !== 1 ? "s" : ""} não resolvida{totalDiversions !== 1 ? "s" : ""}</p>
+                                    <p className="text-[11px] text-amber-700 mt-0.5">A folha será salva com os erros. Você poderá retomar a correção pelo histórico.</p>
+                                </div>
+                            </div>
+                        )}
+
+                        {result && result.total === 0 && (
+                            <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 flex items-start gap-2">
+                                <Info className="h-4 w-4 text-blue-500 mt-0.5 shrink-0" />
+                                <div>
+                                    <p className="text-xs font-bold text-blue-800">Total zerado</p>
+                                    <p className="text-[11px] text-blue-700 mt-0.5">Todos os colaboradores foram excluídos. A folha será salva assim mesmo.</p>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setShowSaveModal(false)} disabled={isSaving}>
+                            Cancelar
+                        </Button>
+                        <Button
+                            onClick={() => {
+                                if (!folhaNome.trim()) { alert("Informe o nome da folha."); return }
+                                setShowSaveModal(false)
+                                executeSaveClosing(folhaNome.trim())
+                            }}
+                            disabled={isSaving || !folhaNome.trim()}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                        >
+                            {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Save className="h-4 w-4 mr-1.5" />}
+                            {totalDiversions > 0 ? "Salvar mesmo assim" : "Salvar Folha"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
             {/* ─── History dialog ─── */}
             <Dialog open={isHistoryOpen} onOpenChange={v => { setIsHistoryOpen(v); if (!v) setHistoryFilterUnit(null) }}>
                 <DialogContent className="max-w-2xl">
@@ -2701,6 +2775,7 @@ export function FolhaPagamentoClient({
                                 <table className="w-full text-sm">
                                     <thead className="bg-slate-50 sticky top-0">
                                         <tr className="text-left border-b">
+                                            <th className="px-4 py-2 font-semibold text-slate-600">Nome</th>
                                             <th className="px-4 py-2 font-semibold text-slate-600">Competência</th>
                                             <th className="px-4 py-2 font-semibold text-slate-600">Unidade</th>
                                             <th className="px-4 py-2 font-semibold text-slate-600">Total</th>
@@ -2710,8 +2785,11 @@ export function FolhaPagamentoClient({
                                     <tbody className="divide-y">
                                         {filteredHistory.map(item => (
                                             <tr key={item.id} className="hover:bg-slate-50">
-                                                <td className="px-4 py-3">{MESES.find(m => m.value === String(item.month).padStart(2, "0"))?.label} / {item.year}</td>
-                                                <td className="px-4 py-3">{item.department?.name || "Todas"}</td>
+                                                <td className="px-4 py-3 font-medium text-slate-800">
+                                                    {(item.data as any)?.nome || <span className="text-slate-400 italic">Sem nome</span>}
+                                                </td>
+                                                <td className="px-4 py-3 text-slate-600">{MESES.find(m => m.value === String(item.month).padStart(2, "0"))?.label} / {item.year}</td>
+                                                <td className="px-4 py-3 text-slate-600">{item.department?.name || "Todas"}</td>
                                                 <td className="px-4 py-3 font-medium">{fmtBRL(Number(item.total))}</td>
                                                 <td className="px-4 py-3 text-right space-x-1">
                                                     <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600" onClick={() => loadAnalysis(item.id)} title="Abrir">
