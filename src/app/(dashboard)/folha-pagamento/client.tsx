@@ -749,7 +749,7 @@ export function FolhaPagamentoClient({
         const missingToSave = missingOverride ?? activeMissing
         setIsSaving(true)
         try {
-            await savePayrollAnalysis({
+            const { id: savedId } = await savePayrollAnalysis({
                 id: analysisId || undefined,
                 month: parseInt(mes), year: parseInt(ano),
                 departmentId: unidade || null,
@@ -763,9 +763,12 @@ export function FolhaPagamentoClient({
                     sheetSummary: result.sheetSummary
                 }
             })
+            setAnalysisId(savedId)
+            setFolhaNome(nome)
             if (selectedNfId) {
                 await updateNotaFiscalStatus(selectedNfId, "ANALISADA")
             }
+            setHistory(await listPayrollAnalyses())
             alert("Folha salva com sucesso!")
         } catch (err: any) {
             alert("Erro ao salvar: " + err.message)

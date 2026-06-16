@@ -18,7 +18,7 @@ export async function savePayrollAnalysis(data: {
     departmentId?: string | null
     total: number
     analysisData: any
-}) {
+}): Promise<{ id: string }> {
     const companyId = await getCompanyId()
     const supabase = getSupabaseAdmin()
 
@@ -34,13 +34,17 @@ export async function savePayrollAnalysis(data: {
         updatedAt: now,
     }
 
+    let savedId: string
+
     if (data.id) {
+        // Re-save de uma folha já existente → atualiza o registro pelo ID
         check(await supabase.from("PayrollAnalysis").update(payload).eq("id", data.id).eq("companyId", companyId))
+        savedId = data.id
     } else {
-        const id = randomUUID()
-        check(await supabase.from("PayrollAnalysis").upsert(
-            { ...payload, id, departmentId: data.departmentId ?? null, createdAt: now },
-            { onConflict: "month,year,departmentId,companyId" }
+        // Nova folha → sempre insere um novo registro
+        savedId = randomUUID()
+        check(await supabase.from("PayrollAnalysis").insert(
+            { ...payload, id: savedId, departmentId: data.departmentId ?? null, createdAt: now }
         ))
     }
 
@@ -59,6 +63,8 @@ export async function savePayrollAnalysis(data: {
     revalidatePath("/folha-pagamento")
     revalidatePath("/funcionarios")
     revalidatePath("/dashboard")
+
+    return { id: savedId }
 }
 
 export async function listPayrollAnalyses() {

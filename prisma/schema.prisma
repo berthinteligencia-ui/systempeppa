@@ -212,7 +212,6 @@ model PayrollAnalysis {
   company      Company       @relation(fields: [companyId], references: [id])
   department   Department?   @relation(fields: [departmentId], references: [id])
 
-  @@unique([month, year, departmentId, companyId], name: "month_year_unit_company")
 }
 
 model Comprovante {
