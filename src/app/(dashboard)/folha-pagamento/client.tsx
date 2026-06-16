@@ -222,6 +222,7 @@ export function FolhaPagamentoClient({
     const [isErrorCorrectionOpen, setIsErrorCorrectionOpen] = useState(false)
     const [selectedErrorRows, setSelectedErrorRows] = useState<string[]>([])
     const [ignoredBankCpfs, setIgnoredBankCpfs] = useState<string[]>([])
+    const [newlyRegisteredCpfs, setNewlyRegisteredCpfs] = useState<Set<string>>(new Set())
     
     // Bank Update
     const [isBankUpdateOpen, setIsBankUpdateOpen] = useState(false)
@@ -464,6 +465,7 @@ export function FolhaPagamentoClient({
                 });
                 setMissing(newMissing);
             }
+            setNewlyRegisteredCpfs(prev => new Set([...prev, ...toRegister.map(r => r.cpf)]))
             alert(`${toRegister.length} funcionários cadastrados com sucesso!`);
             setPhase("result")
         } catch (err: any) {
@@ -509,7 +511,7 @@ export function FolhaPagamentoClient({
         setResult(null); setMissing([]); setPhase("form"); setError(null); setDebugInfo(null); setPhoneUpdates([]); setColumnMappingSheets(null); setColumnHints({})
         setManualForm({ nome: "", cpf: "", valor: "", sheet: "", id: "", telefone: "", cargo: "", bankName: "", bankAgency: "", bankAccount: "", pix: "" })
         setExtraForm({ nome: "", cpfCnpj: "", valor: "", sheet: "", cargo: "", pix: "" })
-        setNewSheetName(""); setAnalysisId(null); setIgnoredBankCpfs([])
+        setNewSheetName(""); setAnalysisId(null); setIgnoredBankCpfs([]); setNewlyRegisteredCpfs(new Set())
     }
 
     function detectExcludeReason(row: AnalyzedRow): string {
@@ -1083,11 +1085,12 @@ export function FolhaPagamentoClient({
             return 6
         }
         const allExportRows = viewFilter === "EXCLUIDOS" ? [] :
-            viewFilter === "NOVOS" ? [...sortedResultRows].filter(r => 
-                r.status === "missing" && 
-                !r.isInvalidCpf && 
-                !duplicateCpfSet.has(`${r.sheet}::${r.cpf}`) && 
-                !crossAbaDuplicateSet.has(r.cpf)
+            viewFilter === "NOVOS" ? [...sortedResultRows].filter(r =>
+                (r.status === "missing" &&
+                    !r.isInvalidCpf &&
+                    !duplicateCpfSet.has(`${r.sheet}::${r.cpf}`) &&
+                    !crossAbaDuplicateSet.has(r.cpf)) ||
+                (r.status === "found" && newlyRegisteredCpfs.has(r.cpf))
             ) :
             [...sortedResultRows].sort((a, b) => {
                 const pa = exportPriority(a), pb = exportPriority(b)
@@ -1223,27 +1226,21 @@ export function FolhaPagamentoClient({
         return { duplicateCpfSet: dupCpf, crossAbaDuplicateSet: crossDup, duplicateNomeSet: dupNome }
     }, [resultRows])
 
-    // Priority: 0 = inconsistência (CPF inválido, dup, divergência, extra) → topo
-    //           1 = não cadastrado (missing sem outra inconsistência)
-    //           2 = cadastrado sem problemas → base
+    // Menor número = mais acima na lista. Erros críticos sempre no topo.
     const rowPriority = useCallback((r: AnalyzedRow): number => {
-        const isDuplicate = 
-            duplicateCpfSet.has(`${r.sheet}::${r.cpf}`) || 
-            crossAbaDuplicateSet.has(r.cpf) || 
+        const isDuplicate =
+            duplicateCpfSet.has(`${r.sheet}::${r.cpf}`) ||
+            crossAbaDuplicateSet.has(r.cpf) ||
             duplicateNomeSet.has((r.nome || "").toLowerCase().trim())
-        
-        const isPerfectMatch = 
-            r.status === "found" && 
-            !((r as FoundRow).nameMismatch || (r as FoundRow).valueMismatch || (r as any).isInvalidCpf || (r as any).isMissingBank || isDuplicate)
 
-        if (isPerfectMatch) return 0
-        if (r.status === "found" && (r as FoundRow).nameMismatch) return 1
-        if (r.status === "found" && (r as FoundRow).valueMismatch) return 2
-        if ((r as any).isInvalidCpf || isDuplicate) return 3
-        if (r.status === "extra") return 4
-        if (r.status === "missing") return 5
-        
-        return 6
+        if ((r as any).isInvalidCpf) return 0                              // CPF inválido → topo absoluto
+        if (isDuplicate) return 1                                           // duplicatas
+        if (r.status === "extra") return 2                                  // sem CPF no sistema
+        if (r.status === "found" && (r as FoundRow).nameMismatch) return 3  // divergência de nome
+        if (r.status === "found" && (r as FoundRow).valueMismatch) return 4 // divergência de valor
+        if (r.status === "missing") return 5                                // não cadastrado
+        if ((r as any).isMissingBank) return 6                              // banco ausente (aviso, não erro)
+        return 7                                                             // cadastrado sem pendências → base
     }, [duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet])
 
     const sortedResultRows = useMemo(() => {
@@ -1271,11 +1268,13 @@ export function FolhaPagamentoClient({
         } else if (viewFilter === "CAIXA") {
             base = sortedResultRows.filter(r => (r.bankName || "").toUpperCase().startsWith("CAIXA"))
         } else if (viewFilter === "NOVOS") {
-            base = sortedResultRows.filter(r => 
-                r.status === "missing" && 
-                !r.isInvalidCpf && 
-                !duplicateCpfSet.has(`${r.sheet}::${r.cpf}`) && 
-                !crossAbaDuplicateSet.has(r.cpf)
+            // Inclui: ainda não cadastrados válidos + recém-cadastrados nesta sessão
+            base = sortedResultRows.filter(r =>
+                (r.status === "missing" &&
+                    !r.isInvalidCpf &&
+                    !duplicateCpfSet.has(`${r.sheet}::${r.cpf}`) &&
+                    !crossAbaDuplicateSet.has(r.cpf)) ||
+                (r.status === "found" && newlyRegisteredCpfs.has(r.cpf))
             )
         } else if (viewFilter !== "GERAL" && viewFilter !== "EXCLUIDOS") {
             base = sortedResultRows.filter(r => (r.bankName || "").toUpperCase() === viewFilter)
@@ -1322,16 +1321,15 @@ export function FolhaPagamentoClient({
         return { unregistered, invalidCpfs, nameMismatches, valueMismatches, duplicates, extras, missingBanks }
     }, [result, resultRows, activeMissing, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet, missingBankCount, ignoredBankCpfs])
 
+    // Banco ausente não é erro bloqueante — tratado como aviso separado
     const totalDiversions = useMemo(() => {
         if (!result) return 0
-        const activeMissingBanks = errorGroups.missingBanks.filter(r => !r.isIgnoredBank).length
         return errorGroups.unregistered.length +
                errorGroups.invalidCpfs.length +
                errorGroups.nameMismatches.length +
                errorGroups.valueMismatches.length +
                errorGroups.duplicates.length +
-               errorGroups.extras.length +
-               activeMissingBanks
+               errorGroups.extras.length
     }, [errorGroups])
 
     // Erros que bloqueiam o cadastro: CPF inválido, duplicatas e extras sem CPF
@@ -1872,50 +1870,71 @@ export function FolhaPagamentoClient({
 
                         // ESTADO 3 — Erros bloqueantes presentes → aviso âmbar
                         return (
-                            <div className="mx-5 mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
-                                <div className="flex items-center gap-2 mb-3">
-                                    <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
-                                    <div>
-                                        <h3 className="text-sm font-bold text-amber-900">Atenção Necessária ({totalDiversions})</h3>
-                                        <p className="text-[11px] text-amber-700">
-                                            {errorGroups.unregistered.length > 0 && `${errorGroups.unregistered.length} não cadastrados. `}
-                                            {invalidCpfCount > 0 && `${invalidCpfCount} CPF(s) inválidos. `}
-                                            {nameMismatchCount > 0 && `${nameMismatchCount} divergências de nome. `}
-                                            {valMismatchCount > 0 && `${valMismatchCount} divergências de valor. `}
-                                            {duplicateCpfCount > 0 && `${duplicateCpfCount} CPF(s) dup. mesma aba. `}
-                                            {crossAbaDuplicateCount > 0 && `${crossAbaDuplicateCount} CPF(s) dup. entre abas. `}
-                                            {missingBankCount > 0 && `${missingBankCount} com dados bancários ausentes.`}
-                                        </p>
+                            <div className="mx-5 mt-4 space-y-3">
+                                {/* Banner de erros bloqueantes */}
+                                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
+                                        <div>
+                                            <h3 className="text-sm font-bold text-amber-900">Atenção Necessária ({totalDiversions})</h3>
+                                            <p className="text-[11px] text-amber-700">
+                                                {errorGroups.unregistered.length > 0 && `${errorGroups.unregistered.length} não cadastrado(s). `}
+                                                {invalidCpfCount > 0 && `${invalidCpfCount} CPF(s) inválido(s). `}
+                                                {nameMismatchCount > 0 && `${nameMismatchCount} divergência(s) de nome. `}
+                                                {valMismatchCount > 0 && `${valMismatchCount} divergência(s) de valor. `}
+                                                {duplicateCpfCount > 0 && `${duplicateCpfCount} CPF(s) dup. mesma aba. `}
+                                                {crossAbaDuplicateCount > 0 && `${crossAbaDuplicateCount} CPF(s) dup. entre abas. `}
+                                                {(result?.extras?.length ?? 0) > 0 && `${result!.extras.length} sem CPF identificado.`}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-2 flex-wrap">
+                                        <button onClick={() => {
+                                                const tabs = [
+                                                    { id: "unregistered", count: errorGroups.unregistered.length },
+                                                    { id: "invalidCpfs", count: invalidCpfCount },
+                                                    { id: "duplicates", count: errorGroups.duplicates.length },
+                                                    { id: "nameMismatches", count: nameMismatchCount },
+                                                    { id: "extras", count: result?.extras?.length || 0 },
+                                                ] as const
+                                                const first = tabs.find(t => t.count > 0)
+                                                if (first) setActiveErrorTab(first.id)
+                                                setIsErrorCorrectionOpen(true)
+                                            }} disabled={registering}
+                                            className="flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-100/50 px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-200 disabled:opacity-60 transition-colors">
+                                            <Edit className="h-3.5 w-3.5" /> Corrigir Erros
+                                        </button>
+                                        <button onClick={handleIgnoreAndContinue} disabled={registering}
+                                            className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-60 transition-colors">
+                                            <Users className="h-3.5 w-3.5" /> Ignorar e continuar
+                                        </button>
                                     </div>
                                 </div>
-                                <div className="flex gap-2 flex-wrap">
-                                    <button onClick={() => {
-                                            const tabs = [
-                                                { id: "unregistered", count: errorGroups.unregistered.length },
-                                                { id: "invalidCpfs", count: invalidCpfCount },
-                                                { id: "duplicates", count: errorGroups.duplicates.length },
-                                                { id: "nameMismatches", count: nameMismatchCount },
-                                                { id: "extras", count: result?.extras?.length || 0 },
-                                                { id: "missingBanks", count: missingBankCount },
-                                            ] as const
-                                            const first = tabs.find(t => t.count > 0)
-                                            if (first) setActiveErrorTab(first.id)
-                                            setIsErrorCorrectionOpen(true)
-                                        }} disabled={registering}
-                                        className="flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-100/50 px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-200 disabled:opacity-60 transition-colors">
-                                        <Edit className="h-3.5 w-3.5" /> Corrigir Erros
-                                    </button>
-                                    {missingBankCount > 0 && (
-                                        <button onClick={() => { setActiveErrorTab("missingBanks"); setIsErrorCorrectionOpen(true) }}
-                                            className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 transition-colors">
-                                            <Building2 className="h-3.5 w-3.5" /> Corrigir Bancos
-                                        </button>
-                                    )}
-                                    <button onClick={handleIgnoreAndContinue} disabled={registering}
-                                        className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-60 transition-colors">
-                                        <Users className="h-3.5 w-3.5" /> Ignorar e continuar
-                                    </button>
-                                </div>
+
+                                {/* Aviso separado de dados bancários — não é erro bloqueante */}
+                                {missingBankCount > 0 && (
+                                    <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 flex items-center justify-between gap-3 flex-wrap">
+                                        <div className="flex items-center gap-2">
+                                            <Building2 className="h-4 w-4 text-blue-500 shrink-0" />
+                                            <p className="text-xs text-blue-800 font-medium">
+                                                <span className="font-bold">{missingBankCount} colaborador{missingBankCount !== 1 ? "es" : ""}</span> com dados bancários incompletos.
+                                                <span className="text-blue-600 ml-1">Isso não impede o fechamento.</span>
+                                            </p>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={() => { setActiveErrorTab("missingBanks"); setIsErrorCorrectionOpen(true) }}
+                                                className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 transition-colors">
+                                                <Building2 className="h-3.5 w-3.5" /> Atualizar Bancos
+                                            </button>
+                                            <button
+                                                onClick={() => setIgnoredBankCpfs(resultRows.filter(r => (r as any).isMissingBank).map(r => r.cpf))}
+                                                className="flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50 transition-colors">
+                                                <X className="h-3.5 w-3.5" /> Ignorar todos
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )
                     })()}
@@ -2059,7 +2078,17 @@ export function FolhaPagamentoClient({
                                                         )}
                                                         {row.status === "extra" && (
                                                             <Badge variant="outline" className="h-5 px-1.5 border-orange-200 bg-orange-50 text-orange-700 text-[9px] gap-1 animate-pulse">
-                                                                <AlertCircle className="h-3 w-3" /> Divergência (Sem CPF)
+                                                                <AlertCircle className="h-3 w-3" /> Sem CPF — não identificado
+                                                            </Badge>
+                                                        )}
+                                                        {row.status === "missing" && (
+                                                            <Badge variant="outline" className="h-5 px-1.5 border-amber-300 bg-amber-50 text-amber-700 text-[9px] gap-1">
+                                                                <UserPlus className="h-3 w-3" /> Não cadastrado
+                                                            </Badge>
+                                                        )}
+                                                        {row.status === "found" && newlyRegisteredCpfs.has(row.cpf) && (
+                                                            <Badge variant="outline" className="h-5 px-1.5 border-emerald-300 bg-emerald-50 text-emerald-700 text-[9px] gap-1">
+                                                                <CheckCircle2 className="h-3 w-3" /> Novo
                                                             </Badge>
                                                         )}
                                                     </div>
@@ -2079,13 +2108,16 @@ export function FolhaPagamentoClient({
                                                     </span>
                                                 </td>
                                                 {viewFilter === "EXCLUIDOS" ? (
-                                                    <td className="px-5 py-3 max-w-[260px]">
+                                                    <td className="px-5 py-3 max-w-[280px]">
                                                         {(row as ExcludedRow).observacao ? (
-                                                            <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 block">
-                                                                {(row as ExcludedRow).observacao}
-                                                            </span>
+                                                            <div className="flex items-start gap-1.5">
+                                                                <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0 mt-0.5" />
+                                                                <span className="text-xs text-amber-800 font-medium bg-amber-50 border border-amber-200 rounded-md px-2 py-1 block leading-relaxed">
+                                                                    {(row as ExcludedRow).observacao}
+                                                                </span>
+                                                            </div>
                                                         ) : (
-                                                            <span className="text-slate-300 italic text-[11px]">Sem observação</span>
+                                                            <span className="text-slate-300 italic text-[11px]">Motivo não informado</span>
                                                         )}
                                                     </td>
                                                 ) : (
@@ -2688,7 +2720,10 @@ export function FolhaPagamentoClient({
                         <div className="w-64 bg-white border-r flex flex-col pt-6">
                             <DialogHeader className="px-6 mb-8 pt-0">
                                 <DialogTitle className="text-lg font-bold text-slate-800">Correção de Erros</DialogTitle>
-                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Total de {totalDiversions} pendências</p>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">
+                                    {totalDiversions} pendência{totalDiversions !== 1 ? "s" : ""}
+                                    {errorGroups.missingBanks.length > 0 && ` · ${errorGroups.missingBanks.length} aviso(s) bancário(s)`}
+                                </p>
                             </DialogHeader>
                             
                             <div className="flex-1 px-3 space-y-1">
@@ -2698,7 +2733,7 @@ export function FolhaPagamentoClient({
                                     { id: "duplicates", label: "Duplicidades", count: errorGroups.duplicates.length, icon: RotateCcw, color: "text-purple-500" },
                                     { id: "nameMismatches", label: "Divergência Nome", count: errorGroups.nameMismatches.length, icon: Info, color: "text-blue-500" },
                                     { id: "extras", label: "Sem CPF (Extras)", count: errorGroups.extras.length, icon: AlertCircle, color: "text-orange-500" },
-                                    { id: "missingBanks", label: "Dados Bancários", count: errorGroups.missingBanks.length, icon: Building2, color: "text-emerald-500" },
+                                    { id: "missingBanks", label: "Avisos Bancários", count: errorGroups.missingBanks.length, icon: Building2, color: "text-blue-400" },
                                 ].map((tab) => (
                                     <button
                                         key={tab.id}
@@ -2732,7 +2767,7 @@ export function FolhaPagamentoClient({
                                         {activeErrorTab === "duplicates" && "Registros duplicados detectados"}
                                         {activeErrorTab === "nameMismatches" && "Divergências entre planilha e sistema"}
                                         {activeErrorTab === "extras" && "Registros extras sem CPF identificado"}
-                                        {activeErrorTab === "missingBanks" && "Funcionários com dados bancários incompletos"}
+                                        {activeErrorTab === "missingBanks" && "Avisos — dados bancários incompletos (não bloqueante)"}
                                     </h3>
                                     <p className="text-xs text-slate-400 mt-1 font-medium">Selecione os registros para correção ou exclusão em massa.</p>
                                 </div>
@@ -2965,7 +3000,20 @@ export function FolhaPagamentoClient({
                                 </div>
                             </div>
 
-                            <div className="px-8 py-4 bg-white border-t flex justify-end gap-3">
+                            <div className="px-8 py-4 bg-white border-t flex items-center justify-between gap-3">
+                                <div>
+                                    {activeErrorTab === "missingBanks" && errorGroups.missingBanks.length > 0 && (
+                                        <button
+                                            onClick={() => {
+                                                setIgnoredBankCpfs(errorGroups.missingBanks.map(r => r.cpf))
+                                                setIsErrorCorrectionOpen(false)
+                                            }}
+                                            className="flex items-center gap-1.5 rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors"
+                                        >
+                                            <X className="h-3.5 w-3.5" /> Ignorar todos os avisos bancários
+                                        </button>
+                                    )}
+                                </div>
                                 <Button variant="outline" onClick={() => setIsErrorCorrectionOpen(false)} className="rounded-xl px-6">Fechar</Button>
                             </div>
                         </div>
