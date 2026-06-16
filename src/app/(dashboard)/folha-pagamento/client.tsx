@@ -223,6 +223,8 @@ export function FolhaPagamentoClient({
     const [selectedErrorRows, setSelectedErrorRows] = useState<string[]>([])
     const [ignoredBankCpfs, setIgnoredBankCpfs] = useState<string[]>([])
     const [newlyRegisteredCpfs, setNewlyRegisteredCpfs] = useState<Set<string>>(new Set())
+    // Chave: "${tabId}::${sheet}::${cpf||nome}" — marca erros ignorados sem excluir da folha
+    const [ignoredErrorKeys, setIgnoredErrorKeys] = useState<Set<string>>(new Set())
     
     // Bank Update
     const [isBankUpdateOpen, setIsBankUpdateOpen] = useState(false)
@@ -511,7 +513,7 @@ export function FolhaPagamentoClient({
         setResult(null); setMissing([]); setPhase("form"); setError(null); setDebugInfo(null); setPhoneUpdates([]); setColumnMappingSheets(null); setColumnHints({})
         setManualForm({ nome: "", cpf: "", valor: "", sheet: "", id: "", telefone: "", cargo: "", bankName: "", bankAgency: "", bankAccount: "", pix: "" })
         setExtraForm({ nome: "", cpfCnpj: "", valor: "", sheet: "", cargo: "", pix: "" })
-        setNewSheetName(""); setAnalysisId(null); setIgnoredBankCpfs([]); setNewlyRegisteredCpfs(new Set())
+        setNewSheetName(""); setAnalysisId(null); setIgnoredBankCpfs([]); setNewlyRegisteredCpfs(new Set()); setIgnoredErrorKeys(new Set())
     }
 
     function detectExcludeReason(row: AnalyzedRow): string {
@@ -1290,54 +1292,70 @@ export function FolhaPagamentoClient({
     const duplicateCpfCount = resultRows.filter(r => duplicateCpfSet.has(`${r.sheet}::${r.cpf}`)).length
     const crossAbaDuplicateCount = resultRows.filter(r => crossAbaDuplicateSet.has(r.cpf)).length
 
+    const errKey = (tab: string, r: { sheet: string; cpf?: string | null; nome?: string }) =>
+        `${tab}::${r.sheet}::${(r.cpf || r.nome || "").toUpperCase().trim()}`
+
     const errorGroups = useMemo(() => {
         if (!result) return { unregistered: [], invalidCpfs: [], nameMismatches: [], valueMismatches: [], duplicates: [], extras: [], missingBanks: [] }
-        
+
         const unregistered = activeMissing
-            .filter(r => 
-                !r.isInvalidCpf && 
-                !duplicateCpfSet.has(`${r.sheet}::${r.cpf}`) && 
+            .filter(r =>
+                !r.isInvalidCpf &&
+                !duplicateCpfSet.has(`${r.sheet}::${r.cpf}`) &&
                 !crossAbaDuplicateSet.has(r.cpf)
             )
-            .map(r => ({ ...r, status: "missing" as const, errorType: "unregistered" as const }))
-        const invalidCpfs = resultRows.filter(r => (r as any).isInvalidCpf).map(r => ({ ...r, errorType: "invalidCpf" as const } as any))
-        const nameMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).nameMismatch).map(r => ({ ...r, status: "found" as const, errorType: "nameMismatch" as const } as any))
-        const valueMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).valueMismatch).map(r => ({ ...r, status: "found" as const, errorType: "valueMismatch" as const } as any))
+            .map(r => ({ ...r, status: "missing" as const, errorType: "unregistered" as const, isIgnored: ignoredErrorKeys.has(errKey("unregistered", r)) }))
+
+        const invalidCpfs = resultRows.filter(r => (r as any).isInvalidCpf).map(r => ({
+            ...r, errorType: "invalidCpf" as const, isIgnored: ignoredErrorKeys.has(errKey("invalidCpfs", r))
+        } as any))
+
+        const nameMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).nameMismatch).map(r => ({
+            ...r, status: "found" as const, errorType: "nameMismatch" as const, isIgnored: ignoredErrorKeys.has(errKey("nameMismatches", r))
+        } as any))
+
+        const valueMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).valueMismatch).map(r => ({
+            ...r, status: "found" as const, errorType: "valueMismatch" as const, isIgnored: ignoredErrorKeys.has(errKey("valueMismatches", r))
+        } as any))
+
         const missingBanks = resultRows.filter(r => (r as any).isMissingBank).map(r => ({
             ...r,
             isIgnoredBank: ignoredBankCpfs.includes(r.cpf),
             errorType: "missingBank" as const
         } as any))
-        
+
         // Group duplicates by CPF or Name
-        const duplicates = resultRows.filter(r => 
-            duplicateCpfSet.has(`${r.sheet}::${r.cpf}`) || 
-            crossAbaDuplicateSet.has(r.cpf) || 
+        const duplicates = resultRows.filter(r =>
+            duplicateCpfSet.has(`${r.sheet}::${r.cpf}`) ||
+            crossAbaDuplicateSet.has(r.cpf) ||
             duplicateNomeSet.has(((r as any).nome || "").toLowerCase().trim())
-        ).map(r => ({ ...r, errorType: "duplicate" as const } as any))
-        
-        const extras = resultRows.filter(r => r.status === "extra").map(r => ({ ...r, status: "extra" as const, cpf: (r as any).cpf || "", errorType: "extra" as const } as any))
+        ).map(r => ({ ...r, errorType: "duplicate" as const, isIgnored: ignoredErrorKeys.has(errKey("duplicates", r)) } as any))
+
+        const extras = resultRows.filter(r => r.status === "extra").map(r => ({
+            ...r, status: "extra" as const, cpf: (r as any).cpf || "", errorType: "extra" as const, isIgnored: ignoredErrorKeys.has(errKey("extras", r))
+        } as any))
 
         return { unregistered, invalidCpfs, nameMismatches, valueMismatches, duplicates, extras, missingBanks }
-    }, [result, resultRows, activeMissing, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet, missingBankCount, ignoredBankCpfs])
+    }, [result, resultRows, activeMissing, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet, ignoredBankCpfs, ignoredErrorKeys])
 
     // Banco ausente não é erro bloqueante — tratado como aviso separado
+    // Itens com isIgnored=true também não contam como pendência
     const totalDiversions = useMemo(() => {
         if (!result) return 0
-        return errorGroups.unregistered.length +
-               errorGroups.invalidCpfs.length +
-               errorGroups.nameMismatches.length +
-               errorGroups.valueMismatches.length +
-               errorGroups.duplicates.length +
-               errorGroups.extras.length
+        const active = (arr: any[]) => arr.filter(r => !r.isIgnored).length
+        return active(errorGroups.unregistered) +
+               active(errorGroups.invalidCpfs) +
+               active(errorGroups.nameMismatches) +
+               active(errorGroups.valueMismatches) +
+               active(errorGroups.duplicates) +
+               active(errorGroups.extras)
     }, [errorGroups])
 
-    // Erros que bloqueiam o cadastro: CPF inválido, duplicatas e extras sem CPF
-    // Name/value mismatches e missing banks são avisos — não bloqueiam
+    // Erros que bloqueiam o cadastro: CPF inválido, duplicatas e extras sem CPF (não ignorados)
     const nonRegistrationBlockingErrors = useMemo(() =>
-        errorGroups.invalidCpfs.length +
-        errorGroups.duplicates.length +
-        errorGroups.extras.length,
+        errorGroups.invalidCpfs.filter(r => !r.isIgnored).length +
+        errorGroups.duplicates.filter(r => !r.isIgnored).length +
+        errorGroups.extras.filter(r => !r.isIgnored).length,
     [errorGroups])
 
     const [activeErrorTab, setActiveErrorTab] = useState<"unregistered" | "invalidCpfs" | "duplicates" | "nameMismatches" | "extras" | "missingBanks">("unregistered")
@@ -2780,8 +2798,8 @@ export function FolhaPagamentoClient({
                                 {/* Bulk Actions Header */}
                                 <div className="flex items-center justify-between mb-4 bg-white p-3 rounded-xl border border-slate-200">
                                     <div className="flex items-center gap-3">
-                                        <input 
-                                            type="checkbox" 
+                                        <input
+                                            type="checkbox"
                                             className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                                             checked={selectedErrorRows.length === errorGroups[activeErrorTab].length && errorGroups[activeErrorTab].length > 0}
                                             onChange={(e) => {
@@ -2795,9 +2813,41 @@ export function FolhaPagamentoClient({
                                         <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Selecionar todos os {errorGroups[activeErrorTab].length}</span>
                                     </div>
                                     <div className="flex items-center gap-2">
+                                        {/* Ignorar todos (sem selecionar) */}
+                                        {activeErrorTab !== "missingBanks" && errorGroups[activeErrorTab].filter((r: any) => !r.isIgnored).length > 0 && selectedErrorRows.length === 0 && (
+                                            <button
+                                                onClick={() => {
+                                                    const keys = errorGroups[activeErrorTab]
+                                                        .filter((r: any) => !r.isIgnored)
+                                                        .map((r: any) => errKey(activeErrorTab, r))
+                                                    setIgnoredErrorKeys(prev => new Set([...prev, ...keys]))
+                                                }}
+                                                className="flex items-center gap-1.5 bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider hover:bg-slate-200 transition-colors"
+                                            >
+                                                <X className="h-3 w-3" /> Ignorar todos
+                                            </button>
+                                        )}
+                                        {/* Reconsiderar todos ignorados */}
+                                        {activeErrorTab !== "missingBanks" && errorGroups[activeErrorTab].filter((r: any) => r.isIgnored).length > 0 && selectedErrorRows.length === 0 && (
+                                            <button
+                                                onClick={() => {
+                                                    const keys = errorGroups[activeErrorTab]
+                                                        .filter((r: any) => r.isIgnored)
+                                                        .map((r: any) => errKey(activeErrorTab, r))
+                                                    setIgnoredErrorKeys(prev => {
+                                                        const next = new Set(prev)
+                                                        keys.forEach((k: string) => next.delete(k))
+                                                        return next
+                                                    })
+                                                }}
+                                                className="flex items-center gap-1.5 bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider hover:bg-blue-100 transition-colors"
+                                            >
+                                                <RotateCcw className="h-3 w-3" /> Reconsiderar todos
+                                            </button>
+                                        )}
                                         {selectedErrorRows.length > 0 && (
                                             <>
-                                                <button 
+                                                <button
                                                     onClick={() => {
                                                         const rows = errorGroups[activeErrorTab].filter(r => selectedErrorRows.includes(`${r.sheet}::${r.cpf || (r as any).nome}`))
                                                         if (confirm(`Remover ${rows.length} registros selecionados?`)) {
@@ -2866,12 +2916,13 @@ export function FolhaPagamentoClient({
                                         const style = tabStyles[activeErrorTab] || tabStyles.unregistered
 
                                         return (
-                                            <div 
+                                            <div
                                                 key={idx}
                                                 className={cn(
-                                                    "flex items-center gap-4 p-4 rounded-xl bg-white border border-l-4 transition-all hover:shadow-md hover:translate-x-1 group relative",
-                                                    style.border,
-                                                    isSelected ? "border-blue-400 ring-4 ring-blue-50 bg-blue-50/30" : "border-slate-100 shadow-sm"
+                                                    "flex items-center gap-4 p-4 rounded-xl border border-l-4 transition-all group relative",
+                                                    (row as any).isIgnored
+                                                        ? "bg-slate-50 border-slate-200 border-l-slate-300 opacity-60"
+                                                        : cn("bg-white hover:shadow-md hover:translate-x-1", style.border, isSelected ? "border-blue-400 ring-4 ring-blue-50 bg-blue-50/30" : "border-slate-100 shadow-sm")
                                                 )}
                                             >
                                                 <div className="flex items-center gap-3">
@@ -2898,6 +2949,11 @@ export function FolhaPagamentoClient({
                                                             <FileSpreadsheet className="h-2.5 w-2.5" />
                                                             {row.sheet}
                                                         </div>
+                                                        {(row as any).isIgnored && (
+                                                            <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-200 text-[9px] font-bold text-slate-500 uppercase tracking-tighter">
+                                                                <X className="h-2.5 w-2.5" /> Ignorado
+                                                            </div>
+                                                        )}
                                                     </div>
                                                     
                                                     <div className="flex items-center gap-3 mt-1 underline-offset-2">
@@ -2935,7 +2991,7 @@ export function FolhaPagamentoClient({
                                                     </div>
 
                                                     <div className="flex items-center gap-1.5 border-l border-slate-100 pl-4 py-1">
-                                                        {activeErrorTab === "nameMismatches" && (
+                                                                        {activeErrorTab === "nameMismatches" && (
                                                             <button
                                                                 onClick={() => handleReconcileName(row as FoundRow)}
                                                                 className="h-8 px-3 rounded-lg flex items-center gap-2 bg-blue-600 text-white hover:bg-blue-700 transition-all font-black text-[9px] uppercase tracking-wider shadow-sm hover:shadow-blue-200"
@@ -2951,7 +3007,7 @@ export function FolhaPagamentoClient({
                                                                 <RotateCcw className="h-3 w-3" /> Consolidar
                                                             </button>
                                                         )}
-                                                        
+
                                                         {activeErrorTab === "missingBanks" && (
                                                             <>
                                                                 <button
@@ -2980,15 +3036,40 @@ export function FolhaPagamentoClient({
                                                                     }}
                                                                     className="h-8 px-3 rounded-lg flex items-center gap-2 bg-slate-100 text-slate-700 hover:bg-slate-200 transition-all font-black text-[9px] uppercase tracking-wider shadow-sm"
                                                                 >
-                                                                    {ignoredBankCpfs.includes(row.cpf) ? "Reconsiderar" : "Ignorar Erro"}
+                                                                    {ignoredBankCpfs.includes(row.cpf) ? "Reconsiderar" : "Ignorar"}
                                                                 </button>
                                                             </>
                                                         )}
-                                                        
-                                                        <button 
+
+                                                        {/* Ignorar / Reconsiderar — disponível em todos os tipos (exceto banco que já tem acima) */}
+                                                        {activeErrorTab !== "missingBanks" && (
+                                                            <button
+                                                                onClick={() => {
+                                                                    const k = errKey(activeErrorTab, row)
+                                                                    if ((row as any).isIgnored) {
+                                                                        setIgnoredErrorKeys(prev => { const n = new Set(prev); n.delete(k); return n })
+                                                                    } else {
+                                                                        setIgnoredErrorKeys(prev => new Set([...prev, k]))
+                                                                    }
+                                                                }}
+                                                                className={`h-8 px-3 rounded-lg flex items-center gap-2 transition-all font-black text-[9px] uppercase tracking-wider shadow-sm ${
+                                                                    (row as any).isIgnored
+                                                                        ? "bg-blue-50 text-blue-700 hover:bg-blue-100"
+                                                                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                                                }`}
+                                                                title={(row as any).isIgnored ? "Reconsiderar este erro" : "Ignorar e não bloquear o fechamento"}
+                                                            >
+                                                                {(row as any).isIgnored
+                                                                    ? <><RotateCcw className="h-3 w-3" /> Reconsiderar</>
+                                                                    : <><X className="h-3 w-3" /> Ignorar</>
+                                                                }
+                                                            </button>
+                                                        )}
+
+                                                        <button
                                                             onClick={() => handleDeleteRow(row)}
                                                             className="h-8 w-8 rounded-lg flex items-center justify-center text-slate-300 hover:text-red-600 hover:bg-red-50 hover:border-red-100 border border-transparent transition-all"
-                                                            title="Excluir Registro"
+                                                            title="Excluir da Folha"
                                                         >
                                                             <Trash2 className="h-3.5 w-3.5" />
                                                         </button>
