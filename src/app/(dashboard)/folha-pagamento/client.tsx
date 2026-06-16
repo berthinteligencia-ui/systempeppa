@@ -221,6 +221,7 @@ export function FolhaPagamentoClient({
     const [excludeReasonInput, setExcludeReasonInput] = useState("")
     const [isErrorCorrectionOpen, setIsErrorCorrectionOpen] = useState(false)
     const [selectedErrorRows, setSelectedErrorRows] = useState<string[]>([])
+    const [ignoredBankCpfs, setIgnoredBankCpfs] = useState<string[]>([])
     
     // Bank Update
     const [isBankUpdateOpen, setIsBankUpdateOpen] = useState(false)
@@ -508,15 +509,16 @@ export function FolhaPagamentoClient({
         setResult(null); setMissing([]); setPhase("form"); setError(null); setDebugInfo(null); setPhoneUpdates([]); setColumnMappingSheets(null); setColumnHints({})
         setManualForm({ nome: "", cpf: "", valor: "", sheet: "", id: "", telefone: "", cargo: "", bankName: "", bankAgency: "", bankAccount: "", pix: "" })
         setExtraForm({ nome: "", cpfCnpj: "", valor: "", sheet: "", cargo: "", pix: "" })
-        setNewSheetName(""); setAnalysisId(null)
+        setNewSheetName(""); setAnalysisId(null); setIgnoredBankCpfs([])
     }
 
     function detectExcludeReason(row: AnalyzedRow): string {
         const reasons: string[] = []
         if ((row as any).isInvalidCpf)  reasons.push("CPF inválido")
         if (row.status === "found" && (row as FoundRow).nameMismatch) reasons.push("Divergência de nome")
-        if (duplicateCpfSet.has(`${row.sheet}::${row.cpf}`))  reasons.push("Duplicado na mesma aba")
-        if (crossAbaDuplicateSet.has(row.cpf))                reasons.push("Duplicado entre abas")
+        if (duplicateCpfSet.has(`${row.sheet}::${row.cpf}`) || crossAbaDuplicateSet.has(row.cpf) || duplicateNomeSet.has((row.nome || "").toLowerCase().trim())) {
+            reasons.push("Duplicidade")
+        }
         if (row.status === "extra")      reasons.push("Sem CPF cadastrado")
         if (row.status === "missing")    reasons.push("Não cadastrado no sistema")
         if (row.valor === 0)             reasons.push("Valor zerado")
@@ -1081,7 +1083,12 @@ export function FolhaPagamentoClient({
             return 6
         }
         const allExportRows = viewFilter === "EXCLUIDOS" ? [] :
-            viewFilter === "NOVOS" ? [...sortedResultRows].filter(r => r.status === "missing") :
+            viewFilter === "NOVOS" ? [...sortedResultRows].filter(r => 
+                r.status === "missing" && 
+                !r.isInvalidCpf && 
+                !duplicateCpfSet.has(`${r.sheet}::${r.cpf}`) && 
+                !crossAbaDuplicateSet.has(r.cpf)
+            ) :
             [...sortedResultRows].sort((a, b) => {
                 const pa = exportPriority(a), pb = exportPriority(b)
                 if (pa !== pb) return pa - pb
@@ -1264,7 +1271,12 @@ export function FolhaPagamentoClient({
         } else if (viewFilter === "CAIXA") {
             base = sortedResultRows.filter(r => (r.bankName || "").toUpperCase().startsWith("CAIXA"))
         } else if (viewFilter === "NOVOS") {
-            base = sortedResultRows.filter(r => r.status === "missing")
+            base = sortedResultRows.filter(r => 
+                r.status === "missing" && 
+                !r.isInvalidCpf && 
+                !duplicateCpfSet.has(`${r.sheet}::${r.cpf}`) && 
+                !crossAbaDuplicateSet.has(r.cpf)
+            )
         } else if (viewFilter !== "GERAL" && viewFilter !== "EXCLUIDOS") {
             base = sortedResultRows.filter(r => (r.bankName || "").toUpperCase() === viewFilter)
         }
@@ -1272,7 +1284,7 @@ export function FolhaPagamentoClient({
         return selectedSheet ? base.filter(r => r.sheet === selectedSheet) : base
     }, [viewFilter, sortedResultRows, excludedRows, selectedSheet, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet])
 
-    const missingBankCount = resultRows.filter(r => (r as any).isMissingBank).length
+    const missingBankCount = resultRows.filter(r => (r as any).isMissingBank && !ignoredBankCpfs.includes(r.cpf)).length
     const invalidCpfCount = resultRows.filter(r => (r as any).isInvalidCpf).length
     const nameMismatchCount = resultRows.filter(r => r.status === "found" && (r as FoundRow).nameMismatch).length
     const valMismatchCount = resultRows.filter(r => r.status === "found" && (r as FoundRow).valueMismatch).length
@@ -1282,11 +1294,21 @@ export function FolhaPagamentoClient({
     const errorGroups = useMemo(() => {
         if (!result) return { unregistered: [], invalidCpfs: [], nameMismatches: [], valueMismatches: [], duplicates: [], extras: [], missingBanks: [] }
         
-        const unregistered = activeMissing.map(r => ({ ...r, status: "missing" as const, errorType: "unregistered" as const }))
+        const unregistered = activeMissing
+            .filter(r => 
+                !r.isInvalidCpf && 
+                !duplicateCpfSet.has(`${r.sheet}::${r.cpf}`) && 
+                !crossAbaDuplicateSet.has(r.cpf)
+            )
+            .map(r => ({ ...r, status: "missing" as const, errorType: "unregistered" as const }))
         const invalidCpfs = resultRows.filter(r => (r as any).isInvalidCpf).map(r => ({ ...r, errorType: "invalidCpf" as const } as any))
         const nameMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).nameMismatch).map(r => ({ ...r, status: "found" as const, errorType: "nameMismatch" as const } as any))
         const valueMismatches = resultRows.filter(r => r.status === "found" && (r as FoundRow).valueMismatch).map(r => ({ ...r, status: "found" as const, errorType: "valueMismatch" as const } as any))
-        const missingBanks = resultRows.filter(r => (r as any).isMissingBank).map(r => ({ ...r, errorType: "missingBank" as const } as any))
+        const missingBanks = resultRows.filter(r => (r as any).isMissingBank).map(r => ({
+            ...r,
+            isIgnoredBank: ignoredBankCpfs.includes(r.cpf),
+            errorType: "missingBank" as const
+        } as any))
         
         // Group duplicates by CPF or Name
         const duplicates = resultRows.filter(r => 
@@ -1298,17 +1320,18 @@ export function FolhaPagamentoClient({
         const extras = resultRows.filter(r => r.status === "extra").map(r => ({ ...r, status: "extra" as const, cpf: (r as any).cpf || "", errorType: "extra" as const } as any))
 
         return { unregistered, invalidCpfs, nameMismatches, valueMismatches, duplicates, extras, missingBanks }
-    }, [result, resultRows, activeMissing, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet, missingBankCount])
+    }, [result, resultRows, activeMissing, duplicateCpfSet, crossAbaDuplicateSet, duplicateNomeSet, missingBankCount, ignoredBankCpfs])
 
     const totalDiversions = useMemo(() => {
         if (!result) return 0
+        const activeMissingBanks = errorGroups.missingBanks.filter(r => !r.isIgnoredBank).length
         return errorGroups.unregistered.length +
                errorGroups.invalidCpfs.length +
                errorGroups.nameMismatches.length +
                errorGroups.valueMismatches.length +
                errorGroups.duplicates.length +
                errorGroups.extras.length +
-               errorGroups.missingBanks.length
+               activeMissingBanks
     }, [errorGroups])
 
     // Erros que bloqueiam o cadastro: CPF inválido, duplicatas e extras sem CPF
@@ -1855,7 +1878,7 @@ export function FolhaPagamentoClient({
                                     <div>
                                         <h3 className="text-sm font-bold text-amber-900">Atenção Necessária ({totalDiversions})</h3>
                                         <p className="text-[11px] text-amber-700">
-                                            {activeMissing.length > 0 && `${activeMissing.length} não cadastrados. `}
+                                            {errorGroups.unregistered.length > 0 && `${errorGroups.unregistered.length} não cadastrados. `}
                                             {invalidCpfCount > 0 && `${invalidCpfCount} CPF(s) inválidos. `}
                                             {nameMismatchCount > 0 && `${nameMismatchCount} divergências de nome. `}
                                             {valMismatchCount > 0 && `${valMismatchCount} divergências de valor. `}
@@ -1868,7 +1891,7 @@ export function FolhaPagamentoClient({
                                 <div className="flex gap-2 flex-wrap">
                                     <button onClick={() => {
                                             const tabs = [
-                                                { id: "unregistered", count: activeMissing.length },
+                                                { id: "unregistered", count: errorGroups.unregistered.length },
                                                 { id: "invalidCpfs", count: invalidCpfCount },
                                                 { id: "duplicates", count: errorGroups.duplicates.length },
                                                 { id: "nameMismatches", count: nameMismatchCount },
@@ -1999,7 +2022,7 @@ export function FolhaPagamentoClient({
                                             const isDupSameAba = duplicateCpfSet.has(`${row.sheet}::${row.cpf}`);
                                             const isDupCrossAba = !isDupSameAba && crossAbaDuplicateSet.has(row.cpf);
                                             const hasNameIssue = !!(row as any).isInvalidCpf || (row.status === "found" && (row as FoundRow).nameMismatch);
-                                            const hasMissingBank = !!(row as any).isMissingBank;
+                                            const hasMissingBank = !!(row as any).isMissingBank && !ignoredBankCpfs.includes(row.cpf);
                                             const rowBg = isDupSameAba
                                                 ? "bg-purple-50/70 hover:bg-purple-100/70"
                                                 : isDupCrossAba
@@ -2861,6 +2884,12 @@ export function FolhaPagamentoClient({
                                                                 {duplicateCpfSet.has(`${row.sheet}::${row.cpf}`) ? "DUPLICADO NESTA ABA" : "DUPLICADO ENTRE ABAS"}
                                                             </div>
                                                         )}
+                                                        {activeErrorTab === "missingBanks" && (row as any).isIgnoredBank && (
+                                                            <div className="flex items-center gap-1 text-[9px] px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200 font-bold animate-in fade-in">
+                                                                <Info className="h-2.5 w-2.5" />
+                                                                ERRO IGNORADO
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 </div>
 
@@ -2889,22 +2918,36 @@ export function FolhaPagamentoClient({
                                                         )}
                                                         
                                                         {activeErrorTab === "missingBanks" && (
-                                                            <button
-                                                                onClick={() => {
-                                                                    setBankUpdateSelectedIds([])
-                                                                    setBankUpdateTarget(row.id!)
-                                                                    setBankUpdateForm({
-                                                                        bankName: row.bankName || "",
-                                                                        bankAgency: row.bankAgency || "",
-                                                                        bankAccount: row.bankAccount || "",
-                                                                        pixKey: row.pix || ""
-                                                                    })
-                                                                    setIsBankUpdateOpen(true)
-                                                                }}
-                                                                className="h-8 px-3 rounded-lg flex items-center gap-2 bg-emerald-600 text-white hover:bg-emerald-700 transition-all font-black text-[9px] uppercase tracking-wider shadow-sm hover:shadow-emerald-200"
-                                                            >
-                                                                <Building2 className="h-3 w-3" /> Corrigir Banco
-                                                            </button>
+                                                            <>
+                                                                <button
+                                                                    onClick={() => {
+                                                                        setBankUpdateSelectedIds([])
+                                                                        setBankUpdateTarget(row.id!)
+                                                                        setBankUpdateForm({
+                                                                            bankName: row.bankName || "",
+                                                                            bankAgency: row.bankAgency || "",
+                                                                            bankAccount: row.bankAccount || "",
+                                                                            pixKey: row.pix || ""
+                                                                        })
+                                                                        setIsBankUpdateOpen(true)
+                                                                    }}
+                                                                    className="h-8 px-3 rounded-lg flex items-center gap-2 bg-emerald-600 text-white hover:bg-emerald-700 transition-all font-black text-[9px] uppercase tracking-wider shadow-sm hover:shadow-emerald-200"
+                                                                >
+                                                                    <Building2 className="h-3 w-3" /> Corrigir Banco
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => {
+                                                                        if (ignoredBankCpfs.includes(row.cpf)) {
+                                                                            setIgnoredBankCpfs(prev => prev.filter(c => c !== row.cpf))
+                                                                        } else {
+                                                                            setIgnoredBankCpfs(prev => [...prev, row.cpf])
+                                                                        }
+                                                                    }}
+                                                                    className="h-8 px-3 rounded-lg flex items-center gap-2 bg-slate-100 text-slate-700 hover:bg-slate-200 transition-all font-black text-[9px] uppercase tracking-wider shadow-sm"
+                                                                >
+                                                                    {ignoredBankCpfs.includes(row.cpf) ? "Reconsiderar" : "Ignorar Erro"}
+                                                                </button>
+                                                            </>
                                                         )}
                                                         
                                                         <button 
