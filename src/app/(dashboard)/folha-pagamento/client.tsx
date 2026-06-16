@@ -284,6 +284,7 @@ export function FolhaPagamentoClient({
             return
         }
         setFile(f)
+        setAnalysisId(null)
         setError(null)
     }
 
@@ -1629,7 +1630,7 @@ export function FolhaPagamentoClient({
                                         <p className="truncate text-sm font-semibold text-slate-800">{file.name}</p>
                                         <p className="text-xs text-slate-400">{fmtFile(file.size)}</p>
                                     </div>
-                                    <button onClick={() => setFile(null)} className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-200">
+                                    <button onClick={() => { setFile(null); setAnalysisId(null); }} className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-200">
                                         <X className="h-4 w-4" />
                                     </button>
                                 </div>

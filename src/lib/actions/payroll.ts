@@ -18,6 +18,7 @@ export async function savePayrollAnalysis(data: {
     year: number
     departmentId?: string | null
     total: number
+    totalEmployees?: number
     analysisData: any
 }): Promise<{ id: string }> {
     const companyId = await getCompanyId()
@@ -30,35 +31,15 @@ export async function savePayrollAnalysis(data: {
         departmentId: data.departmentId || null,
         companyId,
         total: data.total,
+        totalEmployees: data.totalEmployees ?? null,
         data: data.analysisData,
-        status: "OPEN",
+        status: "ABERTO",
         updatedAt: now,
     }
 
     let savedId: string
 
     let targetId = data.id
-
-    if (!targetId) {
-        // Verifica se já existe um fechamento para o mesmo mês, ano, departamento e empresa
-        let queryBuilder = supabase
-            .from("PayrollAnalysis")
-            .select("id")
-            .eq("month", data.month)
-            .eq("year", data.year)
-            .eq("companyId", companyId)
-
-        if (data.departmentId) {
-            queryBuilder = queryBuilder.eq("departmentId", data.departmentId)
-        } else {
-            queryBuilder = queryBuilder.is("departmentId", null)
-        }
-
-        const { data: existingRecord } = await queryBuilder.maybeSingle()
-        if (existingRecord) {
-            targetId = existingRecord.id
-        }
-    }
 
     if (targetId) {
         // Re-save de uma folha já existente → atualiza o registro pelo ID
@@ -121,5 +102,49 @@ export async function deletePayrollAnalysis(id: string) {
     check(await supabase.from("PayrollAnalysis").delete().eq("id", id).eq("companyId", companyId))
     revalidatePath("/folha-pagamento")
     revalidatePath("/relatorios")
+    revalidatePath("/dashboard")
+}
+
+export async function fecharFolha(id: string, observations?: string) {
+    const session = await auth()
+    if (!session?.user?.companyId) throw new Error("Não autenticado")
+    const companyId = session.user.companyId
+    const supabase = getSupabaseAdmin()
+
+    const now = new Date().toISOString()
+    check(await supabase.from("PayrollAnalysis")
+        .update({
+            status: "FECHADO",
+            closedAt: now,
+            closedByUserId: session.user.id ?? null,
+            observations: observations ?? null,
+            updatedAt: now,
+        })
+        .eq("id", id)
+        .eq("companyId", companyId)
+        .eq("status", "ABERTO")
+    )
+
+    revalidatePath("/folha-pagamento")
+    revalidatePath("/dashboard")
+}
+
+export async function reabrirFolha(id: string) {
+    const companyId = await getCompanyId()
+    const supabase = getSupabaseAdmin()
+
+    const now = new Date().toISOString()
+    check(await supabase.from("PayrollAnalysis")
+        .update({
+            status: "ABERTO",
+            closedAt: null,
+            closedByUserId: null,
+            updatedAt: now,
+        })
+        .eq("id", id)
+        .eq("companyId", companyId)
+    )
+
+    revalidatePath("/folha-pagamento")
     revalidatePath("/dashboard")
 }

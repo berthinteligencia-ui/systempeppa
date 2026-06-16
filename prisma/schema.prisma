@@ -138,10 +138,11 @@ model User {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
   companyId          String
-  mustChangePassword Boolean   @default(false)
+  mustChangePassword Boolean           @default(false)
   accounts           Account[]
   sessions           Session[]
-  company            Company   @relation(fields: [companyId], references: [id])
+  company            Company           @relation(fields: [companyId], references: [id])
+  closedPayrolls     PayrollAnalysis[] @relation("PayrollClosedBy")
 }
 
 model Department {
@@ -198,20 +199,24 @@ model Bank {
 }
 
 model PayrollAnalysis {
-  id           String        @id @default(cuid())
-  month        Int
-  year         Int
-  departmentId String?
-  companyId    String
-  data         Json
-  total        Decimal       @db.Decimal(10, 2)
-  status       String        @default("OPEN")
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  comprovantes Comprovante[]
-  company      Company       @relation(fields: [companyId], references: [id])
-  department   Department?   @relation(fields: [departmentId], references: [id])
-
+  id             String        @id @default(cuid())
+  month          Int
+  year           Int
+  departmentId   String?
+  companyId      String
+  data           Json
+  total          Decimal       @db.Decimal(10, 2)
+  status         String        @default("ABERTO")
+  totalEmployees Int?
+  observations   String?
+  closedAt       DateTime?
+  closedByUserId String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  comprovantes   Comprovante[]
+  company        Company       @relation(fields: [companyId], references: [id])
+  department     Department?   @relation(fields: [departmentId], references: [id])
+  closedByUser   User?         @relation("PayrollClosedBy", fields: [closedByUserId], references: [id], onDelete: SetNull)
 }
 
 model Comprovante {
