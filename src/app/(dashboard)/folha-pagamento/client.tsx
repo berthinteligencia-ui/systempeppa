@@ -215,6 +215,8 @@ export function FolhaPagamentoClient({
     const [historySearchQuery, setHistorySearchQuery] = useState("")
     const [historyFilterMonth, setHistoryFilterMonth] = useState("")
     const [historyFilterYear, setHistoryFilterYear] = useState("")
+    const [selectedHistoryIds, setSelectedHistoryIds] = useState<Set<string>>(new Set())
+    const [isMergeExporting, setIsMergeExporting] = useState(false)
     const [showSaveModal, setShowSaveModal] = useState(false)
     const [folhaNome, setFolhaNome] = useState("")
     const [viewFilter, setViewFilter] = useState("GERAL")
@@ -982,7 +984,127 @@ export function FolhaPagamentoClient({
         try {
             await deletePayrollAnalysis(id)
             setHistory(h => h.filter(x => x.id !== id))
+            setSelectedHistoryIds(prev => { const s = new Set(prev); s.delete(id); return s })
         } catch (err: any) { alert("Erro ao excluir: " + err.message) }
+    }
+
+    function toggleHistorySelection(id: string) {
+        setSelectedHistoryIds(prev => {
+            const s = new Set(prev)
+            s.has(id) ? s.delete(id) : s.add(id)
+            return s
+        })
+    }
+
+    async function handleMergeExport() {
+        if (selectedHistoryIds.size < 2) return
+        setIsMergeExporting(true)
+        try {
+            const ExcelJS = (await import("exceljs")).default
+            const wb = new ExcelJS.Workbook()
+            wb.creator = "PepaCorp"
+            wb.created = new Date()
+
+            const HEADER_FILL = { type: "pattern" as const, pattern: "solid" as const, fgColor: { argb: "FF1E3A5F" } }
+            const HEADER_FONT = { bold: true, size: 11, color: { argb: "FFFFFFFF" } }
+            const TOTAL_FILL = { type: "pattern" as const, pattern: "solid" as const, fgColor: { argb: "FFD9D9D9" } }
+
+            function styleHeaderRow(ws: any, colCount: number) {
+                const row = ws.getRow(1)
+                row.font = HEADER_FONT
+                row.fill = HEADER_FILL
+                row.alignment = { vertical: "middle", horizontal: "center" }
+                row.height = 20
+                ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: colCount } }
+            }
+
+            // Coleta dados de todos os fechamentos selecionados
+            const pagRows: any[] = []
+            const exclRows: any[] = []
+
+            for (const item of history.filter(h => selectedHistoryIds.has(h.id))) {
+                const ad = item.data as any
+                const mesLabel = MESES.find((m: any) => m.value === String(item.month).padStart(2, "0"))?.label || item.month
+                const origem = `${ad?.nome || "GERAL"} — ${mesLabel}/${item.year} (${item.department?.name || "Geral"})`
+
+                // Pagamentos: found + missing
+                for (const r of [...(ad?.found || []), ...(ad?.missing || [])]) {
+                    pagRows.push({
+                        origem,
+                        nome: r.nome || "",
+                        cpf: fmtCpf(r.cpf || ""),
+                        status: r.status === "found" ? "Cadastrado" : "Não cadastrado",
+                        banco: r.bankName || "—",
+                        agencia: r.bankAgency || "—",
+                        conta: r.bankAccount || "—",
+                        pix: r.pix || "—",
+                        valor: Number(r.valor) || 0,
+                    })
+                }
+
+                // Excluídos: excluded + extras (sem CPF)
+                for (const r of [...(ad?.excluded || []), ...(ad?.extras || [])]) {
+                    exclRows.push({
+                        origem,
+                        nome: r.nome || "",
+                        cpf: fmtCpf((r.cpf || r.cpfCnpj || "")),
+                        aba: r.sheet || "—",
+                        motivo: (r as any).observacao || "Sem CPF identificado",
+                        valor: Number(r.valor) || 0,
+                    })
+                }
+            }
+
+            // Aba 1 — Pagamentos
+            const wsPag = wb.addWorksheet("Pagamentos")
+            wsPag.columns = [
+                { header: "Origem (Fechamento)", key: "origem",  width: 44 },
+                { header: "Nome",                key: "nome",    width: 40 },
+                { header: "CPF",                 key: "cpf",     width: 18 },
+                { header: "Status",              key: "status",  width: 18 },
+                { header: "Banco",               key: "banco",   width: 22 },
+                { header: "Agência",             key: "agencia", width: 14 },
+                { header: "Conta",               key: "conta",   width: 18 },
+                { header: "PIX",                 key: "pix",     width: 28 },
+                { header: "Valor Líquido",       key: "valor",   width: 18 },
+            ]
+            pagRows.forEach(r => wsPag.addRow(r))
+            const totalPag = pagRows.reduce((s, r) => s + r.valor, 0)
+            wsPag.addRow({ origem: "TOTAL", nome: "", cpf: "", status: "", banco: "", agencia: "", conta: "", pix: "", valor: totalPag })
+            styleHeaderRow(wsPag, 9)
+            wsPag.getRow(wsPag.rowCount).font = { bold: true }
+            wsPag.getRow(wsPag.rowCount).fill = TOTAL_FILL
+            wsPag.getColumn("valor").numFmt = '"R$"#,##0.00'
+
+            // Aba 2 — Excluídos
+            const wsExcl = wb.addWorksheet("Excluídos da Folha")
+            wsExcl.columns = [
+                { header: "Origem (Fechamento)",    key: "origem", width: 44 },
+                { header: "Nome",                   key: "nome",   width: 40 },
+                { header: "CPF",                    key: "cpf",    width: 18 },
+                { header: "Aba Origem",             key: "aba",    width: 18 },
+                { header: "Motivo / Observação",    key: "motivo", width: 48 },
+                { header: "Valor",                  key: "valor",  width: 18 },
+            ]
+            exclRows.forEach(r => wsExcl.addRow(r))
+            if (exclRows.length === 0) wsExcl.addRow({ origem: "Nenhum registro excluído nos fechamentos selecionados." })
+            styleHeaderRow(wsExcl, 6)
+            wsExcl.getColumn("valor").numFmt = '"R$"#,##0.00'
+
+            // Download
+            const buf = await wb.xlsx.writeBuffer()
+            const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement("a")
+            a.href = url
+            a.download = `fechamentos-mesclados-${new Date().toISOString().slice(0, 10)}.xlsx`
+            a.click()
+            URL.revokeObjectURL(url)
+        } catch (err: any) {
+            alert("Erro ao exportar: " + err.message)
+        } finally {
+            setIsMergeExporting(false)
+        }
     }
 
     async function handleCpfSearch() {
@@ -2100,54 +2222,54 @@ export function FolhaPagamentoClient({
                                                             : "hover:bg-slate-50";
                                             return (
                                                 <tr key={i} className={`transition-colors ${rowBg}`}>
-                                                <td className="px-5 py-3">
-                                                    <div className="flex items-center gap-2">
-                                                        <p className="font-semibold text-slate-800">{row.nome}</p>
-                                                        {row.status === "found" && (row as FoundRow).nameMismatch && (
-                                                            <Badge variant="outline" className="h-5 px-1.5 border-amber-200 bg-amber-50 text-amber-700 text-[9px] gap-1 animate-pulse">
-                                                                <AlertCircle className="h-3 w-3" /> Divergência
-                                                            </Badge>
-                                                        )}
-                                                        {isDupSameAba && (
-                                                            <Badge variant="outline" className="h-5 px-1.5 border-purple-200 bg-purple-50 text-purple-700 text-[9px] gap-1">
-                                                                <AlertCircle className="h-3 w-3" /> Dup. mesma aba
-                                                            </Badge>
-                                                        )}
-                                                        {isDupCrossAba && (
-                                                            <Badge variant="outline" className="h-5 px-1.5 border-indigo-200 bg-indigo-50 text-indigo-700 text-[9px] gap-1">
-                                                                <AlertCircle className="h-3 w-3" /> Dup. outra aba
-                                                            </Badge>
-                                                        )}
-                                                        {duplicateNomeSet.has(row.nome.toLowerCase().trim()) && (
-                                                            <Badge variant="outline" className="h-5 px-1.5 border-teal-200 bg-teal-50 text-teal-700 text-[9px] gap-1">
-                                                                <AlertCircle className="h-3 w-3" /> Divergência (Nome)
-                                                            </Badge>
-                                                        )}
-                                                        {row.status === "extra" && (
-                                                            <Badge variant="outline" className="h-5 px-1.5 border-orange-200 bg-orange-50 text-orange-700 text-[9px] gap-1 animate-pulse">
-                                                                <AlertCircle className="h-3 w-3" /> Sem CPF — não identificado
-                                                            </Badge>
-                                                        )}
-                                                        {row.status === "missing" && (
-                                                            <Badge variant="outline" className="h-5 px-1.5 border-amber-300 bg-amber-50 text-amber-700 text-[9px] gap-1">
-                                                                <UserPlus className="h-3 w-3" /> Não cadastrado
-                                                            </Badge>
-                                                        )}
-                                                        {row.status === "found" && newlyRegisteredCpfs.has(row.cpf) && (
-                                                            <Badge variant="outline" className="h-5 px-1.5 border-emerald-300 bg-emerald-50 text-emerald-700 text-[9px] gap-1">
-                                                                <CheckCircle2 className="h-3 w-3" /> Novo
-                                                            </Badge>
-                                                        )}
-                                                    </div>
-                                                    <div className="flex items-center gap-2">
+                                                <td className="px-5 py-3 max-w-[220px] min-w-[160px]">
+                                                    <p className="font-semibold text-slate-800 truncate" title={row.nome}>{row.nome}</p>
+                                                    <div className="flex items-center gap-1.5 mt-0.5">
                                                         <p className={`text-[10px] font-mono ${isDupSameAba ? "text-purple-500" : isDupCrossAba ? "text-indigo-500" : "text-slate-400"}`}>{fmtCpf(row.cpf)}</p>
                                                         {(row as any).isInvalidCpf && (
-                                                            <span className="text-[9px] font-bold text-red-500 uppercase tracking-tighter">CPF Inválido</span>
+                                                            <span className="text-[9px] font-bold text-red-500 uppercase tracking-tighter">Inválido</span>
                                                         )}
                                                     </div>
                                                     {row.status === "found" && (row as FoundRow).nameMismatch && (
-                                                        <p className="text-[9px] text-slate-400 italic mt-0.5">Sist: {(row as FoundRow).dbName}</p>
+                                                        <p className="text-[9px] text-slate-400 italic mt-0.5 truncate">Sist: {(row as FoundRow).dbName}</p>
                                                     )}
+                                                    <div className="flex flex-wrap gap-1 mt-1.5">
+                                                        {row.status === "found" && (row as FoundRow).nameMismatch && (
+                                                            <Badge variant="outline" className="h-4 px-1 border-amber-200 bg-amber-50 text-amber-700 text-[9px] gap-0.5">
+                                                                <AlertCircle className="h-2.5 w-2.5" /> Div. Nome
+                                                            </Badge>
+                                                        )}
+                                                        {isDupSameAba && (
+                                                            <Badge variant="outline" className="h-4 px-1 border-purple-200 bg-purple-50 text-purple-700 text-[9px] gap-0.5">
+                                                                <AlertCircle className="h-2.5 w-2.5" /> Dup. aba
+                                                            </Badge>
+                                                        )}
+                                                        {isDupCrossAba && (
+                                                            <Badge variant="outline" className="h-4 px-1 border-indigo-200 bg-indigo-50 text-indigo-700 text-[9px] gap-0.5">
+                                                                <AlertCircle className="h-2.5 w-2.5" /> Dup. outra
+                                                            </Badge>
+                                                        )}
+                                                        {duplicateNomeSet.has(row.nome.toLowerCase().trim()) && (
+                                                            <Badge variant="outline" className="h-4 px-1 border-teal-200 bg-teal-50 text-teal-700 text-[9px] gap-0.5">
+                                                                <AlertCircle className="h-2.5 w-2.5" /> Div. Nome
+                                                            </Badge>
+                                                        )}
+                                                        {row.status === "extra" && (
+                                                            <Badge variant="outline" className="h-4 px-1 border-orange-200 bg-orange-50 text-orange-700 text-[9px] gap-0.5">
+                                                                <AlertCircle className="h-2.5 w-2.5" /> Sem CPF
+                                                            </Badge>
+                                                        )}
+                                                        {row.status === "missing" && (
+                                                            <Badge variant="outline" className="h-4 px-1 border-amber-300 bg-amber-50 text-amber-700 text-[9px] gap-0.5">
+                                                                <UserPlus className="h-2.5 w-2.5" /> Não cad.
+                                                            </Badge>
+                                                        )}
+                                                        {row.status === "found" && newlyRegisteredCpfs.has(row.cpf) && (
+                                                            <Badge variant="outline" className="h-4 px-1 border-emerald-300 bg-emerald-50 text-emerald-700 text-[9px] gap-0.5">
+                                                                <CheckCircle2 className="h-2.5 w-2.5" /> Novo
+                                                            </Badge>
+                                                        )}
+                                                    </div>
                                                 </td>
                                                 <td className="px-5 py-3">
                                                     <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-600">
@@ -2791,18 +2913,42 @@ export function FolhaPagamentoClient({
                             <DialogTitle className="text-xl font-bold text-slate-900">Histórico de Fechamentos</DialogTitle>
                             <p className="text-xs text-slate-400 mt-0.5">
                                 {filteredHistory.length} fechamento{filteredHistory.length !== 1 ? "s" : ""} encontrado{filteredHistory.length !== 1 ? "s" : ""}
+                                {selectedHistoryIds.size > 0 && (
+                                    <span className="ml-2 text-indigo-600 font-semibold">· {selectedHistoryIds.size} selecionado{selectedHistoryIds.size !== 1 ? "s" : ""}</span>
+                                )}
                             </p>
                         </div>
-                        {filteredHistory.length > 0 && (
-                            <div className="flex items-center gap-4 text-right">
-                                <div>
+                        <div className="flex items-center gap-3">
+                            {selectedHistoryIds.size >= 2 && (
+                                <button
+                                    onClick={handleMergeExport}
+                                    disabled={isMergeExporting}
+                                    className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-700 disabled:opacity-60 transition-colors shadow-sm"
+                                >
+                                    {isMergeExporting
+                                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        : <Download className="h-3.5 w-3.5" />
+                                    }
+                                    Juntar e Exportar ({selectedHistoryIds.size})
+                                </button>
+                            )}
+                            {selectedHistoryIds.size > 0 && (
+                                <button
+                                    onClick={() => setSelectedHistoryIds(new Set())}
+                                    className="text-xs text-slate-400 hover:text-slate-600 transition-colors"
+                                >
+                                    Limpar seleção
+                                </button>
+                            )}
+                            {filteredHistory.length > 0 && (
+                                <div className="text-right">
                                     <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total geral</p>
                                     <p className="text-base font-bold text-slate-800">
                                         {fmtBRL(filteredHistory.reduce((s, i) => s + Number(i.total), 0))}
                                     </p>
                                 </div>
-                            </div>
-                        )}
+                            )}
+                        </div>
                     </div>
 
                     {/* Filtros */}
@@ -2881,13 +3027,21 @@ export function FolhaPagamentoClient({
                                 {filteredHistory.map(item => {
                                     const isFechado = item.status === "FECHADO"
                                     const mesLabel = MESES.find(m => m.value === String(item.month).padStart(2, "0"))?.label
+                                    const isSelected = selectedHistoryIds.has(item.id)
                                     return (
                                         <div
                                             key={item.id}
-                                            className={`group relative flex items-center gap-4 rounded-xl border bg-white p-4 shadow-sm transition-all hover:shadow-md ${isFechado ? "border-emerald-100 hover:border-emerald-200" : "border-slate-100 hover:border-indigo-200"}`}
+                                            className={`group relative flex items-center gap-4 rounded-xl border bg-white p-4 shadow-sm transition-all hover:shadow-md cursor-pointer
+                                                ${isSelected ? "border-indigo-300 ring-2 ring-indigo-200 bg-indigo-50/30" : isFechado ? "border-emerald-100 hover:border-emerald-200" : "border-slate-100 hover:border-indigo-200"}`}
+                                            onClick={() => toggleHistorySelection(item.id)}
                                         >
+                                            {/* Checkbox */}
+                                            <div className={`shrink-0 h-5 w-5 rounded border-2 flex items-center justify-center transition-colors ${isSelected ? "bg-indigo-600 border-indigo-600" : "border-slate-300 bg-white group-hover:border-indigo-400"}`}>
+                                                {isSelected && <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+                                            </div>
+
                                             {/* Indicador de status lateral */}
-                                            <div className={`absolute left-0 top-4 bottom-4 w-1 rounded-full ${isFechado ? "bg-emerald-400" : "bg-blue-400"}`} />
+                                            <div className={`absolute left-0 top-4 bottom-4 w-1 rounded-full ${isSelected ? "bg-indigo-400" : isFechado ? "bg-emerald-400" : "bg-blue-400"}`} />
 
                                             {/* Ícone / período */}
                                             <div className={`ml-3 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-xs font-bold ${isFechado ? "bg-emerald-50 text-emerald-700" : "bg-blue-50 text-blue-700"}`}>
@@ -2943,7 +3097,7 @@ export function FolhaPagamentoClient({
                                                 <Button
                                                     variant="ghost" size="icon"
                                                     className="h-8 w-8 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg"
-                                                    onClick={() => loadAnalysis(item.id)}
+                                                    onClick={e => { e.stopPropagation(); loadAnalysis(item.id) }}
                                                     title="Abrir"
                                                 >
                                                     <Edit className="h-3.5 w-3.5" />
@@ -2951,7 +3105,7 @@ export function FolhaPagamentoClient({
                                                 <Button
                                                     variant="ghost" size="icon"
                                                     className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50 rounded-lg"
-                                                    onClick={() => handleDeleteAnalysis(item.id)}
+                                                    onClick={e => { e.stopPropagation(); handleDeleteAnalysis(item.id) }}
                                                     title="Excluir"
                                                 >
                                                     <Trash2 className="h-3.5 w-3.5" />
