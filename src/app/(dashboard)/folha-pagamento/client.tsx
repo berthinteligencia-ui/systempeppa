@@ -2823,7 +2823,7 @@ export function FolhaPagamentoClient({
                                 className="h-9 w-full appearance-none rounded-lg border border-slate-200 bg-white px-3 pr-7 text-sm text-slate-700 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
                             >
                                 <option value="">Todas as Unidades</option>
-                                {departments.map(d => (
+                                {departments.filter(d => !d.parentId).map(d => (
                                     <option key={d.id} value={d.id}>{d.name}</option>
                                 ))}
                             </select>
