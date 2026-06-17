@@ -2784,172 +2784,190 @@ export function FolhaPagamentoClient({
                     setHistoryFilterYear("")
                 }
             }}>
-                <DialogContent className="max-w-5xl w-[95vw]">
-                    <DialogHeader>
-                        <DialogTitle className="text-xl font-bold text-slate-800">Histórico de Fechamentos</DialogTitle>
-                    </DialogHeader>
-                    
-                    {/* Barra de Filtros */}
-                    <div className="flex flex-wrap items-center gap-3 p-3 bg-slate-50 border border-slate-100 rounded-xl mt-3">
-                        {/* Busca textual */}
-                        <div className="relative flex-1 min-w-[200px]">
-                            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                            <Input
-                                placeholder="Buscar fechamento pelo nome..."
-                                value={historySearchQuery}
-                                onChange={e => setHistorySearchQuery(e.target.value)}
-                                className="pl-9 h-10 w-full rounded-lg border-slate-200 focus-visible:ring-indigo-500 bg-white"
-                            />
+                <DialogContent className="max-w-5xl w-[95vw] p-0 gap-0 overflow-hidden rounded-2xl">
+                    {/* Header */}
+                    <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-slate-100">
+                        <div>
+                            <DialogTitle className="text-xl font-bold text-slate-900">Histórico de Fechamentos</DialogTitle>
+                            <p className="text-xs text-slate-400 mt-0.5">
+                                {filteredHistory.length} fechamento{filteredHistory.length !== 1 ? "s" : ""} encontrado{filteredHistory.length !== 1 ? "s" : ""}
+                            </p>
                         </div>
-
-                        {/* Dropdown de Departamento / Unidade */}
-                        <div className="relative min-w-[180px]">
-                            <select
-                                value={historyFilterUnit || ""}
-                                onChange={e => setHistoryFilterUnit(e.target.value || null)}
-                                className="h-10 w-full appearance-none rounded-lg border border-slate-200 bg-white px-3 py-2 pr-8 text-sm text-slate-700 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 shadow-sm"
-                            >
-                                <option value="">Todas as Unidades</option>
-                                {departments.map(d => (
-                                    <option key={d.id} value={d.id}>
-                                        {d.name.toUpperCase()}
-                                    </option>
-                                ))}
-                            </select>
-                            <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-slate-400">
-                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                </svg>
-                            </span>
-                        </div>
-
-                        {/* Dropdown de Mês */}
-                        <div className="relative min-w-[130px]">
-                            <select
-                                value={historyFilterMonth}
-                                onChange={e => setHistoryFilterMonth(e.target.value)}
-                                className="h-10 w-full appearance-none rounded-lg border border-slate-200 bg-white px-3 py-2 pr-8 text-sm text-slate-700 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 shadow-sm"
-                            >
-                                <option value="">Todos os Meses</option>
-                                {MESES.map(m => (
-                                    <option key={m.value} value={m.value}>{m.label}</option>
-                                ))}
-                            </select>
-                            <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-slate-400">
-                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                </svg>
-                            </span>
-                        </div>
-
-                        {/* Dropdown de Ano */}
-                        <div className="relative min-w-[110px]">
-                            <select
-                                value={historyFilterYear}
-                                onChange={e => setHistoryFilterYear(e.target.value)}
-                                className="h-10 w-full appearance-none rounded-lg border border-slate-200 bg-white px-3 py-2 pr-8 text-sm text-slate-700 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 shadow-sm"
-                            >
-                                <option value="">Todos os Anos</option>
-                                {ANOS.map(a => (
-                                    <option key={a} value={String(a)}>{a}</option>
-                                ))}
-                            </select>
-                            <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-slate-400">
-                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                </svg>
-                            </span>
-                        </div>
-
-                        {/* Botão de Limpar */}
-                        {(historySearchQuery || historyFilterUnit || historyFilterMonth || historyFilterYear) && (
-                            <Button
-                                variant="ghost"
-                                onClick={() => {
-                                    setHistorySearchQuery("")
-                                    setHistoryFilterUnit(null)
-                                    setHistoryFilterMonth("")
-                                    setHistoryFilterYear("")
-                                }}
-                                className="h-10 text-xs font-semibold text-slate-500 hover:text-indigo-600 hover:bg-slate-100 px-3 rounded-lg"
-                            >
-                                Limpar
-                            </Button>
-                        )}
-                    </div>
-
-                    <div className="py-4">
-                        {isLoadingHistory ? (
-                            <div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin text-blue-500" /></div>
-                        ) : filteredHistory.length === 0 ? (
-                            <p className="text-center text-slate-500 py-8">Nenhum fechamento encontrado.</p>
-                        ) : (
-                            <div className="max-h-[50vh] overflow-y-auto border rounded-xl shadow-sm">
-                                <table className="w-full text-sm">
-                                    <thead className="bg-slate-50/75 backdrop-blur sticky top-0 border-b z-10">
-                                        <tr className="text-left">
-                                            <th className="px-4 py-3 font-bold text-[11px] uppercase tracking-wider text-slate-400">Nome</th>
-                                            <th className="px-4 py-3 font-bold text-[11px] uppercase tracking-wider text-slate-400">Competência</th>
-                                            <th className="px-4 py-3 font-bold text-[11px] uppercase tracking-wider text-slate-400">Unidade</th>
-                                            <th className="px-4 py-3 font-bold text-[11px] uppercase tracking-wider text-slate-400">Colaboradores</th>
-                                            <th className="px-4 py-3 font-bold text-[11px] uppercase tracking-wider text-slate-400">Total</th>
-                                            <th className="px-4 py-3 font-bold text-[11px] uppercase tracking-wider text-slate-400">Status</th>
-                                            <th className="px-4 py-3 font-bold text-[11px] uppercase tracking-wider text-slate-400">Criado em</th>
-                                            <th className="px-4 py-3 font-bold text-[11px] uppercase tracking-wider text-slate-400 text-right">Ações</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y bg-white">
-                                        {filteredHistory.map(item => (
-                                            <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
-                                                <td className="px-4 py-3.5 font-semibold text-slate-800">
-                                                    {(item.data as any)?.nome || <span className="text-slate-400 italic">Sem nome</span>}
-                                                </td>
-                                                <td className="px-4 py-3.5 text-slate-600 font-medium">{MESES.find(m => m.value === String(item.month).padStart(2, "0"))?.label} / {item.year}</td>
-                                                <td className="px-4 py-3.5 text-slate-600 font-medium">{item.department?.name || "Todas"}</td>
-                                                <td className="px-4 py-3.5 text-slate-500 font-medium">
-                                                    {item.totalEmployees != null ? (
-                                                        <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
-                                                            {item.totalEmployees} colabs
-                                                        </span>
-                                                    ) : (
-                                                        <span className="text-slate-300">-</span>
-                                                    )}
-                                                </td>
-                                                <td className="px-4 py-3.5 font-bold text-slate-900">{fmtBRL(Number(item.total))}</td>
-                                                <td className="px-4 py-3.5">
-                                                    {item.status === "FECHADO" ? (
-                                                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700 border border-emerald-100">
-                                                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                                                            Fechado
-                                                        </span>
-                                                    ) : (
-                                                        <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-700 border border-blue-100">
-                                                            <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
-                                                            Aberto
-                                                        </span>
-                                                    )}
-                                                </td>
-                                                <td className="px-4 py-3.5 text-slate-500 text-xs font-medium">
-                                                    {item.createdAt ? new Date(item.createdAt).toLocaleDateString("pt-BR") : "-"}
-                                                </td>
-                                                <td className="px-4 py-3.5 text-right space-x-1">
-                                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors" onClick={() => loadAnalysis(item.id)} title="Abrir">
-                                                        <Edit className="h-4 w-4" />
-                                                    </Button>
-                                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors" onClick={() => handleDeleteAnalysis(item.id)} title="Excluir">
-                                                        <Trash2 className="h-4 w-4" />
-                                                    </Button>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                        {filteredHistory.length > 0 && (
+                            <div className="flex items-center gap-4 text-right">
+                                <div>
+                                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total geral</p>
+                                    <p className="text-base font-bold text-slate-800">
+                                        {fmtBRL(filteredHistory.reduce((s, i) => s + Number(i.total), 0))}
+                                    </p>
+                                </div>
                             </div>
                         )}
                     </div>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsHistoryOpen(false)}>Fechar</Button>
-                    </DialogFooter>
+
+                    {/* Filtros */}
+                    <div className="flex flex-wrap items-center gap-2 px-6 py-3 bg-slate-50 border-b border-slate-100">
+                        <div className="relative flex-1 min-w-[180px]">
+                            <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                            <Input
+                                placeholder="Buscar pelo nome..."
+                                value={historySearchQuery}
+                                onChange={e => setHistorySearchQuery(e.target.value)}
+                                className="pl-8 h-9 text-sm rounded-lg border-slate-200 bg-white focus-visible:ring-indigo-500"
+                            />
+                        </div>
+                        <div className="relative min-w-[160px]">
+                            <select
+                                value={historyFilterUnit || ""}
+                                onChange={e => setHistoryFilterUnit(e.target.value || null)}
+                                className="h-9 w-full appearance-none rounded-lg border border-slate-200 bg-white px-3 pr-7 text-sm text-slate-700 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                            >
+                                <option value="">Todas as Unidades</option>
+                                {departments.map(d => (
+                                    <option key={d.id} value={d.id}>{d.name}</option>
+                                ))}
+                            </select>
+                            <svg className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                        </div>
+                        <div className="relative min-w-[120px]">
+                            <select
+                                value={historyFilterMonth}
+                                onChange={e => setHistoryFilterMonth(e.target.value)}
+                                className="h-9 w-full appearance-none rounded-lg border border-slate-200 bg-white px-3 pr-7 text-sm text-slate-700 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                            >
+                                <option value="">Todos os Meses</option>
+                                {MESES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                            </select>
+                            <svg className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                        </div>
+                        <div className="relative min-w-[100px]">
+                            <select
+                                value={historyFilterYear}
+                                onChange={e => setHistoryFilterYear(e.target.value)}
+                                className="h-9 w-full appearance-none rounded-lg border border-slate-200 bg-white px-3 pr-7 text-sm text-slate-700 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                            >
+                                <option value="">Todos os Anos</option>
+                                {ANOS.map(a => <option key={a} value={String(a)}>{a}</option>)}
+                            </select>
+                            <svg className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                        </div>
+                        {(historySearchQuery || historyFilterUnit || historyFilterMonth || historyFilterYear) && (
+                            <button
+                                onClick={() => { setHistorySearchQuery(""); setHistoryFilterUnit(null); setHistoryFilterMonth(""); setHistoryFilterYear("") }}
+                                className="h-9 px-3 text-xs font-semibold text-slate-500 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                            >
+                                Limpar
+                            </button>
+                        )}
+                    </div>
+
+                    {/* Conteúdo */}
+                    <div className="overflow-y-auto max-h-[58vh] px-6 py-4">
+                        {isLoadingHistory ? (
+                            <div className="flex flex-col items-center justify-center py-16 gap-3">
+                                <Loader2 className="h-8 w-8 animate-spin text-indigo-400" />
+                                <p className="text-sm text-slate-400">Carregando fechamentos...</p>
+                            </div>
+                        ) : filteredHistory.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-16 gap-3">
+                                <div className="h-12 w-12 rounded-full bg-slate-100 flex items-center justify-center">
+                                    <Search className="h-5 w-5 text-slate-400" />
+                                </div>
+                                <p className="text-sm font-medium text-slate-500">Nenhum fechamento encontrado</p>
+                                <p className="text-xs text-slate-400">Tente ajustar os filtros de busca</p>
+                            </div>
+                        ) : (
+                            <div className="grid gap-3">
+                                {filteredHistory.map(item => {
+                                    const isFechado = item.status === "FECHADO"
+                                    const mesLabel = MESES.find(m => m.value === String(item.month).padStart(2, "0"))?.label
+                                    return (
+                                        <div
+                                            key={item.id}
+                                            className={`group relative flex items-center gap-4 rounded-xl border bg-white p-4 shadow-sm transition-all hover:shadow-md ${isFechado ? "border-emerald-100 hover:border-emerald-200" : "border-slate-100 hover:border-indigo-200"}`}
+                                        >
+                                            {/* Indicador de status lateral */}
+                                            <div className={`absolute left-0 top-4 bottom-4 w-1 rounded-full ${isFechado ? "bg-emerald-400" : "bg-blue-400"}`} />
+
+                                            {/* Ícone / período */}
+                                            <div className={`ml-3 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-xs font-bold ${isFechado ? "bg-emerald-50 text-emerald-700" : "bg-blue-50 text-blue-700"}`}>
+                                                <div className="text-center leading-none">
+                                                    <div className="text-[10px] font-bold uppercase">{mesLabel?.slice(0, 3)}</div>
+                                                    <div className="text-sm font-extrabold">{item.year}</div>
+                                                </div>
+                                            </div>
+
+                                            {/* Nome + unidade */}
+                                            <div className="flex-1 min-w-0">
+                                                <p className="font-semibold text-slate-800 truncate text-sm">
+                                                    {(item.data as any)?.nome || "Folha Geral"}
+                                                </p>
+                                                <div className="flex items-center gap-2 mt-1">
+                                                    <span className="text-[11px] text-slate-500 font-medium truncate">
+                                                        {item.department?.name || "Todas as unidades"}
+                                                    </span>
+                                                    {item.totalEmployees != null && (
+                                                        <>
+                                                            <span className="text-slate-300">·</span>
+                                                            <span className="text-[11px] text-slate-400">{item.totalEmployees} colaboradores</span>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            {/* Total */}
+                                            <div className="text-right shrink-0">
+                                                <p className="text-base font-bold text-slate-900">{fmtBRL(Number(item.total))}</p>
+                                                <p className="text-[10px] text-slate-400 mt-0.5">
+                                                    {item.createdAt ? new Date(item.createdAt).toLocaleDateString("pt-BR") : "—"}
+                                                </p>
+                                            </div>
+
+                                            {/* Status badge */}
+                                            <div className="shrink-0">
+                                                {isFechado ? (
+                                                    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-100 px-3 py-1 text-[11px] font-bold text-emerald-700">
+                                                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                                                        Fechado
+                                                    </span>
+                                                ) : (
+                                                    <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 border border-blue-100 px-3 py-1 text-[11px] font-bold text-blue-700">
+                                                        <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
+                                                        Aberto
+                                                    </span>
+                                                )}
+                                            </div>
+
+                                            {/* Ações */}
+                                            <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <Button
+                                                    variant="ghost" size="icon"
+                                                    className="h-8 w-8 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg"
+                                                    onClick={() => loadAnalysis(item.id)}
+                                                    title="Abrir"
+                                                >
+                                                    <Edit className="h-3.5 w-3.5" />
+                                                </Button>
+                                                <Button
+                                                    variant="ghost" size="icon"
+                                                    className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                                                    onClick={() => handleDeleteAnalysis(item.id)}
+                                                    title="Excluir"
+                                                >
+                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Footer */}
+                    <div className="flex items-center justify-end px-6 py-4 border-t border-slate-100 bg-slate-50">
+                        <Button variant="outline" className="rounded-lg" onClick={() => setIsHistoryOpen(false)}>Fechar</Button>
+                    </div>
                 </DialogContent>
             </Dialog>
 
