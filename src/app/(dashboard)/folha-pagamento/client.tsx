@@ -212,6 +212,9 @@ export function FolhaPagamentoClient({
     const [isHistoryOpen, setIsHistoryOpen] = useState(false)
     const [isLoadingHistory, setIsLoadingHistory] = useState(false)
     const [historyFilterUnit, setHistoryFilterUnit] = useState<string | null>(null)
+    const [historySearchQuery, setHistorySearchQuery] = useState("")
+    const [historyFilterMonth, setHistoryFilterMonth] = useState("")
+    const [historyFilterYear, setHistoryFilterYear] = useState("")
     const [showSaveModal, setShowSaveModal] = useState(false)
     const [folhaNome, setFolhaNome] = useState("")
     const [viewFilter, setViewFilter] = useState("GERAL")
@@ -421,11 +424,9 @@ export function FolhaPagamentoClient({
     }
 
     async function handleRegisterAll() {
-        // Bloqueia se houver qualquer divergência que não seja apenas o fato de não estar cadastrado
-        const otherDiversions = (invalidCpfCount || 0) + (nameMismatchCount || 0) + (duplicateCpfCount || 0) + (crossAbaDuplicateCount || 0) + (result?.extras?.length || 0);
-
-        if (otherDiversions > 0) {
-            alert(`Não é possível cadastrar novos funcionários enquanto houverem ${otherDiversions} outras pendências (CPFs inválidos, duplicados, divergências de nome ou registros sem CPF) na planilha. Resolva ou exclua os registros problemáticos primeiro.`);
+        // Bloqueia apenas erros críticos não ignorados (CPF inválido, duplicatas, extras sem CPF)
+        if (nonRegistrationBlockingErrors > 0) {
+            alert(`Não é possível cadastrar novos funcionários enquanto houverem ${nonRegistrationBlockingErrors} pendências críticas (CPFs inválidos, duplicados ou registros sem CPF) na planilha. Resolva, exclua ou ignore os registros problemáticos primeiro.`);
             return;
         }
 
@@ -921,18 +922,34 @@ export function FolhaPagamentoClient({
     }
 
     const filteredHistory = useMemo(() => {
-        if (!historyFilterUnit) return history
-        // Build a set containing the unit itself and ALL its descendants
-        const ids = new Set<string>([historyFilterUnit])
-        const addDesc = (pid: string) => {
-            departments.filter(d => d.parentId === pid).forEach(d => {
-                ids.add(d.id)
-                addDesc(d.id)
+        let items = history
+        if (historyFilterUnit) {
+            // Build a set containing the unit itself and ALL its descendants
+            const ids = new Set<string>([historyFilterUnit])
+            const addDesc = (pid: string) => {
+                departments.filter(d => d.parentId === pid).forEach(d => {
+                    ids.add(d.id)
+                    addDesc(d.id)
+                })
+            }
+            addDesc(historyFilterUnit)
+            items = items.filter(h => h.departmentId != null && ids.has(h.departmentId))
+        }
+        if (historySearchQuery) {
+            const q = historySearchQuery.toLowerCase().trim()
+            items = items.filter(h => {
+                const name = ((h.data as any)?.nome || "").toLowerCase()
+                return name.includes(q)
             })
         }
-        addDesc(historyFilterUnit)
-        return history.filter(h => h.departmentId != null && ids.has(h.departmentId))
-    }, [history, historyFilterUnit, departments])
+        if (historyFilterMonth) {
+            items = items.filter(h => String(h.month).padStart(2, "0") === historyFilterMonth)
+        }
+        if (historyFilterYear) {
+            items = items.filter(h => String(h.year) === historyFilterYear)
+        }
+        return items
+    }, [history, historyFilterUnit, historySearchQuery, historyFilterMonth, historyFilterYear, departments])
 
     async function loadAnalysis(id: string) {
         setIsLoadingHistory(true)
@@ -2758,48 +2775,168 @@ export function FolhaPagamentoClient({
             </Dialog>
 
             {/* ─── History dialog ─── */}
-            <Dialog open={isHistoryOpen} onOpenChange={v => { setIsHistoryOpen(v); if (!v) setHistoryFilterUnit(null) }}>
-                <DialogContent className="max-w-2xl">
+            <Dialog open={isHistoryOpen} onOpenChange={v => {
+                setIsHistoryOpen(v)
+                if (!v) {
+                    setHistoryFilterUnit(null)
+                    setHistorySearchQuery("")
+                    setHistoryFilterMonth("")
+                    setHistoryFilterYear("")
+                }
+            }}>
+                <DialogContent className="max-w-5xl w-[95vw]">
                     <DialogHeader>
-                        <DialogTitle>Histórico de Fechamentos</DialogTitle>
-                        {historyFilterUnit && (
-                            <p className="text-xs text-slate-400 mt-0.5">
-                                Filtrando por: <span className="font-semibold text-slate-600">{departments.find(d => d.id === historyFilterUnit)?.name ?? historyFilterUnit}</span>
-                                <button onClick={() => setHistoryFilterUnit(null)} className="ml-2 text-blue-500 hover:underline">ver todos</button>
-                            </p>
-                        )}
+                        <DialogTitle className="text-xl font-bold text-slate-800">Histórico de Fechamentos</DialogTitle>
                     </DialogHeader>
+                    
+                    {/* Barra de Filtros */}
+                    <div className="flex flex-wrap items-center gap-3 p-3 bg-slate-50 border border-slate-100 rounded-xl mt-3">
+                        {/* Busca textual */}
+                        <div className="relative flex-1 min-w-[200px]">
+                            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                            <Input
+                                placeholder="Buscar fechamento pelo nome..."
+                                value={historySearchQuery}
+                                onChange={e => setHistorySearchQuery(e.target.value)}
+                                className="pl-9 h-10 w-full rounded-lg border-slate-200 focus-visible:ring-indigo-500 bg-white"
+                            />
+                        </div>
+
+                        {/* Dropdown de Departamento / Unidade */}
+                        <div className="relative min-w-[180px]">
+                            <select
+                                value={historyFilterUnit || ""}
+                                onChange={e => setHistoryFilterUnit(e.target.value || null)}
+                                className="h-10 w-full appearance-none rounded-lg border border-slate-200 bg-white px-3 py-2 pr-8 text-sm text-slate-700 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 shadow-sm"
+                            >
+                                <option value="">Todas as Unidades</option>
+                                {departments.map(d => (
+                                    <option key={d.id} value={d.id}>
+                                        {d.name.toUpperCase()}
+                                    </option>
+                                ))}
+                            </select>
+                            <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-slate-400">
+                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                </svg>
+                            </span>
+                        </div>
+
+                        {/* Dropdown de Mês */}
+                        <div className="relative min-w-[130px]">
+                            <select
+                                value={historyFilterMonth}
+                                onChange={e => setHistoryFilterMonth(e.target.value)}
+                                className="h-10 w-full appearance-none rounded-lg border border-slate-200 bg-white px-3 py-2 pr-8 text-sm text-slate-700 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 shadow-sm"
+                            >
+                                <option value="">Todos os Meses</option>
+                                {MESES.map(m => (
+                                    <option key={m.value} value={m.value}>{m.label}</option>
+                                ))}
+                            </select>
+                            <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-slate-400">
+                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                </svg>
+                            </span>
+                        </div>
+
+                        {/* Dropdown de Ano */}
+                        <div className="relative min-w-[110px]">
+                            <select
+                                value={historyFilterYear}
+                                onChange={e => setHistoryFilterYear(e.target.value)}
+                                className="h-10 w-full appearance-none rounded-lg border border-slate-200 bg-white px-3 py-2 pr-8 text-sm text-slate-700 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 shadow-sm"
+                            >
+                                <option value="">Todos os Anos</option>
+                                {ANOS.map(a => (
+                                    <option key={a} value={String(a)}>{a}</option>
+                                ))}
+                            </select>
+                            <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-slate-400">
+                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                </svg>
+                            </span>
+                        </div>
+
+                        {/* Botão de Limpar */}
+                        {(historySearchQuery || historyFilterUnit || historyFilterMonth || historyFilterYear) && (
+                            <Button
+                                variant="ghost"
+                                onClick={() => {
+                                    setHistorySearchQuery("")
+                                    setHistoryFilterUnit(null)
+                                    setHistoryFilterMonth("")
+                                    setHistoryFilterYear("")
+                                }}
+                                className="h-10 text-xs font-semibold text-slate-500 hover:text-indigo-600 hover:bg-slate-100 px-3 rounded-lg"
+                            >
+                                Limpar
+                            </Button>
+                        )}
+                    </div>
+
                     <div className="py-4">
                         {isLoadingHistory ? (
                             <div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin text-blue-500" /></div>
                         ) : filteredHistory.length === 0 ? (
                             <p className="text-center text-slate-500 py-8">Nenhum fechamento encontrado.</p>
                         ) : (
-                            <div className="max-h-[400px] overflow-y-auto border rounded-md">
+                            <div className="max-h-[50vh] overflow-y-auto border rounded-xl shadow-sm">
                                 <table className="w-full text-sm">
-                                    <thead className="bg-slate-50 sticky top-0">
-                                        <tr className="text-left border-b">
-                                            <th className="px-4 py-2 font-semibold text-slate-600">Nome</th>
-                                            <th className="px-4 py-2 font-semibold text-slate-600">Competência</th>
-                                            <th className="px-4 py-2 font-semibold text-slate-600">Unidade</th>
-                                            <th className="px-4 py-2 font-semibold text-slate-600">Total</th>
-                                            <th className="px-4 py-2 font-semibold text-slate-600 text-right">Ações</th>
+                                    <thead className="bg-slate-50/75 backdrop-blur sticky top-0 border-b z-10">
+                                        <tr className="text-left">
+                                            <th className="px-4 py-3 font-bold text-[11px] uppercase tracking-wider text-slate-400">Nome</th>
+                                            <th className="px-4 py-3 font-bold text-[11px] uppercase tracking-wider text-slate-400">Competência</th>
+                                            <th className="px-4 py-3 font-bold text-[11px] uppercase tracking-wider text-slate-400">Unidade</th>
+                                            <th className="px-4 py-3 font-bold text-[11px] uppercase tracking-wider text-slate-400">Colaboradores</th>
+                                            <th className="px-4 py-3 font-bold text-[11px] uppercase tracking-wider text-slate-400">Total</th>
+                                            <th className="px-4 py-3 font-bold text-[11px] uppercase tracking-wider text-slate-400">Status</th>
+                                            <th className="px-4 py-3 font-bold text-[11px] uppercase tracking-wider text-slate-400">Criado em</th>
+                                            <th className="px-4 py-3 font-bold text-[11px] uppercase tracking-wider text-slate-400 text-right">Ações</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y">
+                                    <tbody className="divide-y bg-white">
                                         {filteredHistory.map(item => (
-                                            <tr key={item.id} className="hover:bg-slate-50">
-                                                <td className="px-4 py-3 font-medium text-slate-800">
+                                            <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
+                                                <td className="px-4 py-3.5 font-semibold text-slate-800">
                                                     {(item.data as any)?.nome || <span className="text-slate-400 italic">Sem nome</span>}
                                                 </td>
-                                                <td className="px-4 py-3 text-slate-600">{MESES.find(m => m.value === String(item.month).padStart(2, "0"))?.label} / {item.year}</td>
-                                                <td className="px-4 py-3 text-slate-600">{item.department?.name || "Todas"}</td>
-                                                <td className="px-4 py-3 font-medium">{fmtBRL(Number(item.total))}</td>
-                                                <td className="px-4 py-3 text-right space-x-1">
-                                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600" onClick={() => loadAnalysis(item.id)} title="Abrir">
+                                                <td className="px-4 py-3.5 text-slate-600 font-medium">{MESES.find(m => m.value === String(item.month).padStart(2, "0"))?.label} / {item.year}</td>
+                                                <td className="px-4 py-3.5 text-slate-600 font-medium">{item.department?.name || "Todas"}</td>
+                                                <td className="px-4 py-3.5 text-slate-500 font-medium">
+                                                    {item.totalEmployees != null ? (
+                                                        <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
+                                                            {item.totalEmployees} colabs
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-slate-300">-</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-3.5 font-bold text-slate-900">{fmtBRL(Number(item.total))}</td>
+                                                <td className="px-4 py-3.5">
+                                                    {item.status === "FECHADO" ? (
+                                                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700 border border-emerald-100">
+                                                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                                                            Fechado
+                                                        </span>
+                                                    ) : (
+                                                        <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-700 border border-blue-100">
+                                                            <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+                                                            Aberto
+                                                        </span>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-3.5 text-slate-500 text-xs font-medium">
+                                                    {item.createdAt ? new Date(item.createdAt).toLocaleDateString("pt-BR") : "-"}
+                                                </td>
+                                                <td className="px-4 py-3.5 text-right space-x-1">
+                                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors" onClick={() => loadAnalysis(item.id)} title="Abrir">
                                                         <Edit className="h-4 w-4" />
                                                     </Button>
-                                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-red-600" onClick={() => handleDeleteAnalysis(item.id)} title="Excluir">
+                                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors" onClick={() => handleDeleteAnalysis(item.id)} title="Excluir">
                                                         <Trash2 className="h-4 w-4" />
                                                     </Button>
                                                 </td>
