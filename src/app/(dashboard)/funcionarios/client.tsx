@@ -752,22 +752,38 @@ ${rows.map((emp, i) => `<tr>
     const data = filteredEmployees.map((emp) => ({
       "Nome": toTitleCase(emp.name),
       "CPF": fmtCpf(emp.cpf),
+      "Data de Nascimento": emp.birthDate ? fmtDate(emp.birthDate) : "",
+      "Nome da Mãe": emp.motherName ? toTitleCase(emp.motherName) : "",
       "Cargo": emp.position,
-      "Unidade": getAbsoluteRoot(emp.department, departments),
-      "Departamento": getSecondLevelUnit(emp.department, departments),
       "E-mail": emp.email ?? "",
       "Telefone": fmtPhone(emp.phone),
       "Salário": Number(emp.salary),
       "Data Admissão": fmtDate(emp.hireDate),
-      "Status": statusMap[emp.status as keyof typeof statusMap]?.label ?? emp.status,
-      "Pagamento": pagamentoMap[normalizePag(emp.pagamento)]?.label ?? emp.pagamento,
+      "Unidade": getAbsoluteRoot(emp.department, departments),
+      "Departamento": getSecondLevelUnit(emp.department, departments),
       "Banco": emp.bankName ?? "",
       "Agência": emp.bankAgency ?? "",
       "Conta": emp.bankAccount ?? "",
       "Chave PIX": emp.pixKey ?? "",
     }))
     const ws = XLSX.utils.json_to_sheet(data)
-    ws["!cols"] = [{ wch: 35 }, { wch: 16 }, { wch: 22 }, { wch: 22 }, { wch: 26 }, { wch: 28 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 20 }, { wch: 10 }, { wch: 15 }, { wch: 25 }, { wch: 25 }]
+    ws["!cols"] = [
+      { wch: 35 }, // Nome
+      { wch: 16 }, // CPF
+      { wch: 20 }, // Data de Nascimento
+      { wch: 30 }, // Nome da Mãe
+      { wch: 25 }, // Cargo
+      { wch: 28 }, // E-mail
+      { wch: 20 }, // Telefone
+      { wch: 12 }, // Salário
+      { wch: 16 }, // Data Admissão
+      { wch: 25 }, // Unidade
+      { wch: 25 }, // Departamento
+      { wch: 15 }, // Banco
+      { wch: 10 }, // Agência
+      { wch: 15 }, // Conta
+      { wch: 25 }  // Chave PIX
+    ]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, "Funcionários")
     const raw = XLSX.write(wb, { bookType: "xlsx", type: "array" })
@@ -1179,7 +1195,7 @@ ${rows.map((emp, i) => `<tr>
     ]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, "Divergências")
-    XLSX.writeFile(wb, `divergencias-${new Date().toLocaleDateString("pt-BR").replace(/\//g, "-")}.xlsx`)
+    XLSX.writeFile(wb, `divergencias-funcionarios-${new Date().toLocaleDateString("pt-BR").replace(/\//g, "-")}.xlsx`)
   }
 
   async function handleCreateNewPrincipalUnit() {
