@@ -93,6 +93,19 @@ function looksLikeNumeric(value: unknown): boolean {
     return !isNaN(n) && n >= 0
 }
 
+// Rejeita texto de status/observação (ex: "Erro", "Pendente", "OK") que às vezes cai na
+// coluna detectada como PIX. Só aceita valores que realmente parecem uma chave PIX.
+function looksLikePixKey(value: string): boolean {
+    const s = value.trim()
+    if (!s) return false
+    if (/@/.test(s)) return true // e-mail
+    if (/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(s)) return true // chave aleatória (UUID)
+    const digits = s.replace(/\D/g, "")
+    if (digits.length === 11 || digits.length === 14) return true // CPF/CNPJ
+    if (digits.length >= 10 && digits.length <= 13 && digits.length === s.replace(/[\s().-]/g, "").length) return true // celular
+    return false
+}
+
 function looksLikeProfession(value: unknown): boolean {
     const s = String(value ?? "").trim()
     if (s.length < 3) return false
@@ -349,7 +362,6 @@ export async function POST(req: NextRequest) {
 
         const form = await req.formData()
         const file = form.get("file") as File | null
-        const unidadeId = form.get("unidade") as string | null
         if (!file) return NextResponse.json({ error: "Arquivo não enviado" }, { status: 400 })
 
         // Column hints: { "SheetName": { cpf?: "COL", nome?: "COL", valor?: "COL", ... }, "*": {...} }
@@ -486,13 +498,15 @@ export async function POST(req: NextRequest) {
                 const bankName = bancoIdx !== -1 ? normalizeBankName(String(row[headers[bancoIdx]] ?? "")) : undefined
                 const bankAgency = agenciaIdx !== -1 ? String(row[headers[agenciaIdx]] ?? "").trim() : undefined
                 const bankAccount = contaIdx !== -1 ? String(row[headers[contaIdx]] ?? "").trim().replace(/\./g, "") : undefined
-                const pix = pixIdx !== -1 ? String(row[headers[pixIdx]] ?? "").trim() : undefined
+                const pixRaw = pixIdx !== -1 ? String(row[headers[pixIdx]] ?? "").trim() : ""
+                const pix = looksLikePixKey(pixRaw) ? pixRaw : undefined
 
                 const isInvalidCpf = !isValidCpf(cpf)
                 
-                // Bank contingency logic
+                // Bank contingency logic: chave PIX sozinha já basta (sem erro); só é erro
+                // "falta de conta" quando não há NEM conta bancária NEM chave PIX.
                 const isMentoreOrPix = bankName === "MENTORE" || bankName === "PIX";
-                const isMissingBank = !bankName || bankName === "Não informado" || (!isMentoreOrPix && (!bankAgency || !bankAccount));
+                const isMissingBank = !isMentoreOrPix && !bankAccount && !pix;
 
                 // Skip truly empty rows
                 if (!cpf && !nomeRaw && valor === 0) continue
@@ -591,33 +605,19 @@ export async function POST(req: NextRequest) {
                     bankAccount: e.bankAccount || r.bankAccount,
                     pix: e.pixKey || r.pix,
                     isInvalidCpf: r.isInvalidCpf,
-                    isMissingBank: (function(b, a, c) {
+                    isMissingBank: (function(b, acc, p) {
                         const isMpt = b === "MENTORE" || b === "PIX"
-                        return !b || b === "Não informado" || (!isMpt && (!a || !c))
-                    })(normalizeBankName(e.bankName || r.bankName), e.bankAgency || r.bankAgency, e.bankAccount || r.bankAccount),
+                        return !isMpt && !acc && !p
+                    })(normalizeBankName(e.bankName || r.bankName), e.bankAccount || r.bankAccount, e.pixKey || r.pix),
                     nameMismatch,
                     valueMismatch,
                     departmentId: e.departmentId
                 }
             })
 
-        // Auto-reconcile and Reactivate: atualiza status, salário e unidade no banco
-        if (found.length > 0) {
-            await Promise.all(
-                found.map(r =>
-                    supabase.from("Employee").update({ 
-                        status: "ACTIVE",
-                        salary: String(r.valor),
-                        departmentId: unidadeId || r.departmentId,
-                        updatedAt: new Date().toISOString()
-                    }).eq("id", r.id)
-                )
-            )
-            for (const r of found) {
-                r.valueMismatch = false
-                r.dbSalary = r.valor
-            }
-        }
+        // Análise é somente leitura: nenhuma escrita no banco acontece aqui.
+        // Qualquer persistência (reativar, atualizar salário/unidade) só ocorre
+        // em uma ação explícita de salvar/fechar folha, fora desta rota.
 
         const missing = finalRows
             .filter((r: PayrollRow) => !dbMap.has(r.cpf))

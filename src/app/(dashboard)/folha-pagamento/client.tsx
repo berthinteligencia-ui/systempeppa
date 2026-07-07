@@ -2086,7 +2086,7 @@ export function FolhaPagamentoClient({
                                         <div className="flex items-center gap-2">
                                             <Building2 className="h-4 w-4 text-blue-500 shrink-0" />
                                             <p className="text-xs text-blue-800 font-medium">
-                                                <span className="font-bold">{missingBankCount} colaborador{missingBankCount !== 1 ? "es" : ""}</span> com dados bancários incompletos.
+                                                <span className="font-bold">{missingBankCount} colaborador{missingBankCount !== 1 ? "es" : ""}</span> sem conta bancária nem chave PIX.
                                                 <span className="text-blue-600 ml-1">Isso não impede o fechamento.</span>
                                             </p>
                                         </div>
@@ -3180,7 +3180,7 @@ export function FolhaPagamentoClient({
                                         {activeErrorTab === "duplicates" && "Registros duplicados detectados"}
                                         {activeErrorTab === "nameMismatches" && "Divergências entre planilha e sistema"}
                                         {activeErrorTab === "extras" && "Registros extras sem CPF identificado"}
-                                        {activeErrorTab === "missingBanks" && "Avisos — dados bancários incompletos (não bloqueante)"}
+                                        {activeErrorTab === "missingBanks" && "Avisos — falta de conta bancária e chave PIX (não bloqueante)"}
                                     </h3>
                                     <p className="text-xs text-slate-400 mt-1 font-medium">Selecione os registros para correção ou exclusão em massa.</p>
                                 </div>
